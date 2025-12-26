@@ -1,0 +1,4392 @@
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
+import {
+  StyleSheet,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
+  Alert,
+  ActionSheetIOS,
+  Modal,
+  Image,
+  FlatList,
+  Animated,
+  AppState,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker from "@react-native-community/datetimepicker";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
+import * as FileSystem from "expo-file-system";
+import ViewParametersModal from "./ViewParametersModal";
+import ViewHistoryModal from "./ViewHistoryModal";
+import ViewUploadedFilesModal from "./ViewUploadedFilesModal";
+
+// Enhanced debugging helper function
+const logObject = (label, obj) => {
+  console.log(
+    `🔍 ${label}:`,
+    typeof obj === "object" ? JSON.stringify(obj, null, 2) : obj
+  );
+};
+
+// Enhanced error handler for image picker operations
+class ImagePickerErrorHandler {
+  static handleError(error, context = "Unknown") {
+    const errorReport = {
+      timestamp: new Date().toISOString(),
+      context,
+      errorType: error.constructor.name,
+      message: error.message,
+      platform: Platform.OS,
+      stack: error.stack,
+    };
+
+    console.error(
+      "🚨 Image Picker Error Report:",
+      JSON.stringify(errorReport, null, 2)
+    );
+
+    // Return user-friendly error messages
+    switch (error.code) {
+      case "ERR_INVALID_MEDIA_TYPE":
+        return {
+          userMessage:
+            "The selected file type is not supported. Please choose a valid image.",
+          action: "retry",
+        };
+      case "ERR_PERMISSION_DENIED":
+        return {
+          userMessage:
+            "Camera or gallery access is required. Please enable permissions in settings.",
+          action: "permissions",
+        };
+      case "ERR_CANCELED":
+        return {
+          userMessage: "Image selection was cancelled.",
+          action: "ignore",
+        };
+      default:
+        return {
+          userMessage: "An unexpected error occurred. Please try again.",
+          action: "retry",
+        };
+    }
+  }
+}
+
+// Add DynamoDB unmarshalling helper function with detailed logging
+const unmarshallDynamoDBObject = (dbObject) => {
+  console.log(
+    "🔄 unmarshallDynamoDBObject called with:",
+    typeof dbObject === "object"
+      ? `object of type ${
+          dbObject && dbObject.constructor
+            ? dbObject.constructor.name
+            : "unknown"
+        }`
+      : typeof dbObject
+  );
+
+  if (!dbObject) {
+    console.log(
+      "⚠️ unmarshallDynamoDBObject: Null or undefined input, returning null"
+    );
+    return null;
+  }
+
+  // Log the object keys to help with debugging
+  if (typeof dbObject === "object") {
+    console.log("📋 Object keys:", Object.keys(dbObject).join(", "));
+
+    // Check if specific DynamoDB markers are present
+    const hasDynamoDBMarkers =
+      dbObject.M !== undefined ||
+      dbObject.S !== undefined ||
+      dbObject.N !== undefined ||
+      dbObject.BOOL !== undefined ||
+      dbObject.L !== undefined;
+
+    console.log(`🔍 Has DynamoDB type markers: ${hasDynamoDBMarkers}`);
+  }
+
+  // Handle case where the object is already in plain JS format
+  if (!dbObject.M && !dbObject.S && !dbObject.N && !dbObject.BOOL) {
+    console.log("✅ Object already in plain JS format, returning as is");
+    return dbObject;
+  }
+
+  // Handle specific DynamoDB types
+  if (dbObject.S !== undefined) {
+    console.log(`🔤 Converting String value: ${dbObject.S}`);
+    return dbObject.S;
+  }
+
+  if (dbObject.N !== undefined) {
+    console.log(`🔢 Converting Number value: ${dbObject.N}`);
+    return Number(dbObject.N);
+  }
+
+  if (dbObject.BOOL !== undefined) {
+    console.log(`⚖️ Converting Boolean value: ${dbObject.BOOL}`);
+    return dbObject.BOOL;
+  }
+
+  if (dbObject.NULL !== undefined) {
+    console.log("🚫 Converting NULL value");
+    return null;
+  }
+
+  // Handle maps (M)
+  if (dbObject.M) {
+    console.log("🗺️ Converting Map with keys:", Object.keys(dbObject.M));
+    const result = {};
+    for (const key in dbObject.M) {
+      console.log(`🔑 Processing map key: ${key}`);
+      result[key] = unmarshallDynamoDBObject(dbObject.M[key]);
+    }
+    console.log("✅ Map conversion complete with keys:", Object.keys(result));
+    return result;
+  }
+
+  // Handle lists (L)
+  if (dbObject.L) {
+    console.log(`📊 Converting List with ${dbObject.L.length} items`);
+    const result = dbObject.L.map((item, index) => {
+      console.log(`📍 Processing list item ${index}`);
+      return unmarshallDynamoDBObject(item);
+    });
+    console.log(`✅ List conversion complete with ${result.length} items`);
+    return result;
+  }
+
+  console.log("⚠️ No recognized DynamoDB type, returning original object");
+  return dbObject;
+};
+
+// Enhanced file URI normalization function
+const normalizeUri = async (uri) => {
+  console.log(`🔄 Normalizing URI: ${uri}`);
+
+  if (Platform.OS === "android" && uri.startsWith("content://")) {
+    try {
+      console.log(
+        "📱 Android content:// URI detected, copying to accessible location"
+      );
+      const tempPath = `${
+        FileSystem.cacheDirectory
+      }temp_image_${Date.now()}.jpg`;
+      await FileSystem.copyAsync({
+        from: uri,
+        to: tempPath,
+      });
+      console.log(`✅ Successfully normalized URI to: ${tempPath}`);
+      return tempPath;
+    } catch (error) {
+      console.error("❌ URI normalization failed:", error);
+      return uri;
+    }
+  }
+
+  console.log("✅ URI already in correct format");
+  return uri;
+};
+
+// Enhanced file validation function
+const validateImageFile = async (asset) => {
+  console.log("🔍 Validating image file:", asset.uri);
+
+  const validationResults = {
+    exists: false,
+    readable: false,
+    validSize: false,
+    validType: false,
+    errors: [],
+  };
+
+  try {
+    // Check if file exists
+    const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+    validationResults.exists = fileInfo.exists;
+    console.log(`📁 File exists: ${fileInfo.exists}`);
+
+    if (!fileInfo.exists) {
+      validationResults.errors.push("File does not exist at URI");
+      return validationResults;
+    }
+
+    // Validate file size
+    const fileSize = fileInfo.size || asset.fileSize || 0;
+    validationResults.validSize = fileSize > 0 && fileSize < 50 * 1024 * 1024; // 50MB max
+    console.log(
+      `📏 File size: ${fileSize} bytes, valid: ${validationResults.validSize}`
+    );
+
+    // Validate file type
+    const validTypes = [
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+      "image/jpg",
+    ];
+    const mimeType = asset.mimeType || asset.type || "image/jpeg";
+    validationResults.validType = validTypes.includes(mimeType);
+    console.log(
+      `🎨 MIME type: ${mimeType}, valid: ${validationResults.validType}`
+    );
+
+    // Test file readability
+    try {
+      const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+        encoding: FileSystem.EncodingType.Base64,
+        length: 100,
+      });
+      validationResults.readable = base64.length > 0;
+      console.log(`📖 File readable: ${validationResults.readable}`);
+    } catch (readError) {
+      console.warn("⚠️ File readability test failed:", readError.message);
+      validationResults.readable = false;
+    }
+  } catch (error) {
+    console.error("❌ Validation error:", error);
+    validationResults.errors.push(`Validation error: ${error.message}`);
+  }
+
+  console.log("✅ Validation complete:", validationResults);
+  return validationResults;
+};
+
+// Enhanced View Files Modal Component with backend deletion
+const ViewFilesModal = ({
+  isVisible,
+  onClose,
+  reportFiles,
+  removeReportFileWithBackend, // Updated to use enhanced deletion function
+  patientId,
+}) => {
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  const handleFilePress = (file) => {
+    setSelectedFile(file);
+  };
+
+  const closePreview = () => {
+    setSelectedFile(null);
+  };
+
+  const renderFileItem = ({ item, index }) => (
+    <View style={styles.modalFileItem}>
+      <View style={styles.modalFileDetails}>
+        <View style={styles.modalFileIconContainer}>
+          <Ionicons
+            name={
+              item.type?.includes("pdf")
+                ? "document-text"
+                : item.type?.includes("image")
+                ? "image"
+                : "document"
+            }
+            size={24}
+            color="#0070D6"
+          />
+        </View>
+        <View style={styles.modalFileInfo}>
+          <Text style={styles.modalFileName} numberOfLines={1}>
+            {item.name || `File ${index + 1}`}
+          </Text>
+          <View style={styles.modalFileMetaContainer}>
+            {item.size && (
+              <Text style={styles.modalFileSize}>
+                {Math.round(item.size / 1024)} KB
+              </Text>
+            )}
+            {item.dateAdded && (
+              <Text style={styles.modalFileDate}>Added: {item.dateAdded}</Text>
+            )}
+            {item.category && (
+              <View style={styles.modalCategoryBadge}>
+                <Text style={styles.modalCategoryText}>{item.category}</Text>
+              </View>
+            )}
+            {/* Add status indicators */}
+            {item.uploadedToS3 && (
+              <View style={styles.statusBadge}>
+                <Text style={styles.statusText}>✅ Uploaded</Text>
+              </View>
+            )}
+            {item.s3UploadFailed && (
+              <View style={[styles.statusBadge, styles.errorBadge]}>
+                <Text style={[styles.statusText, styles.errorText]}>
+                  ❌ Upload Failed
+                </Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.modalFileActions}>
+        {item.type?.includes("image") && (
+          <TouchableOpacity
+            style={styles.modalActionButton}
+            onPress={() => handleFilePress(item)}
+          >
+            <Ionicons name="eye" size={22} color="#0070D6" />
+            <Text style={styles.modalActionText}>Preview</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Enhanced delete button with confirmation - Updated to use enhanced deletion */}
+        <TouchableOpacity
+          style={[styles.modalActionButton, styles.modalRemoveButton]}
+          onPress={() => {
+            // Call the enhanced removal function with backend deletion
+            removeReportFileWithBackend(index);
+          }}
+        >
+          <Ionicons name="trash" size={22} color="#E53935" />
+          <Text style={styles.modalRemoveText}>Delete</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  return (
+    <Modal
+      visible={isVisible}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Uploaded Files</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseButton}>
+              <Ionicons name="close" size={24} color="#4A5568" />
+            </TouchableOpacity>
+          </View>
+
+          {reportFiles.length > 0 ? (
+            <FlatList
+              data={reportFiles}
+              renderItem={renderFileItem}
+              keyExtractor={(_, index) => `file-${index}`}
+              style={styles.modalFileList}
+              ItemSeparatorComponent={() => (
+                <View style={styles.modalFileDivider} />
+              )}
+            />
+          ) : (
+            <View style={styles.modalEmptyContainer}>
+              <Ionicons name="document-outline" size={48} color="#A0AEC0" />
+              <Text style={styles.modalEmptyText}>No files uploaded yet</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.modalCloseFullButton}
+            onPress={onClose}
+          >
+            <Text style={styles.modalCloseFullButtonText}>Close</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* File Preview Modal */}
+      {selectedFile && selectedFile.type?.includes("image") && (
+        <Modal
+          visible={!!selectedFile}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closePreview}
+        >
+          <View style={styles.previewModalContainer}>
+            <View style={styles.previewModalContent}>
+              <View style={styles.previewModalHeader}>
+                <Text style={styles.previewModalTitle} numberOfLines={1}>
+                  {selectedFile.name}
+                </Text>
+                <TouchableOpacity
+                  onPress={closePreview}
+                  style={styles.previewModalCloseButton}
+                >
+                  <Ionicons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.previewImageContainer}>
+                <Image
+                  source={{ uri: selectedFile.uri }}
+                  style={styles.previewImage}
+                  resizeMode="contain"
+                />
+              </View>
+
+              <View style={styles.previewModalFooter}>
+                <TouchableOpacity
+                  style={styles.previewModalCloseFullButton}
+                  onPress={closePreview}
+                >
+                  <Text style={styles.previewModalCloseFullButtonText}>
+                    Close Preview
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+    </Modal>
+  );
+};
+
+// Auto-Bulleting Text Area Component
+const AutoBulletTextArea = ({
+  value,
+  onChangeText,
+  placeholder,
+  style,
+  numberOfLines = 10,
+  onEndEditing = null,
+}) => {
+  const inputRef = useRef(null);
+
+  // Handle text changes including auto-bulleting feature
+  const handleChangeText = (text) => {
+    // Check if Enter key was pressed (by seeing if a new line was added)
+    if (text.length > value.length && text.endsWith("\n")) {
+      const lines = text.split("\n");
+      const previousLine = lines[lines.length - 2] || "";
+
+      // Check if the previous line starts with a bullet point or dash
+      if (previousLine.match(/^\s*[-•*]\s/)) {
+        // Extract the bullet pattern (including any leading whitespace)
+        const bulletMatch = previousLine.match(/^(\s*[-•*]\s)/);
+        if (bulletMatch) {
+          const bulletPattern = bulletMatch[1];
+
+          // Add the same bullet pattern to the new line
+          const newText = text + bulletPattern;
+          onChangeText(newText);
+          return;
+        }
+      }
+    }
+
+    onChangeText(text);
+  };
+
+  return (
+    <TextInput
+      ref={inputRef}
+      style={[styles.textArea, style]}
+      value={value}
+      onChangeText={handleChangeText}
+      placeholder={placeholder}
+      multiline
+      numberOfLines={numberOfLines}
+      textAlignVertical="top"
+      placeholderTextColor="#C8C8C8"
+      blurOnSubmit={false}
+      onEndEditing={onEndEditing}
+    />
+  );
+};
+
+// New Add History Modal Component
+const AddHistoryModal = ({ isVisible, onClose, onSave, patientId }) => {
+  const [newHistoryText, setNewHistoryText] = useState("");
+
+  const handleSave = () => {
+    if (newHistoryText.trim()) {
+      onSave(newHistoryText);
+      setNewHistoryText(""); // Clear the input after saving
+    } else {
+      Alert.alert("Error", "Please enter history details before saving.");
+    }
+  };
+
+  return (
+    <Modal
+      visible={isVisible}
+      transparent={true}
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalContainer}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Add New History Entry</Text>
+            <TouchableOpacity onPress={onClose} style={styles.modalCloseButton}>
+              <Ionicons name="close" size={24} color="#4A5568" />
+            </TouchableOpacity>
+          </View>
+
+          <Text style={styles.modalLabel}>
+            Enter new history, complaints, or symptoms:
+          </Text>
+
+          <AutoBulletTextArea
+            value={newHistoryText}
+            onChangeText={setNewHistoryText}
+            placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
+            numberOfLines={15}
+            style={[styles.textArea, { minHeight: 150 }]}
+          />
+
+          <Text style={styles.hintText}>
+            Tip: Start a line with "-" to create a bulleted list
+          </Text>
+
+          <View style={styles.modalButtonRow}>
+            <TouchableOpacity
+              style={styles.modalCancelButton}
+              onPress={onClose}
+            >
+              <Text style={styles.modalCancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalSaveButton}
+              onPress={handleSave}
+            >
+              <Text style={styles.modalSaveButtonText}>Save</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// New Collapsible Section Component
+const CollapsibleSection = ({
+  title,
+  children,
+  isExpanded,
+  onToggle,
+  icon,
+}) => {
+  const animatedHeight = useRef(new Animated.Value(isExpanded ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(animatedHeight, {
+      toValue: isExpanded ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+  }, [isExpanded]);
+
+  return (
+    <View style={styles.collapsibleContainer}>
+      <TouchableOpacity
+        style={styles.collapsibleHeader}
+        onPress={onToggle}
+        activeOpacity={0.7}
+      >
+        <View style={styles.collapsibleTitleContainer}>
+          {icon && (
+            <Ionicons
+              name={icon}
+              size={20}
+              color="#0070D6"
+              style={styles.collapsibleHeaderIcon}
+            />
+          )}
+          <Text
+            style={styles.collapsibleTitle}
+            numberOfLines={1}
+            ellipsizeMode="tail"
+          >
+            {title}
+          </Text>
+        </View>
+        <View style={styles.chevronContainer}>
+          <Ionicons
+            name={isExpanded ? "chevron-up" : "chevron-down"}
+            size={22}
+            color="#4A5568"
+          />
+        </View>
+      </TouchableOpacity>
+      <Animated.View
+        style={[
+          styles.collapsibleContent,
+          {
+            maxHeight: animatedHeight.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 2000],
+            }),
+            opacity: animatedHeight,
+            overflow: "hidden",
+          },
+        ]}
+      >
+        {children}
+      </Animated.View>
+    </View>
+  );
+};
+
+// Helper function for regex escaping (new)
+const escapeRegExp = (string) => {
+  return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+};
+
+// Format history for display with proper date sorting
+const formatHistoryForDisplay = (historyText) => {
+  if (!historyText) return null;
+
+  // Split by entry markers
+  const entrySeparator = /---\s*(?:New\s*)?Entry\s*\([^)]+\)\s*---/i;
+  const entries = historyText.split(entrySeparator).filter(Boolean);
+
+  // If there's just raw text with no separators, return it as is
+  if (entries.length <= 1 && !historyText.match(entrySeparator)) {
+    return <Text style={styles.historyText}>{historyText}</Text>;
+  }
+
+  // Find all entry markers with their positions and timestamps
+  const markerRegex = /---\s*(?:New\s*)?Entry\s*\(([^)]+)\)\s*---/g;
+  const markers = [];
+  let match;
+
+  while ((match = markerRegex.exec(historyText)) !== null) {
+    markers.push({
+      text: match[0],
+      position: match.index,
+      timestamp: match[1],
+    });
+  }
+
+  // Extract entries with their timestamps
+  const entriesWithDates = [];
+
+  for (let i = 0; i < markers.length; i++) {
+    const startPos = markers[i].position + markers[i].text.length;
+    const endPos =
+      i < markers.length - 1 ? markers[i + 1].position : historyText.length;
+
+    const entryText = historyText.substring(startPos, endPos).trim();
+
+    if (entryText) {
+      // Parse the date from the timestamp
+      let date;
+      try {
+        date = new Date(markers[i].timestamp);
+        // If the date is invalid, try parsing as locale string
+        if (isNaN(date.getTime())) {
+          // Extract date components from locale string formats like "4/21/2025, 10:30:45 AM"
+          const parts = markers[i].timestamp.split(/[/,:\s]/);
+          if (parts.length >= 3) {
+            // Try to create a date from the components
+            const month = parseInt(parts[0]) - 1; // 0-based months
+            const day = parseInt(parts[1]);
+            const year = parseInt(parts[2]);
+            date = new Date(year, month, day);
+          }
+        }
+      } catch (e) {
+        // If date parsing fails, use a default date
+        console.log(
+          `❌ Error parsing date from timestamp: ${markers[i].timestamp}`,
+          e
+        );
+        date = new Date(0);
+      }
+
+      entriesWithDates.push({
+        text: entryText,
+        timestamp: markers[i].timestamp,
+        date: date,
+      });
+    }
+  }
+
+  // Sort entries by date (newest first)
+  entriesWithDates.sort((a, b) => {
+    // First try to compare by the parsed date
+    if (a.date && b.date && !isNaN(a.date) && !isNaN(b.date)) {
+      return b.date - a.date;
+    }
+
+    // If we can't compare by date, use the original order (this is a fallback)
+    return 0;
+  });
+
+  // Create a formatted view with entries in date order (newest first)
+  return (
+    <View>
+      {entriesWithDates.map((entry, index) => (
+        <View key={index} style={styles.entryContainer}>
+          {entry.timestamp && (
+            <Text style={styles.entryTimestamp}>{entry.timestamp}</Text>
+          )}
+          <Text style={styles.historyText}>{entry.text}</Text>
+          {index < entriesWithDates.length - 1 && (
+            <View style={styles.entrySeparator} />
+          )}
+        </View>
+      ))}
+    </View>
+  );
+};
+
+// Modify the component definition to use forwardRef
+const ClinicalTab = forwardRef(
+  (
+    {
+      patientData,
+      updateField,
+      reportFiles,
+      clinicalParameters,
+      setClinicalParameters,
+      showDatePicker,
+      setShowDatePicker,
+      tempDate,
+      setTempDate,
+      handleDateChange,
+      pickDocument,
+      removeReportFile,
+      isFileAlreadyUploaded,
+      savedSections,
+      patientId,
+      prefillMode,
+      hideBasicTab, // Add this line to receive the prop
+    },
+    ref
+  ) => {
+    // Add state for direct history text entry
+    const [directHistoryText, setDirectHistoryText] = useState("");
+    // Add state for the table view modal
+    const [tableModalVisible, setTableModalVisible] = useState(false);
+    // State to store historical clinical parameters data
+    const [historicalData, setHistoricalData] = useState([]);
+    // State to track if data has been fetched
+    const [dataFetched, setDataFetched] = useState(false);
+    // Add state to track error information
+    const [apiError, setApiError] = useState(null);
+    // Add state for history/complaints/symptoms modal
+    const [historyModalVisible, setHistoryModalVisible] = useState(false);
+    // Add state for the view files modal
+    const [viewFilesModalVisible, setViewFilesModalVisible] = useState(false);
+    // Add state for the view uploaded files modal
+    const [viewUploadedFilesModalVisible, setViewUploadedFilesModalVisible] =
+      useState(false);
+    // State for loading
+    const [isLoading, setIsLoading] = useState(false);
+    // Add state for add history modal
+    const [addHistoryModalVisible, setAddHistoryModalVisible] = useState(false);
+    // Add state for picker operations to prevent concurrent operations
+    const [isPickerActive, setIsPickerActive] = useState(false);
+
+    // New state for tracking expanded sections
+    const [expandedSections, setExpandedSections] = useState({
+      history: true, // Start with history expanded
+      reports: false,
+      clinicalParameters: false,
+    });
+
+    // Enhanced function to remove report file from both frontend and backend
+    const removeReportFileWithBackend = async (index) => {
+      try {
+        console.log(`🗑️ Starting removal of file at index ${index}`);
+
+        if (!reportFiles || index < 0 || index >= reportFiles.length) {
+          console.error(`❌ Invalid file index: ${index}`);
+          Alert.alert("Error", "Invalid file selection for removal.");
+          return;
+        }
+
+        const fileToRemove = reportFiles[index];
+        console.log(`🗑️ Removing file: ${fileToRemove.name || "unnamed"}`);
+        console.log(
+          `🗑️ File URL: ${fileToRemove.url || fileToRemove.uri || "no URL"}`
+        );
+
+        // Show confirmation dialog
+        Alert.alert(
+          "Delete File",
+          `Are you sure you want to delete "${
+            fileToRemove.name || "this file"
+          }"? This action cannot be undone.`,
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  console.log(
+                    `🗑️ User confirmed deletion of file: ${fileToRemove.name}`
+                  );
+
+                  // If we have a patientId and the file has a URL, call backend deletion
+                  if (patientId && (fileToRemove.url || fileToRemove.uri)) {
+                    console.log(
+                      `🗑️ Calling backend deletion for patient ${patientId}`
+                    );
+
+                    const apiUrl =
+                      "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+                    const requestBody = {
+                      action: "deletePatientFile",
+                      patientId: patientId,
+                      fileUrl: fileToRemove.url || fileToRemove.uri,
+                      fileName: fileToRemove.name,
+                    };
+
+                    console.log(
+                      `📤 Sending deletion request:`,
+                      JSON.stringify(requestBody, null, 2)
+                    );
+
+                    const response = await fetch(apiUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                        "Cache-Control": "no-cache",
+                      },
+                      body: JSON.stringify(requestBody),
+                    });
+
+                    console.log(
+                      `📥 Deletion response status: ${response.status}`
+                    );
+
+                    const responseText = await response.text();
+                    console.log(
+                      `📥 Raw response: ${responseText.substring(0, 500)}`
+                    );
+
+                    let result;
+                    try {
+                      result = JSON.parse(responseText);
+                    } catch (parseError) {
+                      console.error(
+                        `❌ Error parsing deletion response: ${parseError.message}`
+                      );
+                      throw new Error("Invalid response from server");
+                    }
+
+                    // FIXED: Handle nested response structure from AWS Lambda
+                    let actualResult = result;
+
+                    // Check if this is a Lambda response with statusCode and body
+                    if (result.statusCode && result.body) {
+                      console.log(
+                        "🔄 Detected Lambda response format, extracting body"
+                      );
+                      try {
+                        // Parse the body if it's a string
+                        actualResult =
+                          typeof result.body === "string"
+                            ? JSON.parse(result.body)
+                            : result.body;
+                        console.log(
+                          "✅ Successfully extracted body from Lambda response"
+                        );
+                      } catch (bodyParseError) {
+                        console.error(
+                          `❌ Error parsing Lambda response body: ${bodyParseError.message}`
+                        );
+                        throw new Error("Invalid Lambda response body format");
+                      }
+                    }
+
+                    console.log(
+                      "🔍 Final parsed result:",
+                      JSON.stringify(actualResult, null, 2)
+                    );
+
+                    // Handle the response using the actual result
+                    if (actualResult.success) {
+                      console.log(`✅ Backend deletion successful`);
+                      console.log(`📋 Deletion details:`, actualResult.details);
+
+                      // Remove from local state only if backend deletion was successful
+                      removeReportFile(index);
+
+                      // Show success message
+                      Alert.alert(
+                        "Success",
+                        `File "${fileToRemove.name}" has been deleted successfully.`,
+                        [{ text: "OK" }]
+                      );
+                    } else {
+                      console.error(
+                        `❌ Backend deletion failed: ${
+                          actualResult.error || "Unknown error"
+                        }`
+                      );
+
+                      // Ask user if they want to remove from local state anyway
+                      Alert.alert(
+                        "Deletion Warning",
+                        `Failed to delete file from server: ${
+                          actualResult.error || "Unknown error"
+                        }\n\nWould you like to remove it from the list anyway?`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Remove from List",
+                            style: "destructive",
+                            onPress: () => {
+                              removeReportFile(index);
+                              console.log(
+                                `⚠️ Removed file from local state despite backend failure`
+                              );
+                            },
+                          },
+                        ]
+                      );
+                    }
+                  } else {
+                    // No patientId or no URL - just remove from local state
+                    console.log(
+                      `🗑️ No backend deletion needed (no patientId or URL), removing from local state only`
+                    );
+                    removeReportFile(index);
+
+                    Alert.alert(
+                      "Removed",
+                      `File "${fileToRemove.name}" has been removed from the list.`,
+                      [{ text: "OK" }]
+                    );
+                  }
+                } catch (error) {
+                  console.error(
+                    `❌ Error during file deletion: ${error.message}`
+                  );
+                  console.error(error.stack);
+
+                  // Ask user if they want to remove from local state anyway
+                  Alert.alert(
+                    "Deletion Error",
+                    `An error occurred while deleting the file: ${error.message}\n\nWould you like to remove it from the list anyway?`,
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Remove from List",
+                        style: "destructive",
+                        onPress: () => {
+                          removeReportFile(index);
+                          console.log(
+                            `⚠️ Removed file from local state after error`
+                          );
+                        },
+                      },
+                    ]
+                  );
+                }
+              },
+            },
+          ]
+        );
+      } catch (error) {
+        console.error(
+          `❌ Error in removeReportFileWithBackend: ${error.message}`
+        );
+        Alert.alert("Error", `Failed to remove file: ${error.message}`);
+      }
+    };
+
+    // Handle app state changes for navigation persistence - FIXED to prevent infinite loops
+    useEffect(() => {
+      let isComponentMounted = true;
+
+      const handleAppStateChange = (nextAppState) => {
+        if (!isComponentMounted || !patientId) return;
+
+        console.log(`📱 App state changed to: ${nextAppState}`);
+
+        if (nextAppState === "background") {
+          // Save current state when going to background (especially important for picker operations)
+          const currentState = {
+            timestamp: Date.now(),
+            expandedSections,
+            patientId,
+            routeName: "ClinicalTab",
+            currentRoute: "NewPatientForm", // Important: Save that we're in NewPatientForm
+            isPickerOperation: isPickerActive, // Track if this is a picker operation
+            hideBasicTab: true, // Preserve the hideBasicTab state
+            initialTab: "clinical", // Preserve the initial tab
+          };
+
+          // Save to multiple keys for better recovery
+          AsyncStorage.multiSet([
+            ["NAVIGATION_STATE_CLINICAL", JSON.stringify(currentState)],
+            [
+              "CURRENT_PATIENT_STATE",
+              JSON.stringify({
+                patientId,
+                routeName: "NewPatientForm",
+                hideBasicTab: true,
+                initialTab: "clinical",
+                timestamp: Date.now(),
+              }),
+            ],
+            [
+              "APP_LIFECYCLE_STATE",
+              JSON.stringify({
+                isPickerOperation: isPickerActive,
+                lastActiveTime: Date.now(),
+                currentRoute: "NewPatientForm",
+              }),
+            ],
+          ])
+            .then(() =>
+              console.log("💾 Complete app state saved for picker operation")
+            )
+            .catch((error) =>
+              console.error("❌ Error saving complete app state:", error)
+            );
+        }
+      };
+
+      const subscription = AppState.addEventListener(
+        "change",
+        handleAppStateChange
+      );
+
+      // One-time restore on component mount with delay - FIXED to prevent infinite loops
+      const initializeState = async () => {
+        if (!isComponentMounted || !patientId) return;
+
+        await new Promise((resolve) => setTimeout(resolve, 300)); // Slightly longer delay
+
+        if (!isComponentMounted) return;
+
+        try {
+          const savedState = await AsyncStorage.getItem(
+            "NAVIGATION_STATE_CLINICAL"
+          );
+          if (savedState && isComponentMounted) {
+            const parsedState = JSON.parse(savedState);
+            if (
+              parsedState.patientId === patientId &&
+              parsedState.expandedSections
+            ) {
+              console.log(
+                "🔄 One-time initial restore:",
+                parsedState.expandedSections
+              );
+              setExpandedSections(parsedState.expandedSections);
+
+              // Clear the saved state after restoring to prevent repeated restores
+              await AsyncStorage.removeItem("NAVIGATION_STATE_CLINICAL");
+              console.log(
+                "🧹 Cleared navigation state after restore to prevent loops"
+              );
+            }
+          }
+        } catch (error) {
+          console.error("❌ Initial restore error:", error);
+        }
+      };
+
+      // Only initialize once per patient
+      initializeState();
+
+      return () => {
+        isComponentMounted = false;
+        subscription?.remove();
+      };
+    }, [patientId]); // REMOVED expandedSections and isPickerActive to prevent infinite loops
+
+    // Enhanced function to create permanent file storage
+    const createPermanentFileStorage = async (tempUri, fileName) => {
+      try {
+        console.log(`📁 Creating permanent storage for: ${fileName}`);
+
+        // Create reports directory if it doesn't exist
+        const reportsDir = `${FileSystem.documentDirectory}reportFiles/`;
+        const dirInfo = await FileSystem.getInfoAsync(reportsDir);
+
+        if (!dirInfo.exists) {
+          console.log("📁 Creating reportFiles directory");
+          await FileSystem.makeDirectoryAsync(reportsDir, {
+            intermediates: true,
+          });
+        }
+
+        // Generate unique filename to prevent conflicts
+        const timestamp = Date.now();
+        const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const permanentPath = `${reportsDir}${timestamp}_${cleanFileName}`;
+
+        console.log(`📋 Copying from ${tempUri} to ${permanentPath}`);
+
+        // Copy file from temporary location to permanent storage
+        await FileSystem.copyAsync({
+          from: tempUri,
+          to: permanentPath,
+        });
+
+        // Verify the copy was successful
+        const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+        if (!fileInfo.exists) {
+          throw new Error("File copy verification failed");
+        }
+
+        console.log(`✅ File successfully stored at: ${permanentPath}`);
+        console.log(`📏 File size: ${fileInfo.size} bytes`);
+
+        return {
+          success: true,
+          permanentPath,
+          fileSize: fileInfo.size,
+        };
+      } catch (error) {
+        console.error("❌ Error creating permanent file storage:", error);
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+    };
+
+    // Enhanced pickDocument wrapper with proper error handling
+    const safePickDocument = async (fileObject) => {
+      console.log("🔄 SafePickDocument called with:", {
+        name: fileObject?.name,
+        type: fileObject?.type,
+        uri: fileObject?.uri ? fileObject.uri.substring(0, 50) + "..." : "none",
+      });
+
+      try {
+        // Validate the file object
+        if (!fileObject || !fileObject.uri) {
+          throw new Error("Invalid file object provided to pickDocument");
+        }
+
+        // Store original function reference to avoid issues
+        const originalPickDocument = pickDocument;
+
+        if (typeof originalPickDocument !== "function") {
+          throw new Error("pickDocument is not available or not a function");
+        }
+
+        // Create permanent storage for the file
+        const storageResult = await createPermanentFileStorage(
+          fileObject.uri,
+          fileObject.name || "unknown_file"
+        );
+
+        if (!storageResult.success) {
+          throw new Error(`File storage failed: ${storageResult.error}`);
+        }
+
+        // Update file object with permanent path
+        const updatedFileObject = {
+          ...fileObject,
+          uri: storageResult.permanentPath,
+          originalUri: fileObject.uri,
+          size: storageResult.fileSize,
+          isPermanent: true,
+        };
+
+        console.log(
+          "📤 Calling original pickDocument with updated file object"
+        );
+        await originalPickDocument(updatedFileObject);
+
+        console.log("✅ File successfully added to reportFiles");
+        return true;
+      } catch (error) {
+        console.error("❌ Error in safePickDocument:", error);
+        const errorDetails = ImagePickerErrorHandler.handleError(
+          error,
+          "safePickDocument"
+        );
+
+        Alert.alert("File Processing Error", errorDetails.userMessage, [
+          { text: "OK" },
+        ]);
+
+        return false;
+      }
+    };
+
+    // Add this function to save the history text
+    // Enhanced function to save the history text with improved AsyncStorage handling
+    const saveDirectHistoryToMedicalHistory = async () => {
+      if (directHistoryText.trim()) {
+        console.log("📝 Saving direct history text to medical history");
+        console.log(`Current text: "${directHistoryText.substring(0, 30)}..."`);
+
+        // Check if there's existing medical history
+        const timestamp = new Date().toLocaleString();
+        let updatedHistory = "";
+
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+          console.log("Adding entry to existing medical history");
+        } else {
+          updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+          console.log("Creating first medical history entry");
+        }
+
+        // Call the updateField function to update the medicalHistory field
+        updateField("medicalHistory", updatedHistory);
+        console.log(
+          `Updated medicalHistory field, new length: ${updatedHistory.length}`
+        );
+
+        // Clear the pending history from ALL AsyncStorage keys for this patient
+        if (patientId) {
+          try {
+            await AsyncStorage.removeItem(`pending_history_${patientId}`);
+            await AsyncStorage.removeItem(`new_history_input_${patientId}`);
+            console.log(
+              `✅ Cleared all history cache from AsyncStorage for ${patientId}`
+            );
+          } catch (clearError) {
+            console.error("Error clearing AsyncStorage:", clearError);
+          }
+        }
+
+        // Clear the input after updating
+        setDirectHistoryText("");
+
+        console.log("✅ History text updated in patientData, ready for save");
+        return true;
+      } else {
+        console.log("⚠️ No history text to save (empty input)");
+        return false;
+      }
+    };
+
+    const getLatestMedicalHistory = () => {
+      console.log("📋 Getting latest medical history for API request");
+
+      // If directHistoryText has content, include it in the return value
+      if (directHistoryText && directHistoryText.trim()) {
+        console.log(
+          "📝 Including pending direct history text in medical history"
+        );
+        const timestamp = new Date().toLocaleString();
+
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          return `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+        } else {
+          return `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+        }
+      }
+
+      return patientData.medicalHistory;
+    };
+
+    const transferHistoryText = () => {
+      if (directHistoryText.trim()) {
+        console.log("📝 Transferring history text to medical history display");
+
+        // Create a timestamp for the new entry
+        const timestamp = new Date().toLocaleString();
+        let updatedHistory = "";
+
+        // Format the new history with the timestamp
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+        } else {
+          updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+        }
+
+        // Update the medicalHistory field to make it visible in the UI
+        updateField("medicalHistory", updatedHistory);
+        console.log(
+          `✅ Visibly updated medicalHistory field, length: ${updatedHistory.length}`
+        );
+
+        // Clear the input field
+        setDirectHistoryText("");
+
+        // Clear AsyncStorage
+        if (patientId) {
+          AsyncStorage.removeItem(`pending_history_${patientId}`);
+          AsyncStorage.removeItem(`new_history_input_${patientId}`);
+        }
+
+        return true;
+      }
+      return false;
+    };
+
+    // Expose methods to parent via ref
+    useImperativeHandle(ref, () => ({
+      saveDirectHistoryToMedicalHistory,
+      getLatestMedicalHistory,
+      transferHistoryText, // Add this new function
+    }));
+
+    // Use effect to save the direct history text to AsyncStorage as soon as it changes
+    useEffect(() => {
+      // Only save to AsyncStorage if there's actual text and a patientId
+      if (directHistoryText.trim() && patientId) {
+        console.log(
+          `📝 Saving pending history text to AsyncStorage for patient ${patientId}`
+        );
+        const savePendingHistory = async () => {
+          try {
+            // Save to both key formats for maximum compatibility
+            await AsyncStorage.setItem(
+              `pending_history_${patientId}`,
+              directHistoryText
+            );
+            await AsyncStorage.setItem(
+              `new_history_input_${patientId}`,
+              directHistoryText
+            );
+            console.log(
+              "✅ Pending history saved to AsyncStorage using both key formats"
+            );
+          } catch (error) {
+            console.error(
+              "❌ Error saving pending history to AsyncStorage:",
+              error
+            );
+          }
+        };
+
+        savePendingHistory();
+      }
+    }, [directHistoryText, patientId]);
+
+    // Function to handle saving new history - MODIFIED to properly prepend new entries
+    const handleSaveNewHistory = (newHistoryText) => {
+      // If there's existing history, prepend the new one with a timestamp and separator
+      const timestamp = new Date().toLocaleString();
+      let updatedHistory = "";
+
+      if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+        updatedHistory = `--- New Entry (${timestamp}) ---\n${newHistoryText}\n\n${patientData.medicalHistory}`;
+      } else {
+        updatedHistory = `--- Entry (${timestamp}) ---\n${newHistoryText}`;
+      }
+
+      // Call the updateField function to update the medicalHistory field
+      updateField("medicalHistory", updatedHistory);
+
+      // Close the modal
+      setAddHistoryModalVisible(false);
+
+      // Show confirmation to user
+      Alert.alert("Success", "New history entry has been added.");
+
+      // Force refresh history display if needed
+      if (historyModalVisible) {
+        setHistoryModalVisible(false);
+        setTimeout(() => setHistoryModalVisible(true), 100);
+      }
+    };
+
+    // Toggle function for collapsible sections - FIXED to prevent infinite loops
+    const toggleSection = (section) => {
+      setExpandedSections((prev) => ({
+        ...prev,
+        [section]: !prev[section],
+      }));
+      // Removed saveNavigationState() call that was causing infinite loops
+    };
+
+    // Simplified debounced save of navigation state - FIXED to reduce frequency
+    useEffect(() => {
+      if (!patientId) return;
+
+      const timeoutId = setTimeout(() => {
+        // Only save if we have valid, changed data and not during initial setup
+        if (
+          expandedSections &&
+          Object.keys(expandedSections).length > 0 &&
+          JSON.stringify(expandedSections) !==
+            JSON.stringify({
+              history: true,
+              reports: false,
+              clinicalParameters: false,
+            })
+        ) {
+          // Don't save if it's just the default state
+
+          const currentState = {
+            timestamp: Date.now(),
+            expandedSections,
+            patientId,
+            routeName: "ClinicalTab",
+          };
+
+          AsyncStorage.setItem(
+            "NAVIGATION_STATE_CLINICAL_BACKUP",
+            JSON.stringify(currentState)
+          )
+            .then(() => console.log("💾 Backup navigation state saved"))
+            .catch((error) =>
+              console.error("❌ Error saving backup navigation state:", error)
+            );
+        }
+      }, 1000); // Increased debounce to 1 second
+
+      return () => clearTimeout(timeoutId);
+    }, [expandedSections, patientId]);
+
+    // Key fix: Add a useEffect that resets parameters when patient changes
+    useEffect(() => {
+      // This effect runs when the patientId changes (i.e., when viewing a different patient)
+      console.log(`🔄 Patient ID changed to: ${patientId || "not set"}`);
+
+      if (patientId) {
+        // Clear the current parameters first to avoid showing old data
+        setClinicalParameters({
+          date: new Date(),
+          inr: "",
+          hb: "",
+          wbc: "",
+          platelet: "",
+          bilirubin: "",
+          sgot: "",
+          sgpt: "",
+          alt: "",
+          tprAlb: "",
+          ureaCreat: "",
+          sodium: "",
+          fastingHBA1C: "",
+          pp: "",
+          tsh: "",
+          ft4: "",
+          others: "",
+        });
+
+        console.log("🧹 Cleared old clinical parameters");
+
+        // Then fetch data for the current patient
+        fetchCurrentPatientData();
+      }
+    }, [patientId]); // This ensures the effect runs when patientId changes
+
+    // Add handler for parameter updates that forces a new timestamp
+    const handleParameterUpdate = (field, value) => {
+      console.log(`🔄 Updating parameter: ${field} = ${value}`);
+      setClinicalParameters((prev) => {
+        // Create a copy of previous state with the updated field
+        const updated = {
+          ...prev,
+          [field]: value,
+          // Force a new timestamp for each update to ensure unique timestamps in history
+          date: new Date(),
+        };
+
+        console.log(
+          "📋 Updated clinical parameters:",
+          JSON.stringify({
+            [field]: value,
+            date: updated.date,
+          })
+        );
+
+        // Store the updated parameters in AsyncStorage for persistence
+        if (patientId) {
+          try {
+            const storageKey = `clinical_params_${patientId}`;
+            AsyncStorage.setItem(storageKey, JSON.stringify(updated))
+              .then(() =>
+                console.log(
+                  `✅ Saved parameter update to storage for: ${patientId}`
+                )
+              )
+              .catch((err) =>
+                console.error(
+                  `❌ Error saving parameter update: ${err.message}`
+                )
+              );
+          } catch (e) {
+            console.error("❌ Error preparing storage update:", e);
+          }
+        }
+
+        return updated;
+      });
+    };
+
+    // Add this helper function to update input fields from a record
+    const updateInputFieldsFromRecord = (record) => {
+      if (!record) {
+        console.log(
+          "⚠️ updateInputFieldsFromRecord: Received null or undefined record"
+        );
+        return;
+      }
+
+      console.log(
+        "📋 Updating input fields with data:",
+        Object.keys(record).join(", ")
+      );
+
+      // Log the actual values for debugging
+      Object.keys(record).forEach((key) => {
+        console.log(`📝 ${key}: ${record[key]}`);
+      });
+
+      // Create a copy of the record
+      const updatedParams = { ...record };
+
+      // Convert date string to Date object if needed
+      if (typeof updatedParams.date === "string") {
+        console.log(
+          `🗓️ Converting date string to Date object: ${updatedParams.date}`
+        );
+        updatedParams.date = new Date(updatedParams.date);
+      } else if (!updatedParams.date) {
+        console.log("🗓️ No date found, using current date");
+        updatedParams.date = new Date();
+      }
+
+      console.log("🔄 Setting clinical parameters state");
+      // Update clinical parameters state
+      setClinicalParameters(updatedParams);
+
+      // Also update the date picker
+      if (updatedParams.date) {
+        console.log(`🗓️ Setting tempDate: ${updatedParams.date}`);
+        setTempDate(updatedParams.date);
+      }
+
+      console.log("✅ Updated clinical parameters with data from record");
+    };
+
+    // Improved fetchCurrentPatientData function to handle DynamoDB formatted data
+    const fetchCurrentPatientData = async () => {
+      try {
+        console.log(
+          `🔍 FETCH CALLED: Getting clinical data for patient: ${patientId}`
+        );
+
+        // Add at the top of the function:
+        if (!patientId) {
+          console.log("⚠️ No patient ID available, skipping data fetch");
+          return;
+        }
+
+        // Reset any previous errors
+        setApiError(null);
+
+        const apiUrl =
+          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+        console.log("📡 API URL:", apiUrl);
+
+        const requestBody = {
+          action: "getPatient",
+          patientId: patientId,
+        };
+
+        console.log("📤 Request body:", JSON.stringify(requestBody, null, 2));
+
+        console.log("⏳ Sending API request...");
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "Cache-Control": "no-cache",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        console.log(`📥 Response received, status: ${response.status}`);
+        const responseText = await response.text();
+        console.log(
+          `📄 Raw Response (first 500 chars): ${responseText.substring(0, 500)}`
+        );
+
+        let result;
+        try {
+          console.log("🔄 Parsing response JSON...");
+          result = JSON.parse(responseText);
+          console.log(
+            "📋 Parsed response:",
+            JSON.stringify(result, null, 2).substring(0, 500) + "..."
+          );
+        } catch (parseError) {
+          console.error("❌ Error parsing response JSON:", parseError);
+          console.log("📄 Raw response that couldn't be parsed:", responseText);
+          setApiError("Failed to parse API response: " + parseError.message);
+          return;
+        }
+
+        // Parse nested response if needed
+        const data = result.body
+          ? typeof result.body === "string"
+            ? JSON.parse(result.body)
+            : result.body
+          : result;
+
+        console.log(
+          "🔄 Processed data after handling nested structures:",
+          Object.keys(data).join(", ")
+        );
+
+        if (data.success && data.patient) {
+          console.log("✅ Patient data received successfully");
+          console.log(
+            "📋 Patient data structure:",
+            Object.keys(data.patient).join(", ")
+          );
+
+          // Check for clinicalParameters in different possible formats
+          let clinicalParams = null;
+
+          if (data.patient.clinicalParameters) {
+            console.log("📋 Found clinicalParameters field in patient data");
+            console.log(
+              "🔍 Raw clinicalParameters:",
+              JSON.stringify(data.patient.clinicalParameters).substring(0, 500)
+            );
+
+            // Check if it's in DynamoDB format or plain JS format
+            if (data.patient.clinicalParameters.M) {
+              console.log("🔄 Detected DynamoDB format, converting...");
+              try {
+                clinicalParams = unmarshallDynamoDBObject(
+                  data.patient.clinicalParameters
+                );
+                console.log("✅ Successfully converted from DynamoDB format");
+              } catch (conversionError) {
+                console.error(
+                  "❌ Error converting from DynamoDB format:",
+                  conversionError
+                );
+                setApiError(
+                  "Error processing clinical parameters: " +
+                    conversionError.message
+                );
+              }
+            } else {
+              console.log("✅ clinicalParameters already in standard format");
+              clinicalParams = data.patient.clinicalParameters;
+            }
+
+            if (clinicalParams) {
+              console.log(
+                "📋 Parameters after processing:",
+                Object.keys(clinicalParams).join(", ")
+              );
+              // Log each parameter value
+              Object.keys(clinicalParams).forEach((key) => {
+                console.log(`📊 ${key}: ${clinicalParams[key]}`);
+              });
+              updateInputFieldsFromRecord(clinicalParams);
+            } else {
+              console.warn("⚠️ clinicalParams is null after processing");
+            }
+          } else {
+            console.log("📋 No clinicalParameters found in patient data");
+            console.log(
+              "📋 Available fields in patient data:",
+              Object.keys(data.patient).join(", ")
+            );
+
+            // Check if there are other fields in the patient data that might have the clinical parameters
+            Object.keys(data.patient).forEach((key) => {
+              console.log(`🔍 Examining field: ${key}`);
+              if (
+                typeof data.patient[key] === "object" &&
+                data.patient[key] !== null
+              ) {
+                console.log(
+                  `📊 Type of ${key}: Object with keys: ${Object.keys(
+                    data.patient[key]
+                  ).join(", ")}`
+                );
+              } else {
+                console.log(`📊 Type of ${key}: ${typeof data.patient[key]}`);
+              }
+            });
+          }
+        } else {
+          console.warn("⚠️ No valid patient data found in API response");
+          if (data.error) {
+            console.error("❌ API Error:", data.error);
+            setApiError("API Error: " + data.error);
+          } else {
+            console.log(
+              "📋 Data returned without patient info:",
+              JSON.stringify(data, null, 2)
+            );
+            setApiError("No patient data returned from API");
+          }
+        }
+      } catch (error) {
+        console.error("❌ Error fetching current patient data:", error);
+        console.error("📚 Error stack:", error.stack);
+        setApiError("Error: " + error.message);
+
+        // Attempt to retrieve values from localStorage as a fallback
+        console.log(
+          "🔄 Attempting to retrieve values from localStorage as fallback"
+        );
+        try {
+          const storageKey = `clinical_params_${patientId}`;
+          const storedData = await AsyncStorage.getItem(storageKey);
+
+          if (storedData) {
+            console.log("✅ Found stored clinical parameters");
+            const parsedParams = JSON.parse(storedData);
+            updateInputFieldsFromRecord(parsedParams);
+          } else {
+            console.log("❌ No stored clinical parameters found");
+          }
+        } catch (storageError) {
+          console.error("❌ Error retrieving from localStorage:", storageError);
+        }
+      }
+    };
+
+    // Effect to fetch historical data when patient ID changes or when the section is saved
+    useEffect(() => {
+      if (patientId && savedSections?.clinical) {
+        fetchHistoricalData();
+      }
+    }, [patientId, savedSections?.clinical]);
+
+    // Add this effect to initialize clinical parameters when component mounts
+    useEffect(() => {
+      // Try to initialize clinical parameters when patientId becomes available
+      if (
+        patientId &&
+        patientId !== "undefined" &&
+        !patientId.startsWith("temp_")
+      ) {
+        console.log(
+          "🔄 Initializing clinical parameters for existing patient:",
+          patientId
+        );
+        fetchCurrentPatientData();
+      }
+    }, [patientId]);
+
+    // Improved fetchHistoricalData function to handle DynamoDB formatted data
+    const fetchHistoricalData = async (forceRefresh = false) => {
+      // Start loading state
+      setIsLoading(true);
+
+      console.log(
+        "🔄 Fetching historical clinical data for patient:",
+        patientId
+      );
+
+      try {
+        // Ensure we have a date for the current parameters
+        if (!clinicalParameters.date) {
+          console.log(
+            "🗓️ No date in current parameters, setting to current date"
+          );
+          setClinicalParameters((prev) => ({
+            ...prev,
+            date: new Date(),
+          }));
+        }
+
+        // Create a record with the current parameters
+        const currentRecord = {
+          ...clinicalParameters,
+          isCurrent: true,
+          date: clinicalParameters.date || new Date(),
+        };
+
+        console.log(
+          "📋 Current parameters record:",
+          JSON.stringify(currentRecord, null, 2)
+        );
+
+        // Start with at least the current record in the historical data
+        let updatedHistoricalData = [currentRecord];
+        setHistoricalData(updatedHistoricalData);
+        setDataFetched(true);
+
+        // First try to get data from AsyncStorage (for offline access)
+        if (patientId) {
+          const storageKey = `clinical_history_${patientId}`;
+          console.log("🔍 Checking AsyncStorage for key:", storageKey);
+
+          try {
+            const storedData = await AsyncStorage.getItem(storageKey);
+
+            if (storedData) {
+              console.log("✅ Found stored historical data");
+              let parsedData;
+              try {
+                parsedData = JSON.parse(storedData);
+                console.log(
+                  `📋 Found ${parsedData.length} historical records in storage`
+                );
+              } catch (parseError) {
+                console.error("❌ Error parsing stored data:", parseError);
+                console.log("📄 Raw stored data:", storedData);
+              }
+
+              if (parsedData && Array.isArray(parsedData)) {
+                // Don't overwrite current parameters with stored data
+                // Instead, combine them with current at the beginning
+                const filteredStoredData = parsedData.filter((item) => {
+                  // Keep all items regardless of date - we'll use timestamp to differentiate
+                  if (!item.date) return false;
+                  if (!currentRecord.date) return true;
+
+                  // Instead of just comparing the date, compare the full timestamp to avoid filtering out same-day entries
+                  const itemTimestamp = new Date(item.date).getTime();
+                  const currentTimestamp = new Date(
+                    currentRecord.date
+                  ).getTime();
+
+                  // Only filter out exact matching timestamps (allowing multiple entries per day)
+                  return itemTimestamp !== currentTimestamp;
+                });
+
+                console.log(
+                  `📋 After filtering, ${filteredStoredData.length} records remain`
+                );
+                updatedHistoricalData = [currentRecord, ...filteredStoredData];
+                setHistoricalData(updatedHistoricalData);
+              }
+            } else {
+              console.log("📋 No stored historical data found");
+            }
+          } catch (storageError) {
+            console.error("❌ Error accessing AsyncStorage:", storageError);
+          }
+
+          // Also fetch from API to get the latest data
+          console.log("🔄 Fetching data from API");
+          const apiUrl =
+            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+          // Use getPatient action instead of fetchClinicalHistory for better compatibility
+          const requestBody = {
+            action: "getPatient",
+            patientId: patientId,
+          };
+
+          // Make the API call
+          console.log(
+            "📤 Sending API request:",
+            JSON.stringify(requestBody, null, 2)
+          );
+          try {
+            const response = await fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                Pragma: "no-cache",
+                Expires: "0",
+              },
+              body: JSON.stringify(requestBody),
+            });
+
+            console.log(`📥 Response received, status: ${response.status}`);
+            const responseText = await response.text();
+
+            // Only log a portion of potentially large responses
+            console.log(
+              `📄 Raw response (first 500 chars): ${responseText.substring(
+                0,
+                500
+              )}`
+            );
+
+            let result;
+            try {
+              result = JSON.parse(responseText);
+            } catch (parseError) {
+              console.error("❌ Error parsing response JSON:", parseError);
+              console.log(
+                "❌ Raw response that couldn't be parsed:",
+                responseText
+              );
+              throw new Error("Failed to parse API response");
+            }
+
+            // Check if the response contains a body that needs to be parsed
+            const data = result.body
+              ? typeof result.body === "string"
+                ? JSON.parse(result.body)
+                : result.body
+              : result;
+
+            console.log(
+              "📋 Processed API response data:",
+              Object.keys(data).join(", ")
+            );
+
+            // Process the patient data to get clinical parameters
+            if (data.success && data.patient) {
+              console.log("✅ Patient data received from API");
+              let patientClinicalParams = data.patient.clinicalParameters;
+
+              console.log(
+                "🔍 Raw clinicalParameters from API:",
+                patientClinicalParams
+                  ? JSON.stringify(patientClinicalParams).substring(0, 500)
+                  : "undefined or null"
+              );
+
+              // Check if clinicalParameters is in DynamoDB format and convert if needed
+              if (patientClinicalParams && patientClinicalParams.M) {
+                console.log(
+                  "🔄 Converting DynamoDB formatted clinicalParameters from API response"
+                );
+                try {
+                  patientClinicalParams = unmarshallDynamoDBObject(
+                    patientClinicalParams
+                  );
+                  console.log("✅ Successfully converted from DynamoDB format");
+                } catch (conversionError) {
+                  console.error(
+                    "❌ Error converting from DynamoDB format:",
+                    conversionError
+                  );
+                  throw new Error(
+                    "Error processing clinical parameters: " +
+                      conversionError.message
+                  );
+                }
+              }
+
+              if (patientClinicalParams) {
+                console.log(
+                  "📋 Clinical parameters found in API response:",
+                  Object.keys(patientClinicalParams).join(", ")
+                );
+
+                // Compare full timestamps instead of just dates
+                const apiParamsTimestamp = patientClinicalParams.date
+                  ? new Date(patientClinicalParams.date).getTime()
+                  : null;
+                const currentParamsTimestamp = currentRecord.date
+                  ? new Date(currentRecord.date).getTime()
+                  : null;
+
+                console.log(
+                  `🗓️ API timestamp: ${apiParamsTimestamp}, Current timestamp: ${currentParamsTimestamp}`
+                );
+
+                // Add to history unless it's exactly the same timestamp (allowing multiple entries per day)
+                if (
+                  apiParamsTimestamp &&
+                  apiParamsTimestamp !== currentParamsTimestamp
+                ) {
+                  console.log(
+                    "📋 API data has different date, adding to history"
+                  );
+                  updatedHistoricalData.push({
+                    ...patientClinicalParams,
+                    isCurrent: false,
+                  });
+
+                  console.log(
+                    `📊 Historical data now has ${updatedHistoricalData.length} entries`
+                  );
+                } else {
+                  console.log(
+                    "📋 API data has same date as current, not adding to history"
+                  );
+                }
+
+                // Sort by date (newest first)
+                updatedHistoricalData = updatedHistoricalData.sort((a, b) => {
+                  return new Date(b.date) - new Date(a.date);
+                });
+
+                // Update state and cache
+                console.log(
+                  `📊 Final historical data has ${updatedHistoricalData.length} entries`
+                );
+                setHistoricalData(updatedHistoricalData);
+                try {
+                  await AsyncStorage.setItem(
+                    storageKey,
+                    JSON.stringify(updatedHistoricalData)
+                  );
+                  console.log("✅ Saved historical data to AsyncStorage");
+                } catch (saveError) {
+                  console.error("❌ Error saving to AsyncStorage:", saveError);
+                }
+              } else {
+                console.log("⚠️ No clinical parameters found in API response");
+              }
+            } else if (
+              data.success &&
+              data.clinicalHistory &&
+              data.clinicalHistory.length > 0
+            ) {
+              // Handle response if it contains clinicalHistory directly
+              console.log(
+                `📋 Fetched ${data.clinicalHistory.length} historical records from API`
+              );
+
+              // Check if clinicalHistory items are in DynamoDB format
+              console.log("🔍 Examining clinicalHistory format");
+              const processedHistory = data.clinicalHistory.map(
+                (item, index) => {
+                  console.log(`📊 Item ${index} type:`, typeof item);
+                  if (typeof item === "object") {
+                    console.log(
+                      `📊 Item ${index} keys:`,
+                      Object.keys(item).join(", ")
+                    );
+                  }
+
+                  // Check if this item is in DynamoDB format
+                  if (item.M) {
+                    console.log(
+                      `🔄 Item ${index} is in DynamoDB format, converting`
+                    );
+                    return unmarshallDynamoDBObject(item);
+                  }
+                  return item;
+                }
+              );
+
+              // Add all historical records but only filter out exact duplicates
+              const apiRecords = processedHistory.filter((item) => {
+                if (!item.date) return true;
+                // Compare full timestamps to allow multiple entries per day
+                const itemTimestamp = new Date(item.date).getTime();
+                const currentTimestamp = new Date(currentRecord.date).getTime();
+                return itemTimestamp !== currentTimestamp;
+              });
+
+              console.log(
+                `📊 After filtering, ${apiRecords.length} API records remain`
+              );
+
+              // Combine with current record
+              updatedHistoricalData = [currentRecord, ...apiRecords];
+
+              // Sort by date (newest first)
+              updatedHistoricalData = updatedHistoricalData.sort((a, b) => {
+                return new Date(b.date) - new Date(a.date);
+              });
+
+              // Update state and cache in AsyncStorage
+              console.log(
+                `📊 Final historical data has ${updatedHistoricalData.length} entries`
+              );
+              setHistoricalData(updatedHistoricalData);
+              try {
+                await AsyncStorage.setItem(
+                  storageKey,
+                  JSON.stringify(updatedHistoricalData)
+                );
+                console.log("✅ Saved historical data to AsyncStorage");
+              } catch (saveError) {
+                console.error("❌ Error saving to AsyncStorage:", saveError);
+              }
+            } else {
+              console.log("📋 No clinical history data found in API response");
+            }
+          } catch (apiError) {
+            console.error("❌ API error in fetchHistoricalData:", apiError);
+            console.error("📚 Error stack:", apiError.stack);
+            // We don't throw here, just log the error and continue with local data
+          }
+        }
+      } catch (error) {
+        console.error("❌ Error fetching clinical history:", error);
+        console.error("📚 Error stack:", error.stack);
+
+        // If API call failed but we have current parameters, still show those
+        if (clinicalParameters && clinicalParameters.date) {
+          console.log("📋 Using current parameters as fallback");
+          const currentRecord = {
+            ...clinicalParameters,
+            isCurrent: true,
+            date: clinicalParameters.date || new Date(),
+          };
+          setHistoricalData([currentRecord]);
+          setDataFetched(true);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    // Function to show upload options (Gallery, Camera, Document)
+    const showUploadOptions = () => {
+      if (Platform.OS === "ios") {
+        // For iOS, use ActionSheetIOS
+        ActionSheetIOS.showActionSheetWithOptions(
+          {
+            options: [
+              "Cancel",
+              "Take Photo",
+              "Choose from Gallery",
+              "Select Document",
+            ],
+            cancelButtonIndex: 0,
+          },
+          (buttonIndex) => {
+            if (buttonIndex === 1) {
+              // Take Photo
+              launchCamera();
+            } else if (buttonIndex === 2) {
+              // Choose from Gallery
+              launchImageLibrary();
+            } else if (buttonIndex === 3) {
+              // Select Document
+              launchDocumentPicker();
+            }
+          }
+        );
+      } else {
+        // For Android, use Alert
+        Alert.alert(
+          "Upload Report",
+          "Choose an option",
+          [
+            { text: "Cancel", style: "cancel" },
+            { text: "Take Photo", onPress: launchCamera },
+            { text: "Choose from Gallery", onPress: launchImageLibrary },
+            { text: "Select Document", onPress: launchDocumentPicker },
+          ],
+          { cancelable: true }
+        );
+      }
+    };
+
+    const clearAllPickerFlags = async () => {
+      try {
+        const keysToRemove = [
+          "PICKER_OPERATION_ACTIVE",
+          "PRE_PICKER_STATE",
+          "LAST_KNOWN_ROUTE",
+          "APP_LIFECYCLE_STATE",
+        ];
+
+        await AsyncStorage.multiRemove(keysToRemove);
+        console.log("🧹 Successfully cleared all picker-related flags");
+        return true;
+      } catch (error) {
+        console.error("❌ Error clearing picker flags:", error);
+        return false;
+      }
+    };
+
+    // Enhanced camera launch function with comprehensive error handling and state management
+    const launchCamera = async () => {
+      if (isPickerActive) {
+        console.log("🚫 Camera picker already active, ignoring request");
+        return;
+      }
+
+      setIsPickerActive(true);
+
+      try {
+        console.log("📸 Launching camera for report upload...");
+
+        // Save complete navigation context before picker launch
+        const prePickerState = {
+          timestamp: Date.now(),
+          patientId,
+          currentRoute: "NewPatientForm",
+          currentTab: "clinical",
+          hideBasicTab: true,
+          expandedSections,
+          isPickerOperation: true, // Mark this as a picker operation
+        };
+
+        await AsyncStorage.multiSet([
+          ["PRE_PICKER_STATE", JSON.stringify(prePickerState)],
+          ["PICKER_OPERATION_ACTIVE", "true"],
+          [
+            "LAST_KNOWN_ROUTE",
+            JSON.stringify({
+              routeName: "NewPatientForm",
+              params: {
+                hideBasicTab: true,
+                initialTab: "clinical",
+                patientId: patientId,
+              },
+            }),
+          ],
+        ]);
+
+        console.log("💾 Pre-picker state saved for navigation protection");
+
+        // Request camera permissions
+        const { status } = await ImagePicker.requestCameraPermissionsAsync();
+
+        if (status !== "granted") {
+          console.log("❌ Camera permission denied");
+          Alert.alert(
+            "Permission Denied",
+            "Camera permission is required to take photos."
+          );
+          return;
+        }
+
+        console.log("📸 Camera permissions granted, launching picker");
+
+        // Use memory-conscious settings to prevent app crashes
+        const result = await ImagePicker.launchCameraAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.8,
+          base64: false,
+          exif: false,
+          allowsMultipleSelection: false,
+        });
+
+        console.log("📸 Camera operation completed");
+        console.log("📸 Camera result structure:", {
+          canceled: result.canceled,
+          assetsCount: result.assets?.length || 0,
+          hasUri: result.assets?.[0]?.uri ? "yes" : "no",
+        });
+
+        // Clear picker operation flag immediately after picker completes
+        await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
+
+        // Comprehensive result validation
+        if (result.canceled) {
+          console.log("📸 Camera capture was cancelled by user");
+          return;
+        }
+
+        if (
+          !result.assets ||
+          !Array.isArray(result.assets) ||
+          result.assets.length === 0
+        ) {
+          console.error("❌ Invalid result structure from camera:", result);
+          Alert.alert("Error", "Invalid image data received from camera.");
+          return;
+        }
+
+        const selectedImage = result.assets[0];
+
+        // Validate the selected image
+        if (!selectedImage || !selectedImage.uri) {
+          console.error("❌ No valid image URI from camera:", selectedImage);
+          Alert.alert("Error", "No valid image was captured.");
+          return;
+        }
+
+        console.log("📸 Processing camera image:", {
+          uri: selectedImage.uri
+            ? selectedImage.uri.substring(0, 50) + "..."
+            : "none",
+          width: selectedImage.width,
+          height: selectedImage.height,
+          type: selectedImage.type,
+          fileName: selectedImage.fileName,
+        });
+
+        // Normalize URI for Android compatibility
+        let normalizedUri;
+        try {
+          normalizedUri = await normalizeUri(selectedImage.uri);
+          console.log(
+            `🔄 Normalized URI: ${normalizedUri.substring(0, 50)}...`
+          );
+        } catch (normalizationError) {
+          console.error("❌ Error normalizing URI:", normalizationError);
+          normalizedUri = selectedImage.uri; // Fallback to original
+        }
+
+        // Validate the image file
+        const validationResult = await validateImageFile({
+          ...selectedImage,
+          uri: normalizedUri,
+        });
+
+        if (!validationResult.exists || validationResult.errors.length > 0) {
+          console.error("❌ Image validation failed:", validationResult);
+          Alert.alert(
+            "Image Validation Failed",
+            `The captured image has issues: ${validationResult.errors.join(
+              ", "
+            )}`
+          );
+          return;
+        }
+
+        // Get file info with error handling
+        let fileInfo;
+        try {
+          fileInfo = await FileSystem.getInfoAsync(normalizedUri);
+          console.log("📄 File info:", {
+            exists: fileInfo.exists,
+            size: fileInfo.size
+              ? `${Math.round(fileInfo.size / 1024)}KB`
+              : "unknown",
+            isDirectory: fileInfo.isDirectory,
+          });
+        } catch (fileError) {
+          console.error("❌ Error getting file info:", fileError);
+          // Continue without file size info but with a fallback
+          fileInfo = {
+            exists: true,
+            size: selectedImage.fileSize || null,
+          };
+        }
+
+        if (!fileInfo.exists) {
+          console.error(
+            "❌ Camera image file does not exist at URI:",
+            normalizedUri
+          );
+          Alert.alert("Error", "The captured image could not be found.");
+          return;
+        }
+
+        // Format today's date for the report entry
+        const today = new Date();
+        const formattedDate = today.toLocaleDateString();
+
+        // Create file object with all required properties and a unique identifier
+        const uniqueId = `camera_${Date.now()}_${Math.random()
+          .toString(36)
+          .substr(2, 5)}`;
+
+        // Generate a proper filename if none exists
+        const fileName =
+          selectedImage.fileName ||
+          `camera_${new Date().getTime()}.${
+            (
+              selectedImage.mimeType ||
+              selectedImage.type ||
+              "image/jpeg"
+            ).split("/")[1] || "jpg"
+          }`;
+
+        const file = {
+          uri: normalizedUri,
+          name: fileName,
+          type: selectedImage.mimeType || selectedImage.type || "image/jpeg",
+          size: fileInfo.size || selectedImage.fileSize || null,
+          category: "Camera",
+          dateAdded: formattedDate,
+          uniqueId: uniqueId,
+          width: selectedImage.width,
+          height: selectedImage.height,
+          isCropped: true, // Mark as cropped since allowsEditing was true
+        };
+
+        console.log("📄 Prepared camera file object:", {
+          name: file.name,
+          type: file.type,
+          size: file.size ? `${Math.round(file.size / 1024)}KB` : "unknown",
+          category: file.category,
+          uniqueId: file.uniqueId,
+          isCropped: file.isCropped,
+        });
+
+        // Validate safePickDocument function before calling
+        if (typeof safePickDocument !== "function") {
+          console.error(
+            "❌ safePickDocument is not a function:",
+            typeof safePickDocument
+          );
+          Alert.alert(
+            "Error",
+            "Cannot process image due to internal error. Please contact support."
+          );
+          return;
+        }
+
+        // Call safePickDocument with the file - this will handle file storage and state updates
+        console.log("📤 Calling safePickDocument with camera file");
+        const success = await safePickDocument(file);
+
+        if (success) {
+          console.log("✅ Successfully processed camera image");
+
+          // Clear all picker flags immediately
+          try {
+            await AsyncStorage.multiRemove([
+              "PICKER_OPERATION_ACTIVE",
+              "PRE_PICKER_STATE",
+              "LAST_KNOWN_ROUTE",
+              "APP_LIFECYCLE_STATE",
+            ]);
+            console.log(
+              "🧹 Cleared all picker flags to prevent navigation issues"
+            );
+          } catch (clearError) {
+            console.error("❌ Error clearing picker flags:", clearError);
+          }
+
+          // Auto-expand reports section to show the new file
+          if (!expandedSections.reports) {
+            console.log("📂 Auto-expanding reports section to show new file");
+            setExpandedSections((prev) => ({
+              ...prev,
+              reports: true,
+            }));
+          }
+        } else {
+          console.log("❌ Failed to process camera image");
+
+          // Clear picker flags even on failure
+          try {
+            await AsyncStorage.multiRemove([
+              "PICKER_OPERATION_ACTIVE",
+              "PRE_PICKER_STATE",
+              "LAST_KNOWN_ROUTE",
+            ]);
+          } catch (clearError) {
+            console.error(
+              "❌ Error clearing picker flags on failure:",
+              clearError
+            );
+          }
+
+          Alert.alert(
+            "Error",
+            "Failed to add image to reports. Please try again."
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error taking photo:", error);
+        console.error("❌ Error stack:", error.stack);
+
+        // Clear picker operation flag on error
+        await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
+
+        const errorDetails = ImagePickerErrorHandler.handleError(
+          error,
+          "launchCamera"
+        );
+
+        Alert.alert("Camera Error", errorDetails.userMessage, [{ text: "OK" }]);
+      } finally {
+        setIsPickerActive(false);
+        // Final cleanup of all picker flags
+        try {
+          await AsyncStorage.multiRemove([
+            "PICKER_OPERATION_ACTIVE",
+            "PRE_PICKER_STATE",
+            "LAST_KNOWN_ROUTE",
+          ]);
+        } catch (finalError) {
+          console.error("❌ Final cleanup error:", finalError);
+        }
+        console.log("🔓 Camera picker operation completed, all flags cleared");
+      }
+    };
+
+    // Enhanced picker launch function with navigation protection
+    const launchImageLibrary = async () => {
+      if (isPickerActive) {
+        console.log("🚫 Gallery picker already active, ignoring request");
+        return;
+      }
+
+      setIsPickerActive(true);
+
+      try {
+        console.log("🖼️ Launching image gallery for report upload...");
+
+        // Save complete navigation context before picker launch
+        const prePickerState = {
+          timestamp: Date.now(),
+          patientId,
+          currentRoute: "NewPatientForm",
+          currentTab: "clinical",
+          hideBasicTab: true,
+          expandedSections,
+          isPickerOperation: true,
+        };
+
+        await AsyncStorage.multiSet([
+          [
+            "PRE_PICKER_STATE",
+            JSON.stringify({
+              ...prePickerState,
+              isPickerOperation: true, // Mark this as a picker operation
+            }),
+          ],
+          ["PICKER_OPERATION_ACTIVE", "true"],
+          [
+            "LAST_KNOWN_ROUTE",
+            JSON.stringify({
+              routeName: "NewPatientForm",
+              params: {
+                hideBasicTab: true,
+                initialTab: "clinical",
+                patientId: patientId,
+              },
+            }),
+          ],
+        ]);
+
+        console.log("💾 Pre-picker state saved for navigation protection");
+
+        // Request media library permissions
+        const { status } =
+          await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+        if (status !== "granted") {
+          console.log("❌ Media library permission denied");
+          Alert.alert(
+            "Permission Denied",
+            "Media library permission is required to select images."
+          );
+          return;
+        }
+
+        console.log("🖼️ Gallery permissions granted, launching picker");
+
+        // Use memory-conscious settings and updated API
+        const result = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ImagePicker.MediaTypeOptions.Images,
+          allowsEditing: true,
+          aspect: [4, 3],
+          quality: 0.8, // Memory-conscious quality setting
+          base64: false,
+          exif: false, // Disable EXIF to reduce memory usage
+          allowsMultipleSelection: false,
+        });
+
+        console.log("🖼️ Gallery operation completed");
+        console.log("🖼️ Gallery result structure:", {
+          canceled: result.canceled,
+          assetsLength: result.assets?.length || 0,
+          hasUri: result.assets?.[0]?.uri ? "yes" : "no",
+        });
+
+        // Clear picker operation flag immediately after picker completes
+        await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
+
+        // Robust result validation
+        if (result.canceled) {
+          console.log("🖼️ Gallery selection was cancelled by user");
+          return;
+        }
+
+        if (
+          !result.assets ||
+          !Array.isArray(result.assets) ||
+          result.assets.length === 0
+        ) {
+          console.error("❌ Invalid result structure from gallery:", result);
+          Alert.alert("Error", "Invalid image data received from gallery.");
+          return;
+        }
+
+        const selectedImage = result.assets[0];
+
+        if (!selectedImage || !selectedImage.uri) {
+          console.error("❌ No valid image URI from gallery:", selectedImage);
+          Alert.alert("Error", "No valid image was selected.");
+          return;
+        }
+
+        console.log("🖼️ Processing gallery image:", {
+          uri: selectedImage.uri
+            ? selectedImage.uri.substring(0, 50) + "..."
+            : "none",
+          width: selectedImage.width,
+          height: selectedImage.height,
+          type: selectedImage.mimeType || selectedImage.type,
+          fileName: selectedImage.fileName,
+        });
+
+        // Normalize URI for Android compatibility
+        let normalizedUri;
+        try {
+          normalizedUri = await normalizeUri(selectedImage.uri);
+          console.log(
+            `🔄 Normalized URI: ${normalizedUri.substring(0, 50)}...`
+          );
+        } catch (normalizationError) {
+          console.error("❌ Error normalizing URI:", normalizationError);
+          normalizedUri = selectedImage.uri; // Fallback to original
+        }
+
+        // Validate the image file
+        const validationResult = await validateImageFile({
+          ...selectedImage,
+          uri: normalizedUri,
+        });
+
+        if (!validationResult.exists || validationResult.errors.length > 0) {
+          console.error("❌ Image validation failed:", validationResult);
+          Alert.alert(
+            "Image Validation Failed",
+            `The selected image has issues: ${validationResult.errors.join(
+              ", "
+            )}`
+          );
+          return;
+        }
+
+        // Get file info with robust error handling
+        let fileInfo;
+        try {
+          fileInfo = await FileSystem.getInfoAsync(normalizedUri);
+          console.log("📄 File info:", {
+            exists: fileInfo.exists,
+            size: fileInfo.size
+              ? `${Math.round(fileInfo.size / 1024)}KB`
+              : "unknown",
+            isDirectory: fileInfo.isDirectory,
+          });
+        } catch (fileError) {
+          console.error("❌ Error getting file info:", fileError);
+          fileInfo = {
+            exists: true,
+            size: selectedImage.fileSize || null,
+          };
+        }
+
+        if (!fileInfo.exists) {
+          console.error(
+            "❌ Gallery image file does not exist at URI:",
+            normalizedUri
+          );
+          Alert.alert("Error", "The selected image could not be found.");
+          return;
+        }
+
+        // Create file object with comprehensive data
+        const today = new Date();
+        const formattedDate = today.toLocaleDateString();
+        const uniqueId = `gallery_${Date.now()}_${Math.random()
+          .toString(36)
+          .substr(2, 5)}`;
+
+        // Generate proper filename if missing
+        const fileName =
+          selectedImage.fileName ||
+          `gallery_${new Date().getTime()}.${
+            (
+              selectedImage.mimeType ||
+              selectedImage.type ||
+              "image/jpeg"
+            ).split("/")[1] || "jpg"
+          }`;
+
+        const file = {
+          uri: normalizedUri,
+          name: fileName,
+          type: selectedImage.mimeType || selectedImage.type || "image/jpeg",
+          size: fileInfo.size || selectedImage.fileSize || null,
+          category: "Gallery",
+          dateAdded: formattedDate,
+          uniqueId: uniqueId,
+          width: selectedImage.width,
+          height: selectedImage.height,
+          isCropped: true, // Mark as cropped since allowsEditing was true
+        };
+
+        console.log("📄 Prepared gallery file object:", {
+          name: file.name,
+          type: file.type,
+          size: file.size ? `${Math.round(file.size / 1024)}KB` : "unknown",
+          category: file.category,
+          uniqueId: file.uniqueId,
+          isCropped: file.isCropped,
+        });
+
+        // Validate and call safePickDocument
+        if (typeof safePickDocument !== "function") {
+          console.error(
+            "❌ safePickDocument is not a function:",
+            typeof safePickDocument
+          );
+          Alert.alert("Error", "Cannot process image due to internal error.");
+          return;
+        }
+
+        console.log("📤 Calling safePickDocument with gallery file");
+
+        // Call safePickDocument with timeout protection
+        const success = await Promise.race([
+          safePickDocument(file),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Operation timeout")), 15000)
+          ),
+        ]);
+
+        if (success) {
+          console.log("✅ Successfully processed gallery image");
+
+          // Clear all picker-related storage after successful operation
+          await AsyncStorage.multiRemove([
+            "PRE_PICKER_STATE",
+            "PICKER_OPERATION_ACTIVE",
+            "LAST_KNOWN_ROUTE",
+          ]);
+        } else {
+          console.log("❌ Failed to process gallery image");
+          Alert.alert(
+            "Error",
+            "Failed to add image to reports. Please try again."
+          );
+        }
+      } catch (error) {
+        console.error("❌ Error selecting image:", error);
+        console.error("❌ Error stack:", error.stack);
+
+        // Clear picker operation flag on error
+        await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
+
+        const errorDetails = ImagePickerErrorHandler.handleError(
+          error,
+          "launchImageLibrary"
+        );
+
+        Alert.alert("Gallery Error", errorDetails.userMessage, [
+          { text: "OK" },
+        ]);
+      } finally {
+        setIsPickerActive(false);
+        console.log(
+          "🔓 Gallery picker operation completed, isPickerActive reset"
+        );
+      }
+    };
+
+    // Enhanced document picker function
+    const launchDocumentPicker = async () => {
+      if (isPickerActive) {
+        console.log("🚫 Document picker already active, ignoring request");
+        return;
+      }
+
+      setIsPickerActive(true);
+
+      try {
+        console.log("📑 Launching document picker for report upload...");
+
+        // Launch document picker
+        const result = await DocumentPicker.getDocumentAsync({
+          type: [
+            "application/pdf",
+            "image/*",
+            "application/msword",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          ],
+          copyToCacheDirectory: true,
+        });
+
+        console.log("📑 Document picker result type:", result.type);
+
+        // Check if a document was selected successfully
+        if (
+          result.canceled === false &&
+          result.assets &&
+          result.assets.length > 0
+        ) {
+          const document = result.assets[0];
+          console.log(
+            "📑 Document selected:",
+            JSON.stringify({
+              uri: document.uri
+                ? document.uri.substring(0, 30) + "..."
+                : "none",
+              name: document.name,
+              mimeType: document.mimeType,
+              size: document.size
+                ? `${Math.round(document.size / 1024)}KB`
+                : "unknown",
+            })
+          );
+
+          // Validate document
+          const validationResult = await validateImageFile(document);
+          if (validationResult.errors.length > 0) {
+            console.warn(
+              "⚠️ Document validation warnings:",
+              validationResult.errors
+            );
+            // Continue anyway for documents (they might not be images)
+          }
+
+          // Format today's date for the report entry
+          const today = new Date();
+          const formattedDate = today.toLocaleDateString();
+
+          // Create file object with all required properties and a unique identifier
+          const uniqueId = `doc_${Date.now()}_${Math.random()
+            .toString(36)
+            .substr(2, 5)}`;
+
+          const file = {
+            uri: document.uri,
+            name: document.name,
+            type: document.mimeType || "application/octet-stream",
+            size: document.size,
+            category: "Document",
+            dateAdded: formattedDate,
+            uniqueId: uniqueId,
+          };
+
+          console.log(
+            "📄 Prepared document file object:",
+            JSON.stringify({
+              name: file.name,
+              type: file.type,
+              size: file.size ? `${Math.round(file.size / 1024)}KB` : "unknown",
+              category: file.category,
+              uniqueId: file.uniqueId,
+            })
+          );
+
+          // Call safePickDocument with the file
+          if (typeof safePickDocument === "function") {
+            console.log("📤 Calling safePickDocument with document file");
+            const success = await safePickDocument(file);
+
+            if (success) {
+              console.log("✅ Successfully processed document");
+
+              Alert.alert("Success", "Document added to reports successfully!");
+            } else {
+              console.log("❌ Failed to process document");
+              Alert.alert(
+                "Error",
+                "Failed to add document to reports. Please try again."
+              );
+            }
+          } else {
+            console.error(
+              "❌ safePickDocument is not a function:",
+              safePickDocument
+            );
+            Alert.alert(
+              "Error",
+              "Cannot process document due to internal error."
+            );
+          }
+        } else {
+          console.log("📑 Document selection cancelled or failed");
+        }
+      } catch (error) {
+        console.error("❌ Error selecting document:", error);
+        console.error("❌ Error stack:", error.stack);
+
+        const errorDetails = ImagePickerErrorHandler.handleError(
+          error,
+          "launchDocumentPicker"
+        );
+
+        Alert.alert("Document Error", errorDetails.userMessage, [
+          { text: "OK" },
+        ]);
+      } finally {
+        setIsPickerActive(false);
+        console.log(
+          "🔓 Document picker operation completed, isPickerActive reset"
+        );
+      }
+    };
+
+    // Function to save pending history text to AsyncStorage - NEW FUNCTION
+    const savePendingHistoryText = async (text) => {
+      if (!patientId) {
+        console.log("⚠️ No patientId available, cannot save pending history");
+        return;
+      }
+
+      try {
+        const key = `pending_history_${patientId}`;
+        await AsyncStorage.setItem(key, text);
+        console.log(
+          `✅ Saved pending history text to AsyncStorage with key: ${key}`
+        );
+      } catch (error) {
+        console.error(
+          "❌ Error saving pending history to AsyncStorage:",
+          error
+        );
+      }
+    };
+
+    return (
+      <View style={styles.formSection}>
+        {/* Show API error message if one exists */}
+        {apiError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorTitle}>API Error</Text>
+            <Text style={styles.errorMessage}>{apiError}</Text>
+            <TouchableOpacity
+              style={styles.errorButton}
+              onPress={() => {
+                setApiError(null);
+                // Try fetching data again
+                fetchCurrentPatientData();
+              }}
+            >
+              <Text style={styles.errorButtonText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* History/Complaints/Symptoms Section - MODIFIED to use formatHistoryForDisplay */}
+        <CollapsibleSection
+          title="History/Complaints/Symptoms"
+          isExpanded={expandedSections.history}
+          onToggle={() => toggleSection("history")}
+          icon="document-text-outline"
+        >
+          <View style={styles.inputWrapper}>
+            {/* Use different input based on whether it's a new patient or existing patient */}
+            {!prefillMode ? (
+              // For NEW patients: Show editable text area directly
+              <AutoBulletTextArea
+                value={patientData.medicalHistory}
+                onChangeText={(text) => updateField("medicalHistory", text)}
+                placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
+                style={[styles.textArea, { minHeight: 200 }]}
+                numberOfLines={12}
+              />
+            ) : (
+              // For EXISTING patients: Show non-editable display with either buttons or direct text entry
+              <>
+                {/* Conditional rendering based on route (hideBasicTab) */}
+                {hideBasicTab ? (
+                  // Direct text box for adding history (coming from dashboard)
+                  <>
+                    <View style={{ marginTop: 12 }}>
+                      <Text style={styles.addHistoryLabel}>Add History:</Text>
+                      <AutoBulletTextArea
+                        value={directHistoryText}
+                        onChangeText={(text) => {
+                          console.log(
+                            `🔄 Updating directHistoryText to: ${text.substring(
+                              0,
+                              20
+                            )}...`
+                          );
+                          setDirectHistoryText(text);
+
+                          // Save to AsyncStorage as user types (for recovery if they click Update & Next directly)
+                          savePendingHistoryText(text);
+                        }}
+                        placeholder="Enter new history entry here..."
+                        style={[styles.textArea, { minHeight: 100 }]}
+                        numberOfLines={6}
+                        // Modify onEndEditing handler to update patientData directly using updateField
+                        onEndEditing={() => {
+                          if (directHistoryText.trim()) {
+                            // Check if there's existing medical history
+                            const timestamp = new Date().toLocaleString();
+                            let updatedHistory = "";
+
+                            if (
+                              patientData.medicalHistory &&
+                              patientData.medicalHistory.trim()
+                            ) {
+                              updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+                            } else {
+                              updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+                            }
+
+                            // Immediately update the medicalHistory field to make it visible
+                            updateField("medicalHistory", updatedHistory);
+
+                            // Clear the pending history from AsyncStorage
+                            AsyncStorage.removeItem(
+                              `pending_history_${patientId}`
+                            );
+                            AsyncStorage.removeItem(
+                              `new_history_input_${patientId}`
+                            );
+
+                            // Clear the input after updating
+                            setDirectHistoryText("");
+
+                            console.log(
+                              "History text visibly transferred to medical history"
+                            );
+                          }
+                        }}
+                      />
+                    </View>
+                    <View style={styles.historyButtonsRow}>
+                      <TouchableOpacity
+                        style={styles.viewHistoryButtonBelow}
+                        onPress={() => setHistoryModalVisible(true)}
+                      >
+                        <Ionicons
+                          name="eye-outline"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.viewHistoryButtonText}>
+                          View History
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  </>
+                ) : (
+                  // Standard buttons for normal navigation
+                  <View style={styles.historyButtonsRow}>
+                    {patientData.medicalHistory ? (
+                      <TouchableOpacity
+                        style={styles.viewHistoryButtonBelow}
+                        onPress={() => setHistoryModalVisible(true)}
+                      >
+                        <Ionicons
+                          name="eye-outline"
+                          size={18}
+                          color="#FFFFFF"
+                        />
+                        <Text style={styles.viewHistoryButtonText}>
+                          View History
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+
+                    {/* Add History button */}
+                    <TouchableOpacity
+                      style={styles.addHistoryButton}
+                      onPress={() => setAddHistoryModalVisible(true)}
+                    >
+                      <Ionicons
+                        name="add-circle-outline"
+                        size={18}
+                        color="#FFFFFF"
+                      />
+                      <Text style={styles.addHistoryButtonText}>
+                        Add History
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </>
+            )}
+
+            {/* Add a hint for auto-bulleting in new patient mode */}
+            {!prefillMode && (
+              <Text style={styles.hintText}>
+                Tip: Start a line with "-" to create a bulleted list
+              </Text>
+            )}
+          </View>
+        </CollapsibleSection>
+
+        {/* Reports Section */}
+        <CollapsibleSection
+          title="Reports"
+          isExpanded={expandedSections.reports}
+          onToggle={() => toggleSection("reports")}
+          icon="document-attach-outline"
+        >
+          <View style={styles.inputWrapper}>
+            <TextInput
+              style={[styles.textArea, { minHeight: 150 }]}
+              value={patientData.reports}
+              onChangeText={(text) => updateField("reports", text)}
+              placeholder="Enter report details or upload reports"
+              multiline
+              numberOfLines={8}
+              textAlignVertical="top"
+              placeholderTextColor="#C8C8C8"
+              blurOnSubmit={false}
+            />
+            <TouchableOpacity
+              style={[
+                styles.uploadButton,
+                isPickerActive && styles.uploadButtonDisabled,
+              ]}
+              onPress={() => {
+                if (isPickerActive) {
+                  console.log(
+                    "🚫 Upload button disabled - picker operation in progress"
+                  );
+                  return;
+                }
+
+                console.log(
+                  `📁 Current reportFiles count before upload: ${reportFiles.length}`
+                );
+                if (reportFiles.length > 0) {
+                  console.log("📁 Existing reportFiles preview:");
+                  reportFiles.forEach((file, idx) => {
+                    console.log(
+                      `     File ${idx + 1}: ${file.name}, Category: ${
+                        file.category || "uncategorized"
+                      }, Unique ID: ${file.uniqueId || "none"}`
+                    );
+                  });
+                }
+                showUploadOptions();
+              }}
+              disabled={isPickerActive}
+            >
+              <Ionicons
+                name="cloud-upload-outline"
+                size={20}
+                color={isPickerActive ? "#A0AEC0" : "#FFFFFF"}
+              />
+              <Text
+                style={[
+                  styles.uploadButtonText,
+                  isPickerActive && styles.uploadButtonTextDisabled,
+                ]}
+              >
+                {isPickerActive ? "Processing..." : "Upload Report"}
+              </Text>
+            </TouchableOpacity>
+
+            {/* Enhanced file list display with file type icons, status indicators, and categories */}
+            {reportFiles.length > 0 && (
+              <View style={styles.uploadedFilesContainer}>
+                <Text style={styles.uploadedFilesTitle}>
+                  Uploaded Files: ({reportFiles.length})
+                </Text>
+                {reportFiles.map((file, index) => (
+                  <View key={index} style={styles.fileItem}>
+                    <View style={styles.fileDetails}>
+                      <Ionicons
+                        name={
+                          file.type?.includes("pdf")
+                            ? "document-text-outline"
+                            : file.type?.includes("image")
+                            ? "image-outline"
+                            : "document-outline"
+                        }
+                        size={18}
+                        color="#0070D6"
+                      />
+                      <Text
+                        style={styles.fileName}
+                        numberOfLines={1}
+                        ellipsizeMode="middle"
+                      >
+                        {file.name || `File ${index + 1}`}
+                      </Text>
+
+                      {/* Add file size if available */}
+                      {file.size && (
+                        <Text style={styles.fileSize}>
+                          ({Math.round(file.size / 1024)} KB)
+                        </Text>
+                      )}
+
+                      {/* Display category if available */}
+                      {file.category && (
+                        <View style={styles.categoryBadge}>
+                          <Text style={styles.categoryText}>
+                            {file.category}
+                          </Text>
+                        </View>
+                      )}
+
+                      {/* Add a status indicator for S3 urls */}
+                      {file.uri && isFileAlreadyUploaded(file) && (
+                        <View style={styles.s3BadgeContainer}>
+                          <Text style={styles.s3BadgeText}>S3</Text>
+                        </View>
+                      )}
+                    </View>
+
+                    <View style={styles.fileActions}>
+                      {/* Preview button for images */}
+                      {file.type?.includes("image") && (
+                        <TouchableOpacity
+                          style={styles.previewButton}
+                          onPress={() => {
+                            Alert.alert(
+                              file.name || "ImagePreview",
+                              `Category: ${
+                                file.category || "Uncategorized"
+                              }\nThis image will be uploaded when you save this section.`,
+                              [{ text: "OK" }]
+                            );
+                          }}
+                        >
+                          <Ionicons
+                            name="eye-outline"
+                            size={18}
+                            color="#4A5568"
+                          />
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Remove button - Updated to use enhanced deletion */}
+                      <TouchableOpacity
+                        onPress={() => removeReportFileWithBackend(index)}
+                      >
+                        <Ionicons
+                          name="close-circle"
+                          size={20}
+                          color="#E53935"
+                        />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))}
+
+                <Text style={styles.uploadInfoText}>
+                  Files will be uploaded to S3 when you save this section. Make
+                  sure your internet connection is stable.
+                </Text>
+
+                {/* New "View Upload Files" button - Updated to use the new modal */}
+                {reportFiles.length > 0 && (
+                  <TouchableOpacity
+                    style={styles.viewFilesButton}
+                    onPress={() => setViewUploadedFilesModalVisible(true)}
+                  >
+                    <Ionicons
+                      name="folder-open-outline"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.viewFilesButtonText}>
+                      View Upload Files
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        </CollapsibleSection>
+
+        {/* Clinical Parameters Section */}
+        <CollapsibleSection
+          title="Clinical Parameters"
+          isExpanded={expandedSections.clinicalParameters}
+          onToggle={() => toggleSection("clinicalParameters")}
+          icon="pulse-outline"
+        >
+          <ScrollView
+            style={styles.clinicalParametersContainer}
+            contentContainerStyle={{ paddingBottom: 24 }}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Date input with picker */}
+            <View style={styles.dateInputContainer}>
+              <Text style={styles.dateInputLabel}>Date:</Text>
+              <TouchableOpacity
+                style={styles.datePickerButton}
+                onPress={() => setShowDatePicker(true)}
+              >
+                <Text style={styles.datePickerText}>
+                  {tempDate ? tempDate.toLocaleDateString() : "Select Date"}
+                </Text>
+                <Ionicons name="calendar-outline" size={16} color="#4A5568" />
+              </TouchableOpacity>
+              {showDatePicker && (
+                <DateTimePicker
+                  value={tempDate}
+                  mode="date"
+                  display="default"
+                  onChange={handleDateChange}
+                />
+              )}
+            </View>
+
+            {/* First row of parameters */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={true}
+              style={styles.parametersScrollView}
+            >
+              <View style={styles.parametersRow}>
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>INR (last)</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.inr}
+                    onChangeText={(text) => handleParameterUpdate("inr", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>HB</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.hb}
+                    onChangeText={(text) => handleParameterUpdate("hb", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>WBC</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.wbc}
+                    onChangeText={(text) => handleParameterUpdate("wbc", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>Platelet</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.platelet}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("platelet", text)
+                    }
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>Bilirubin</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.bilirubin}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("bilirubin", text)
+                    }
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Second row of parameters */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={true}
+              style={styles.parametersScrollView}
+            >
+              <View style={styles.parametersRow}>
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>SGOT</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.sgot}
+                    onChangeText={(text) => handleParameterUpdate("sgot", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>SGPT</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.sgpt}
+                    onChangeText={(text) => handleParameterUpdate("sgpt", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>ALT</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.alt}
+                    onChangeText={(text) => handleParameterUpdate("alt", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>TPR/Alb</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.tprAlb}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("tprAlb", text)
+                    }
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>Urea/Creat</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.ureaCreat}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("ureaCreat", text)
+                    }
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Third row of parameters */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={true}
+              style={styles.parametersScrollView}
+            >
+              <View style={styles.parametersRow}>
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>Sodium (Na)</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.sodium}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("sodium", text)
+                    }
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>Fasting/HBA1C</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.fastingHBA1C}
+                    onChangeText={(text) =>
+                      handleParameterUpdate("fastingHBA1C", text)
+                    }
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>P.P</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.pp}
+                    onChangeText={(text) => handleParameterUpdate("pp", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>TSH</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.tsh}
+                    onChangeText={(text) => handleParameterUpdate("tsh", text)}
+                  />
+                </View>
+
+                <View style={styles.parameterInputContainer}>
+                  <Text style={styles.parameterLabel}>FT4</Text>
+                  <TextInput
+                    style={styles.parameterInput}
+                    keyboardType="numeric"
+                    placeholder="Value"
+                    value={clinicalParameters.ft4}
+                    onChangeText={(text) => handleParameterUpdate("ft4", text)}
+                  />
+                </View>
+              </View>
+            </ScrollView>
+
+            {/* Other parameter field */}
+            <View style={styles.otherParameterContainer}>
+              <Text style={styles.parameterLabel}>Others</Text>
+              <TextInput
+                style={styles.otherParameterInput}
+                placeholder="Other parameters"
+                multiline
+                numberOfLines={4}
+                value={clinicalParameters.others || ""}
+                onChangeText={(text) => handleParameterUpdate("others", text)}
+              />
+            </View>
+            {/* Only show button if hideBasicTab is true (coming from DoctorDashboard) AND we have data */}
+            {hideBasicTab &&
+              (savedSections?.clinical ||
+                (clinicalParameters &&
+                  Object.values(clinicalParameters).some(
+                    (value) => value
+                  ))) && (
+                <TouchableOpacity
+                  style={styles.viewTableButton}
+                  onPress={() => {
+                    // Prepare current parameters before showing the modal
+                    if (clinicalParameters) {
+                      console.log("🔍 Preparing data for parameters table...");
+
+                      // Ensure we have a date before showing
+                      if (!clinicalParameters.date) {
+                        console.log("🗓️ No date found, setting current date");
+                        const updatedParams = {
+                          ...clinicalParameters,
+                          date: new Date(),
+                        };
+                        setClinicalParameters(updatedParams);
+
+                        // Create a temporary copy for immediate use
+                        const tempRecord = {
+                          ...updatedParams,
+                          isCurrent: true,
+                        };
+
+                        // Pre-populate historical data with at least this record
+                        setHistoricalData([tempRecord]);
+                        console.log(
+                          "📊 Pre-populated historical data with current record"
+                        );
+                      } else {
+                        console.log(
+                          `🗓️ Using existing date: ${clinicalParameters.date}`
+                        );
+
+                        // Create a temporary record for immediate use
+                        const tempRecord = {
+                          ...clinicalParameters,
+                          isCurrent: true,
+                        };
+
+                        // Pre-populate historical data with at least this record
+                        setHistoricalData([tempRecord]);
+                        console.log(
+                          "📊 Pre-populated historical data with current record"
+                        );
+                      }
+                    }
+
+                    // Log before showing modal
+                    console.log("📊 About to show modal with prepared data");
+
+                    // Show the modal immediately
+                    setTableModalVisible(true);
+                  }}
+                >
+                  <Ionicons name="grid-outline" size={18} color="#FFFFFF" />
+                  <Text style={styles.viewTableButtonText}>
+                    View Parameters Table
+                  </Text>
+                </TouchableOpacity>
+              )}
+          </ScrollView>
+        </CollapsibleSection>
+
+        {/* Use the ViewParametersModal component */}
+        <ViewParametersModal
+          isVisible={tableModalVisible}
+          onClose={() => {
+            console.log("🔒 Closing parameters modal");
+            setTableModalVisible(false);
+          }}
+          clinicalParameters={clinicalParameters}
+          patientId={patientId}
+          unmarshallDynamoDBObject={unmarshallDynamoDBObject}
+          // Pass the initial historical data to ensure it's never empty
+          initialHistoricalData={
+            historicalData.length > 0 ? historicalData : null
+          }
+        />
+
+        {/* Add the History/Complaints/Symptoms Modal */}
+        <ViewHistoryModal
+          isVisible={historyModalVisible}
+          onClose={() => setHistoryModalVisible(false)}
+          historyText={patientData.medicalHistory}
+          patientId={patientId} // Add this line to pass the patientId prop
+        />
+
+        {/* Add the View Files Modal - Updated to use enhanced deletion */}
+        <ViewFilesModal
+          isVisible={viewFilesModalVisible}
+          onClose={() => setViewFilesModalVisible(false)}
+          reportFiles={reportFiles}
+          removeReportFileWithBackend={removeReportFileWithBackend} // Updated to use enhanced deletion
+          patientId={patientId} // Pass patientId for backend deletion
+        />
+
+        {/* Add the ViewUploadedFilesModal component */}
+        <ViewUploadedFilesModal
+          isVisible={viewUploadedFilesModalVisible}
+          onClose={() => setViewUploadedFilesModalVisible(false)}
+          patientId={patientId}
+          reportFiles={reportFiles}
+          removeReportFile={removeReportFileWithBackend} // Updated to use enhanced deletion
+          isFileAlreadyUploaded={isFileAlreadyUploaded}
+        />
+
+        {/* Add the Add History Modal */}
+        <AddHistoryModal
+          isVisible={addHistoryModalVisible}
+          onClose={() => setAddHistoryModalVisible(false)}
+          onSave={handleSaveNewHistory}
+          patientId={patientId}
+        />
+      </View>
+    );
+  }
+);
+
+const styles = StyleSheet.create({
+  formSection: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.1,
+        shadowRadius: 3,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  // Collapsible section styles
+  collapsibleContainer: {
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+  collapsibleHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: 15,
+    backgroundColor: "#F7FAFC",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  collapsibleTitleContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1, // Add flex to take available space
+    maxWidth: "85%", // Limit width to ensure arrow is visible
+  },
+  collapsibleHeaderIcon: {
+    marginRight: 10,
+    minWidth: 20, // Ensure icon has minimum width
+  },
+  chevronContainer: {
+    width: 30, // Fixed width for the chevron container
+    alignItems: "center", // Center the chevron horizontally
+    justifyContent: "center", // Center the chevron vertically
+  },
+  collapsibleTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#2D3748",
+    flexShrink: 1, // Allow text to shrink if needed
+  },
+  collapsibleContent: {
+    padding: 15,
+    backgroundColor: "#FFFFFF",
+  },
+  inputWrapper: { marginBottom: 16 },
+  labelContainer: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 6,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+    marginBottom: 6,
+  },
+  // Style for non-editable history text
+  historyText: {
+    fontSize: 16,
+    color: "#2D3748",
+    lineHeight: 24,
+  },
+  placeholderText: {
+    fontSize: 16,
+    color: "#A0AEC0",
+    fontStyle: "italic",
+    textAlign: "center",
+    padding: 20,
+  },
+  // Row container for buttons
+  historyButtonsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  // Updated styles for View History button below input field
+  viewHistoryButtonBelow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0070D6",
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flex: 1,
+    marginRight: 8,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  viewHistoryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 8,
+  },
+  // Style for the new Add History button
+  addHistoryButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#38A169", // Green color to differentiate from view button
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    flex: 1,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  addHistoryButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 8,
+  },
+  textInput: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+  },
+  textArea: {
+    backgroundColor: "#F9FAFB",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    minHeight: 80,
+  },
+  hintText: {
+    fontSize: 12,
+    color: "#718096",
+    fontStyle: "italic",
+    marginTop: 4,
+  },
+  // Error styles
+  errorContainer: {
+    backgroundColor: "#FEE2E2",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#F87171",
+  },
+  errorTitle: {
+    color: "#B91C1C",
+    fontWeight: "600",
+    marginBottom: 4,
+    fontSize: 16,
+  },
+  errorMessage: {
+    color: "#7F1D1D",
+    fontSize: 14,
+    marginBottom: 8,
+  },
+  errorButton: {
+    backgroundColor: "#EF4444",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 4,
+    alignSelf: "flex-start",
+  },
+  errorButtonText: {
+    color: "#FFFFFF",
+    fontWeight: "500",
+    fontSize: 14,
+  },
+  uploadButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0070D6",
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+  },
+  uploadButtonDisabled: {
+    backgroundColor: "#E2E8F0",
+  },
+  uploadButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "500",
+    marginLeft: 8,
+  },
+  uploadButtonTextDisabled: {
+    color: "#A0AEC0",
+  },
+  uploadedFilesContainer: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: "#F0F5FF",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D1E0FF",
+  },
+  uploadedFilesTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 8,
+  },
+  fileItem: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  fileDetails: {
+    flexDirection: "row",
+    alignItems: "center",
+    flex: 1,
+    flexWrap: "nowrap",
+  },
+  fileName: {
+    marginLeft: 8,
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+    flex: 1,
+  },
+  fileSize: {
+    fontSize: 12,
+    color: "#718096",
+    marginLeft: 4,
+  },
+  fileActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  previewButton: {
+    padding: 6,
+    marginRight: 8,
+  },
+  categoryBadge: {
+    backgroundColor: "#EBF8FF",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginLeft: 8,
+  },
+  categoryText: {
+    fontSize: 11,
+    color: "#2B6CB0",
+    fontWeight: "500",
+  },
+  s3BadgeContainer: {
+    backgroundColor: "#38A169",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 6,
+  },
+  s3BadgeText: {
+    color: "#FFFFFF",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  uploadInfoText: {
+    fontSize: 12,
+    color: "#718096",
+    fontStyle: "italic",
+    marginTop: 12,
+    textAlign: "center",
+  },
+  // New View Files Button
+  viewFilesButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#4C51BF", // Indigo color to differentiate from other buttons
+    borderRadius: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    alignSelf: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  viewFilesButtonText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "500",
+    marginLeft: 8,
+  },
+  clinicalParametersContainer: {
+    backgroundColor: "#F0F5FF",
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 0,
+    marginBottom: 0,
+    borderWidth: 1,
+    borderColor: "#D1E0FF",
+  },
+  clinicalParametersTitle: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  dateInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  dateInputLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+    width: 50,
+  },
+  datePickerButton: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    flex: 1,
+  },
+  datePickerText: {
+    fontSize: 14,
+    color: "#2D3748",
+  },
+  parametersScrollView: {
+    marginBottom: 12,
+  },
+  parametersRow: {
+    flexDirection: "row",
+    paddingBottom: 8,
+  },
+  parameterInputContainer: {
+    width: 120,
+    marginRight: 12,
+  },
+  parameterLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#4A5568",
+    marginBottom: 4,
+  },
+  parameterInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 14,
+  },
+  otherParameterContainer: {
+    marginBottom: 5,
+  },
+  otherParameterInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    minHeight: 100, // ensures it's visible for multiline
+    textAlignVertical: "top", // aligns text properly inside multiline
+  },
+
+  // Styles for View Table button
+  viewTableButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#38A169", // Green color
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+  },
+  viewTableButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "500",
+    marginLeft: 8,
+  },
+  // Styles for the View Files Modal
+  modalContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+  },
+  modalContent: {
+    width: "90%",
+    maxHeight: "80%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 16,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+      },
+      android: { elevation: 5 },
+    }),
+  },
+  modalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+    marginBottom: 12,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#2D3748",
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  modalFileList: {
+    flex: 1,
+  },
+  modalFileDivider: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 8,
+  },
+  modalFileItem: {
+    paddingVertical: 12,
+  },
+  modalFileDetails: {
+    flexDirection: "row",
+    marginBottom: 8,
+  },
+  modalFileIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "#EBF8FF",
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 12,
+  },
+  modalFileInfo: {
+    flex: 1,
+    justifyContent: "center",
+  },
+  modalFileName: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#2D3748",
+    marginBottom: 4,
+  },
+  modalFileMetaContainer: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+  },
+  modalFileSize: {
+    fontSize: 12,
+    color: "#718096",
+    marginRight: 8,
+  },
+  modalFileDate: {
+    fontSize: 12,
+    color: "#718096",
+    marginRight: 8,
+  },
+  modalCategoryBadge: {
+    backgroundColor: "#E6FFFA",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  modalCategoryText: {
+    fontSize: 12,
+    color: "#319795",
+    fontWeight: "500",
+  },
+  modalFileActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 8,
+  },
+  modalActionButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: "#EBF8FF",
+    marginLeft: 8,
+  },
+  modalRemoveButton: {
+    backgroundColor: "#FEE2E2",
+  },
+  modalRemoveText: {
+    fontSize: 12,
+    color: "#E53935",
+    fontWeight: "500",
+    marginLeft: 4,
+  },
+  modalActionText: {
+    fontSize: 12,
+    color: "#0070D6",
+    fontWeight: "500",
+    marginLeft: 4,
+  },
+  modalEmptyContainer: {
+    padding: 24,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalEmptyText: {
+    fontSize: 16,
+    color: "#718096",
+    marginTop: 12,
+  },
+  modalCloseFullButton: {
+    backgroundColor: "#EDF2F7",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: "center",
+    marginTop: 16,
+  },
+  modalCloseFullButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+  },
+  // Preview Modal Styles
+  previewModalContainer: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.9)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewModalContent: {
+    width: "100%",
+    height: "100%",
+    padding: 16,
+  },
+  previewModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 12,
+  },
+  previewModalTitle: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#FFFFFF",
+    flex: 1,
+  },
+  previewModalCloseButton: {
+    padding: 4,
+  },
+  previewImageContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewImage: {
+    width: "100%",
+    height: "90%",
+    borderRadius: 8,
+  },
+  previewModalFooter: {
+    paddingVertical: 12,
+    alignItems: "center",
+  },
+  previewModalCloseFullButton: {
+    backgroundColor: "rgba(255, 255, 255, 0.2)",
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: "center",
+  },
+  previewModalCloseFullButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#FFFFFF",
+  },
+  // Modal styles for Add History modal
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+    marginBottom: 8,
+  },
+  modalButtonRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 16,
+  },
+  modalCancelButton: {
+    backgroundColor: "#EDF2F7",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flex: 1,
+    marginRight: 8,
+    alignItems: "center",
+  },
+  modalCancelButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+  },
+  modalSaveButton: {
+    backgroundColor: "#38A169",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    flex: 1,
+    alignItems: "center",
+  },
+  modalSaveButtonText: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#FFFFFF",
+  },
+  // New styles for formatted history display
+  entryContainer: {
+    marginBottom: 10,
+  },
+  entryTimestamp: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#4A5568",
+    marginBottom: 4,
+    backgroundColor: "#F7FAFC",
+    padding: 4,
+    borderRadius: 4,
+  },
+  entrySeparator: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginVertical: 10,
+  },
+  addHistoryLabel: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#4A5568",
+    marginBottom: 6,
+  },
+  updateNextButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#38A169", // Green color
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  updateNextButtonText: {
+    color: "#FFFFFF",
+    fontSize: 15,
+    fontWeight: "500",
+    marginRight: 8,
+  },
+  // Add status badge styles for file deletion feedback
+  statusBadge: {
+    backgroundColor: "#D1FAE5",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 4,
+  },
+  statusText: {
+    fontSize: 10,
+    color: "#065F46",
+    fontWeight: "500",
+  },
+  errorBadge: {
+    backgroundColor: "#FEE2E2",
+  },
+  errorText: {
+    color: "#991B1B",
+  },
+});
+
+export default ClinicalTab;

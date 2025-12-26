@@ -1,0 +1,400 @@
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { randomUUID } from "crypto";
+
+// Initialize AWS clients - using only region for simplest configuration
+const dynamoClient = new DynamoDBClient({ region: "us-east-1" });
+const dynamodb = DynamoDBDocumentClient.from(dynamoClient);
+const s3 = new S3Client({ 
+    region: "us-east-1",
+    // No custom credentials - use Lambda's execution role
+    forcePathStyle: true
+});
+
+// Table name for DynamoDB
+const PATIENTS_TABLE = 'Patients';
+// S3 bucket name - this must match exactly
+const REPORTS_BUCKET = 'mypatientsbucket';
+
+// Using public URL for the S3 objects - path style for maximum compatibility
+const S3_URL_PREFIX = `https://s3.amazonaws.com/${REPORTS_BUCKET}/`;
+
+export const handler = async (event, context) => {
+    try {
+        // Debug information to help identify the issue
+        console.log("Lambda function started");
+        console.log("Event received:", JSON.stringify({
+            headers: event.headers,
+            httpMethod: event.httpMethod,
+            body: event.body ? "Body present (not displaying content)" : "Body missing",
+            isBase64Encoded: event.isBase64Encoded
+        }));
+        
+        // Don't wait for event loop to empty (allows for faster response)
+        context.callbackWaitsForEmptyEventLoop = false;
+        
+        // Enhanced request body handling
+        let rawBody = event.body;
+        
+        // Check if body is missing and try to recover
+        if (!rawBody) {
+            console.error("Request body is missing from event object");
+            
+            // Try to access body from other potential locations
+            if (event.Records && event.Records[0] && event.Records[0].body) {
+                console.log("Found body in event.Records[0].body");
+                rawBody = event.Records[0].body;
+            } else if (typeof event === 'string') {
+                console.log("Event itself is a string, using as body");
+                rawBody = event;
+            } else {
+                // If we can't find a body anywhere, check if the entire event might be the patient data
+                const hasPatientProperties = event.name && (event.age || event.age === 0);
+                if (hasPatientProperties) {
+                    console.log("Using event object itself as patient data");
+                    return await processPatientData(event);
+                }
+                
+                return formatErrorResponse("Request body is missing and could not be recovered");
+            }
+        }
+        
+        // Handle base64 encoded bodies (sometimes API Gateway encodes the body)
+        if (event.isBase64Encoded) {
+            console.log("Decoding base64 encoded body");
+            rawBody = Buffer.from(rawBody, 'base64').toString('utf8');
+        }
+        
+        // Try to parse the body as JSON
+        let patientData;
+        try {
+            patientData = typeof rawBody === 'string' ? JSON.parse(rawBody) : rawBody;
+        } catch (parseError) {
+            console.error("Error parsing request body:", parseError);
+            return formatErrorResponse("Invalid JSON in request body: " + parseError.message);
+        }
+        
+        // Process the patient data
+        return await processPatientData(patientData);
+    } catch (error) {
+        console.error('Error in handler:', error);
+        return formatErrorResponse(error.message || "Failed to add patient");
+    }
+};
+
+// Separate function to process patient data once we have it
+async function processPatientData(patientData) {
+    try {
+        console.log("Starting processPatientData");
+        
+        // Validate essential patient data
+        if (!patientData.name || !patientData.age) {
+            return formatErrorResponse("Missing required patient information (name or age)");
+        }
+        
+        // Generate a unique ID for the patient using Node.js built-in crypto.randomUUID()
+        const patientId = randomUUID();
+        console.log(`Generated patient ID: ${patientId}`);
+        
+        // Extract report files for S3 upload
+        const reportFiles = patientData.reportFiles || [];
+        console.log(`Found ${reportFiles.length} report files to process`);
+        
+        // Array to store file metadata after processing
+        const processedFiles = [];
+        let filesUploadedToS3 = 0;
+        
+        // Handle each report file, with or without S3 upload
+        for (let i = 0; i < reportFiles.length; i++) {
+            const reportFile = reportFiles[i];
+            console.log(`Processing file ${i+1}/${reportFiles.length}: ${reportFile.name || 'unnamed'}`);
+            
+            // Validate report file data
+            if (!reportFile.base64Data) {
+                console.warn(`File ${i+1} missing base64Data, skipping`);
+                continue;
+            }
+            
+            if (!reportFile.name) {
+                reportFile.name = `file_${Date.now()}.${reportFile.type?.split('/')[1] || 'bin'}`;
+                console.log(`File ${i+1} missing name, assigned: ${reportFile.name}`);
+            }
+            
+            if (!reportFile.type) {
+                reportFile.type = 'application/octet-stream';
+                console.log(`File ${i+1} missing type, assigned: ${reportFile.type}`);
+            }
+
+            try {
+                // Extract actual base64 data by removing data URI prefix if it exists
+                let cleanBase64 = reportFile.base64Data;
+                let detectedType = null;
+                
+                if (cleanBase64.startsWith('data:')) {
+                    console.log(`File ${reportFile.name} has data URI prefix`);
+                    // Extract the base64 part from format like: data:image/jpeg;base64,/9j/4AAQ...
+                    const base64Parts = cleanBase64.split(',');
+                    if (base64Parts.length > 1) {
+                        // Try to extract content type from the data URI
+                        try {
+                            detectedType = base64Parts[0].split(':')[1].split(';')[0];
+                            console.log(`Detected content type from URI: ${detectedType}`);
+                        } catch (e) {
+                            console.warn(`Couldn't extract content type from URI: ${e.message}`);
+                        }
+                        
+                        cleanBase64 = base64Parts[1];
+                        console.log(`Extracted base64 data without prefix`);
+                    } else {
+                        console.warn(`Invalid data URI format for ${reportFile.name}`);
+                    }
+                }
+                
+                // Use detected type from data URI if available and not already set
+                if (detectedType && reportFile.type === 'application/octet-stream') {
+                    reportFile.type = detectedType;
+                    console.log(`Updated content type to ${reportFile.type} based on data URI`);
+                }
+                
+                // Create a unique key for the S3 object
+                const fileKey = `${patientId}/${Date.now()}-${reportFile.name}`;
+                
+                // Decode base64 data
+                const fileBuffer = Buffer.from(cleanBase64, 'base64');
+                console.log(`Decoded file size: ${fileBuffer.length} bytes`);
+                
+                if (fileBuffer.length === 0) {
+                    throw new Error("Decoded file is empty");
+                }
+
+                // Set up S3 upload parameters
+                const uploadParams = {
+                    Bucket: REPORTS_BUCKET,
+                    Key: fileKey,
+                    Body: fileBuffer,
+                    ContentType: reportFile.type,
+                    ACL: 'public-read'  // Make object publicly accessible
+                };
+
+                // Always generate the S3 URL - we'll assume the upload will succeed or retry
+                const s3Url = `${S3_URL_PREFIX}${fileKey}`;
+                
+                // Initialize file info object
+                const fileInfo = {
+                    key: fileKey,
+                    name: reportFile.name,
+                    type: reportFile.type,
+                    url: s3Url,  // Add URL regardless of upload success
+                    processedAt: new Date().toISOString(),
+                    storedLocally: false  // Assume S3 upload will work
+                };
+                
+                // Try to upload to S3 directly
+                console.log(`Attempting S3 upload for: ${fileKey}`);
+                try {
+                    // Use direct S3 upload with no timeout
+                    const uploadResult = await s3.send(new PutObjectCommand(uploadParams));
+                    console.log(`S3 upload successful: ${fileKey}`);
+                    console.log(`S3 URL: ${s3Url}`);
+                    
+                    // Set success flags
+                    fileInfo.eTag = uploadResult.ETag;
+                    fileInfo.uploadedToS3 = true;
+                    filesUploadedToS3++;
+                } catch (s3Error) {
+                    console.error(`S3 upload error: ${s3Error.message}`);
+                    // Still keep the URL, but mark as stored locally with truncated data
+                    fileInfo.storedLocally = true;
+                    fileInfo.s3UploadFailed = true;
+                    
+                    // Store a small portion of the base64 data as fallback
+                    const maxBase64Length = 1000;
+                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) + 
+                                               (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
+                    
+                    // Try again in the background with no await - "fire and forget"
+                    retryS3Upload(uploadParams, fileKey, s3Url, patientId);
+                }
+                
+                // Add to processed files array
+                processedFiles.push(fileInfo);
+                console.log(`Added file info to results. Total processed files: ${processedFiles.length}`);
+            } catch (fileError) {
+                // Log the error but continue processing other files
+                console.error(`Error processing file ${reportFile.name}:`, fileError);
+                console.log("Continuing with other files");
+            }
+        }
+        
+        console.log(`Completed processing ${reportFiles.length} files. Successfully processed: ${processedFiles.length}`);
+        
+        // Prepare the item to store in DynamoDB
+        const patientItem = {
+            patientId: patientId,
+            name: patientData.name,
+            age: parseInt(patientData.age) || 0,
+            sex: patientData.sex,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            diagnosis: patientData.diagnosis,
+            prescription: patientData.prescription,
+            treatment: patientData.treatment,
+            reports: patientData.reports,
+            advisedInvestigations: patientData.advisedInvestigations,
+            existingData: patientData.existingData,
+            firstVisit: {
+                date: new Date().toISOString().split('T')[0],
+                prescription: patientData.prescription,
+                diagnosis: patientData.diagnosis,
+                reports: patientData.reports,
+                treatment: patientData.treatment,
+                advisedInvestigations: patientData.advisedInvestigations,
+                existingData: patientData.existingData,
+            },
+            medications: patientData.medications || [],
+            specialInstructions: patientData.specialInstructions,
+            reportData: patientData.reportData,
+            reportFiles: processedFiles, // Store processed file metadata
+        };
+        
+        // Save to DynamoDB
+        console.log("Saving patient data to DynamoDB");
+        await dynamodb.send(new PutCommand({
+            TableName: PATIENTS_TABLE,
+            Item: patientItem
+        }));
+        console.log("DynamoDB save successful");
+        
+        // Return success response
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*', // For CORS support
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                message: 'Patient added successfully',
+                patientId: patientId,
+                fileDetails: processedFiles.length > 0 ? {
+                    filesProcessed: processedFiles.length,
+                    filesUploadedToS3: filesUploadedToS3,
+                    filesStoredLocally: processedFiles.length - filesUploadedToS3
+                } : null
+            })
+        };
+    } catch (error) {
+        console.error('Error in processPatientData:', error);
+        return formatErrorResponse(error.message || "Failed to add patient");
+    }
+}
+
+// Function to retry S3 upload without blocking
+function retryS3Upload(uploadParams, fileKey, s3Url, patientId) {
+    // This runs asynchronously - we're not awaiting it
+    (async () => {
+        try {
+            console.log(`Starting background S3 upload retry for ${fileKey}`);
+            
+            // Try 3 times with delay between attempts
+            for (let i = 0; i < 3; i++) {
+                try {
+                    // Create a new S3 client for each retry
+                    const retryS3 = new S3Client({ region: "us-east-1", forcePathStyle: true });
+                    
+                    console.log(`Background upload attempt ${i+1}/3 for ${fileKey}`);
+                    const uploadResult = await retryS3.send(new PutObjectCommand(uploadParams));
+                    
+                    console.log(`Background S3 upload succeeded for ${fileKey}`);
+                    
+                    // Update DynamoDB to reflect successful upload
+                    await updateFileStatusInDB(patientId, fileKey, s3Url, uploadResult.ETag);
+                    
+                    // Success - exit retry loop
+                    return;
+                } catch (error) {
+                    console.error(`Background upload attempt ${i+1} failed: ${error.message}`);
+                    
+                    if (i < 2) { // Only wait if we have more retries
+                        // Wait with exponential backoff
+                        const waitMs = Math.pow(2, i) * 500;
+                        console.log(`Waiting ${waitMs}ms before retry ${i+2}`);
+                        await new Promise(resolve => setTimeout(resolve, waitMs));
+                    }
+                }
+            }
+            
+            console.log(`All background S3 upload retries failed for ${fileKey}`);
+        } catch (error) {
+            console.error(`Error in background upload process: ${error.message}`);
+        }
+    })();
+}
+
+// Update file status in DynamoDB after successful retry
+async function updateFileStatusInDB(patientId, fileKey, s3Url, eTag) {
+    try {
+        console.log(`Updating file status in DynamoDB for ${fileKey}`);
+        
+        // Get the current patient record
+        const patientData = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+        
+        if (!patientData.Item) {
+            console.error(`Patient ${patientId} not found in DynamoDB`);
+            return;
+        }
+        
+        // Find and update the file info
+        const reportFiles = patientData.Item.reportFiles || [];
+        const fileIndex = reportFiles.findIndex(file => file.key === fileKey);
+        
+        if (fileIndex >= 0) {
+            // Update the file status to reflect successful upload
+            reportFiles[fileIndex].url = s3Url;
+            reportFiles[fileIndex].eTag = eTag;
+            reportFiles[fileIndex].storedLocally = false;
+            reportFiles[fileIndex].uploadedToS3 = true;
+            reportFiles[fileIndex].s3UploadFailed = false;
+            delete reportFiles[fileIndex].truncatedBase64;
+            
+            // Update the patient record
+            await dynamodb.send(new UpdateCommand({
+                TableName: PATIENTS_TABLE,
+                Key: { patientId },
+                UpdateExpression: "SET reportFiles = :files, updatedAt = :updatedAt",
+                ExpressionAttributeValues: {
+                    ":files": reportFiles,
+                    ":updatedAt": new Date().toISOString()
+                }
+            }));
+            
+            console.log(`Successfully updated file status in DynamoDB for ${fileKey}`);
+        } else {
+            console.warn(`File ${fileKey} not found in patient record`);
+        }
+    } catch (error) {
+        console.error(`Error updating DynamoDB: ${error.message}`);
+    }
+}
+
+// Helper function to format error responses consistently
+function formatErrorResponse(errorMessage) {
+    return {
+        statusCode: 400,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Credentials': true
+        },
+        body: JSON.stringify({
+            success: false,
+            message: 'Failed to add patient',
+            error: errorMessage
+        })
+    };
+}
