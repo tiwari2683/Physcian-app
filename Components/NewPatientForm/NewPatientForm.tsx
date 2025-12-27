@@ -20,6 +20,7 @@ import DiagnosisTab from "./diagnosis";
 import PrescriptionTab from "./prescription";
 import * as DocumentPicker from "expo-document-picker";
 import KeyboardAwareScrollView from "./KeyboardAwareScrollView";
+import { API_ENDPOINTS } from "../../Config";
 
 interface NewPatientFormProps {
   navigation: any;
@@ -286,9 +287,10 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         );
 
         try {
+
+
           // Try fetching from API directly
-          const apiUrl =
-            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+          const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
 
           const response = await fetch(apiUrl, {
             method: "POST",
@@ -926,8 +928,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
       if (pendingHistory && pendingHistory.trim()) {
         console.log(
-          `🔍 Found pending history text in AsyncStorage (length: ${
-            pendingHistory.length
+          `🔍 Found pending history text in AsyncStorage (length: ${pendingHistory.length
           }): ${pendingHistory.substring(0, 30)}...`
         );
 
@@ -1282,8 +1283,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         if (historyIncluded) {
           console.log("📋 Legacy pending history was found and included");
           console.log(
-            `Updated medicalHistory length: ${
-              patientData.medicalHistory?.length || 0
+            `Updated medicalHistory length: ${patientData.medicalHistory?.length || 0
             } chars`
           );
           historySaved = true;
@@ -1310,8 +1310,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     Object.keys(patientData).forEach((key) => {
       const value = patientData[key];
       console.log(
-        `   ${key}: ${
-          typeof value === "string" ? `"${value}"` : value
+        `   ${key}: ${typeof value === "string" ? `"${value}"` : value
         } (${typeof value})`
       );
     });
@@ -1375,8 +1374,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               // If we already have a permanentPatientId from a previous save, include it
               ...(permanentPatientId
                 ? {
-                    patientId: permanentPatientId,
-                  }
+                  patientId: permanentPatientId,
+                }
                 : {}),
             };
 
@@ -1445,8 +1444,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 break;
               } catch (networkError) {
                 console.error(
-                  `❌ Network error (attempt ${retryCount + 1}/${
-                    maxRetries + 1
+                  `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                   }):`,
                   networkError
                 );
@@ -1464,8 +1462,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 if (retryCount === maxRetries) {
                   console.log("❌ Maximum retry attempts reached");
                   throw new Error(
-                    `Network request failed after ${maxRetries + 1} attempts: ${
-                      networkError.message || "Unknown error"
+                    `Network request failed after ${maxRetries + 1} attempts: ${networkError.message || "Unknown error"
                     }. Check your internet connection and try again.`
                   );
                 }
@@ -1648,8 +1645,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 ? file.base64Data.length
                 : "N/A";
               console.log(
-                `📊 File ${index + 1}: ${
-                  file.name
+                `📊 File ${index + 1}: ${file.name
                 }, Base64 length: ${base64Length}`
               );
             });
@@ -1659,8 +1655,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
           // Create the API request payload with improved history handling flags
           console.log(
-            `Building clinical data payload with medicalHistory (${
-              patientData.medicalHistory?.length || 0
+            `Building clinical data payload with medicalHistory (${patientData.medicalHistory?.length || 0
             } chars)`
           );
           console.log(`isSavingHistory flag is: ${isSavingHistory}`);
@@ -1670,7 +1665,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             // Get the LATEST medicalHistory directly from the state or ref
             medicalHistory: clinicalTabRef.current
               ? clinicalTabRef.current.getLatestMedicalHistory() ||
-                patientData.medicalHistory
+              patientData.medicalHistory
               : patientData.medicalHistory,
             diagnosis: patientData.diagnosis || "",
             prescription: patientData.prescription || "",
@@ -1699,8 +1694,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           // Log the key parts for debugging
           console.log(`📝 Final clinicalData payload:`);
           console.log(
-            `⚠️ medicalHistory length: ${
-              clinicalData.medicalHistory?.length || 0
+            `⚠️ medicalHistory length: ${clinicalData.medicalHistory?.length || 0
             } chars`
           );
           console.log(
@@ -1715,9 +1709,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           - pendingHistoryIncluded: ${clinicalData.pendingHistoryIncluded}
           - forceHistoryUpdate: ${clinicalData.forceHistoryUpdate}
           - createMedicalHistoryEntry: ${clinicalData.createMedicalHistoryEntry}
-          - medicalHistory length: ${
-            clinicalData.medicalHistory?.length || 0
-          } chars
+          - medicalHistory length: ${clinicalData.medicalHistory?.length || 0
+            } chars
           - patientId included: ${!!clinicalData.patientId}`);
 
           // Log that we're including the latest history
@@ -1725,8 +1718,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             "📋 Including updated medical history in clinical update"
           );
           console.log(
-            `   Medical history length: ${
-              patientData.medicalHistory?.length || 0
+            `   Medical history length: ${patientData.medicalHistory?.length || 0
             } characters`
           );
 
@@ -1809,8 +1801,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               break;
             } catch (networkError) {
               console.error(
-                `❌ Network error (attempt ${retryCount + 1}/${
-                  maxRetries + 1
+                `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
                 networkError
               );
@@ -1828,8 +1819,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               if (retryCount === maxRetries) {
                 console.log("❌ Maximum retry attempts reached");
                 throw new Error(
-                  `Network request failed after ${maxRetries + 1} attempts: ${
-                    networkError.message || "Unknown error"
+                  `Network request failed after ${maxRetries + 1} attempts: ${networkError.message || "Unknown error"
                   }. Check your internet connection and try again.`
                 );
               }
@@ -2087,8 +2077,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               break;
             } catch (networkError) {
               console.error(
-                `❌ Network error (attempt ${retryCount + 1}/${
-                  maxRetries + 1
+                `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
                 networkError
               );
@@ -2106,8 +2095,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               if (retryCount === maxRetries) {
                 console.log("❌ Maximum retry attempts reached");
                 throw new Error(
-                  `Network request failed after ${maxRetries + 1} attempts: ${
-                    networkError.message || "Unknown error"
+                  `Network request failed after ${maxRetries + 1} attempts: ${networkError.message || "Unknown error"
                   }. Check your internet connection and try again.`
                 );
               }
@@ -2446,8 +2434,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               break;
             } catch (networkError) {
               console.error(
-                `❌ Network error (attempt ${retryCount + 1}/${
-                  maxRetries + 1
+                `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
                 networkError
               );
@@ -2465,8 +2452,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               if (retryCount === maxRetries) {
                 console.log("❌ Maximum retry attempts reached");
                 throw new Error(
-                  `Network request failed after ${maxRetries + 1} attempts: ${
-                    networkError.message || "Unknown error"
+                  `Network request failed after ${maxRetries + 1} attempts: ${networkError.message || "Unknown error"
                   }. Check your internet connection and try again.`
                 );
               }
@@ -2694,8 +2680,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                     const cleared =
                       diagnosisTabRef.current.handleSaveCompletion();
                     console.log(
-                      `Diagnosis clearing result: ${
-                        cleared ? "success" : "no action needed"
+                      `Diagnosis clearing result: ${cleared ? "success" : "no action needed"
                       }`
                     );
                   } else if (
@@ -3016,15 +3001,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               // Log file details for debugging
               reportFiles.forEach((file, idx) => {
                 console.log(
-                  `📄 File ${idx + 1}/${reportFiles.length}: Name: ${
-                    file.name || "unnamed"
-                  }, Type: ${file.type || "unknown"}, URI: ${
-                    file.uri ? file.uri.substring(0, 30) + "..." : "none"
+                  `📄 File ${idx + 1}/${reportFiles.length}: Name: ${file.name || "unnamed"
+                  }, Type: ${file.type || "unknown"}, URI: ${file.uri ? file.uri.substring(0, 30) + "..." : "none"
                   }`
                 );
                 console.log(
-                  `   Category: ${file.category || "uncategorized"}, Size: ${
-                    file.size || "unknown"
+                  `   Category: ${file.category || "uncategorized"}, Size: ${file.size || "unknown"
                   }, Already uploaded: ${isFileAlreadyUploaded(file)}`
                 );
               });
@@ -3245,8 +3227,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             if (retryCount === maxRetries) {
               console.log("❌ Maximum retry attempts reached");
               throw new Error(
-                `Network request failed after ${maxRetries + 1} attempts: ${
-                  networkError.message || "Unknown error"
+                `Network request failed after ${maxRetries + 1} attempts: ${networkError.message || "Unknown error"
                 }. Check your internet connection and try again.`
               );
             }

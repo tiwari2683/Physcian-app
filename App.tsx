@@ -67,7 +67,7 @@ const LAYOUT = {
 };
 
 // App state interface
-interface AppState {
+interface AppStateType {
   isLoading: boolean;
   isAuthenticated: boolean;
   user: AuthUser | null;
@@ -77,7 +77,7 @@ interface AppState {
 
 export default function App(): React.JSX.Element {
   // App state management
-  const [appState, setAppState] = useState<AppState>({
+  const [appState, setAppState] = useState<AppStateType>({
     isLoading: true,
     isAuthenticated: false,
     user: null,
@@ -170,7 +170,7 @@ export default function App(): React.JSX.Element {
 
       // Configure Amplify with the exports
       console.log("🚀 Configuring Amplify...");
-      Amplify.configure(awsExports);
+      Amplify.configure(awsExports as any);
 
       // Verify configuration was successful
       const config = Amplify.getConfig();
@@ -377,8 +377,8 @@ export default function App(): React.JSX.Element {
 
       // Step 3: Check authentication status
       await checkAuthenticationStatus();
-     
-      
+
+
       // Step 4: Update app state with correct initial route
       setAppState((prev) => ({
         ...prev,

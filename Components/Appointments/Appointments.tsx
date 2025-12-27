@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   StyleSheet,
   View,
@@ -34,70 +34,45 @@ interface AppointmentsProps {
   route: any;
 }
 
+import { API_ENDPOINTS } from "../../Config";
+import { handleApiError } from "../../Utils/ApiErrorHandler";
+
+// ... imports
+
 const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
   // Filter states
   const [activeFilter, setActiveFilter] = useState<string>("upcoming");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Modal visibility state
   const [modalVisible, setModalVisible] = useState(false);
 
-  // Mock appointment data
-  const [appointments, setAppointments] = useState<Appointment[]>([
-    {
-      id: 1,
-      patientName: "John Smith",
-      patientAge: 45,
-      date: "Mar 4, 2025",
-      time: "9:00 AM",
-      type: "Follow-up",
-      status: "upcoming",
-    },
-    {
-      id: 2,
-      patientName: "Maria Garcia",
-      patientAge: 62,
-      date: "Mar 4, 2025",
-      time: "11:30 AM",
-      type: "Check-up",
-      status: "upcoming",
-    },
-    {
-      id: 3,
-      patientName: "David Lee",
-      patientAge: 38,
-      date: "Mar 5, 2025",
-      time: "10:15 AM",
-      type: "Consultation",
-      status: "upcoming",
-    },
-    {
-      id: 4,
-      patientName: "Lisa Johnson",
-      patientAge: 52,
-      date: "Mar 3, 2025",
-      time: "2:00 PM",
-      type: "Check-up",
-      status: "completed",
-    },
-    {
-      id: 5,
-      patientName: "Robert Chen",
-      patientAge: 41,
-      date: "Mar 2, 2025",
-      time: "4:30 PM",
-      type: "Follow-up",
-      status: "completed",
-    },
-    {
-      id: 6,
-      patientName: "Emily Wilson",
-      patientAge: 29,
-      date: "Mar 4, 2025",
-      time: "3:45 PM",
-      type: "Emergency",
-      status: "canceled",
-    },
-  ]);
+  // Real appointment data
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+
+  // Fetch appointments
+  useEffect(() => {
+    fetchAppointments();
+  }, []);
+
+  const fetchAppointments = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch(API_ENDPOINTS.APPOINTMENTS);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      // Ensure data is an array
+      setAppointments(Array.isArray(data) ? data : []);
+    } catch (error) {
+      handleApiError(error, "fetching appointments");
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   // Filter tabs
   const filterTabs = [
@@ -139,27 +114,61 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
   };
 
   // Handle saving a new appointment
-  const handleSaveAppointment = (appointmentData: any) => {
-    // Generate a new unique ID
-    const newId = Math.max(...appointments.map((a) => a.id), 0) + 1;
+  const handleSaveAppointment = async (appointmentData: any) => {
+    try {
+      setIsLoading(true);
 
-    // Create new appointment object
-    const newAppointment: Appointment = {
-      id: newId,
-      ...appointmentData,
-    };
+      const response = await fetch(API_ENDPOINTS.APPOINTMENTS, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(appointmentData),
+      });
 
-    // Add to the appointments array
-    setAppointments([...appointments, newAppointment]);
+      if (!response.ok) {
+        // Try to parse the error message from the backend
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          if (errorData && errorData.message) {
+            errorMessage = errorData.message;
+          }
+        } catch (e) {
+          // If parsing fails, use default error message
+        }
 
-    // Close the modal
-    setModalVisible(false);
+        if (response.status === 409) {
+          Alert.alert("Scheduling Conflict", errorMessage);
+          return;
+        }
 
-    // Show confirmation
-    Alert.alert(
-      "Appointment Created",
-      `Appointment for ${appointmentData.patientName} on ${appointmentData.date} at ${appointmentData.time} has been scheduled.`
-    );
+        if (response.status === 400) {
+          Alert.alert("Invalid Input", errorMessage);
+          return;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      await response.json();
+
+      // Refresh the list
+      await fetchAppointments();
+
+      // Close the modal
+      setModalVisible(false);
+
+      // Show confirmation
+      Alert.alert(
+        "Appointment Created",
+        `Appointment for ${appointmentData.patientName} on ${appointmentData.date} at ${appointmentData.time} has been scheduled.`
+      );
+    } catch (error) {
+      handleApiError(error, "saving appointment");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   // Appointment card component
@@ -300,6 +309,8 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
           renderItem={({ item }) => <AppointmentCard appointment={item} />}
           contentContainerStyle={styles.appointmentsList}
           showsVerticalScrollIndicator={false}
+          refreshing={isLoading}
+          onRefresh={fetchAppointments}
         />
       ) : (
         <EmptyState />

@@ -20,12 +20,14 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { signOut } from "@aws-amplify/auth";
 
-const { width } = Dimensions.get("window");
-const API_URL =
-  "https://0kcyg9xic1.execute-api.us-east-1.amazonaws.com/default/DoctorDataWhisperer";
+import { API_ENDPOINTS } from "../../Config";
+import { handleApiError } from "../../Utils/ApiErrorHandler";
 
-// Polling interval (in milliseconds)
-const POLLING_INTERVAL = 5000; // 5 seconds
+const { width } = Dimensions.get("window");
+const API_URL = API_ENDPOINTS.DOCTOR_DASHBOARD;
+
+// Polling interval (in milliseconds) - Optimized to 30 seconds
+const POLLING_INTERVAL = 30000;
 
 // Types
 interface Patient {
@@ -90,7 +92,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
 
   useEffect(() => {
     console.log('dashboard', isAuthenticated);
-    
+
     if (!isAuthenticated) {
       navigation.reset({
         index: 0,
@@ -284,11 +286,10 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           setLastUpdate(new Date());
         }
       } catch (err) {
-        console.error("Error fetching data:", err);
+        // Use standardized error handler
+        const errorResult = handleApiError(err, "fetching patient data");
         if (isComponentMounted) {
-          setError(
-            err instanceof Error ? err.message : "An unknown error occurred"
-          );
+          setError(errorResult.message);
         }
       } finally {
         if (isComponentMounted) {
@@ -352,6 +353,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           }
         }
       } catch (err) {
+        // Silent error for polling (console only) unless critical
         console.error("Auto-polling error:", err);
       } finally {
         if (isComponentMounted) {
