@@ -38,9 +38,11 @@ import ConfirmUser from "./Components/Auth/ConfirmUser";
 import DoctorDashboard from "./Components/DoctorDashboard/DoctorDashboard";
 import NewPatientForm from "./Components/NewPatientForm/NewPatientForm";
 import Appointments from "./Components/Appointments/Appointments";
+import AppointmentDetails from "./Components/Appointments/AppointmentDetails";
 import NewAppointmentModal from "./Components/Appointments/NewAppointmentModal";
 import PatientsData from "./Components/PatientsData/PatientsData";
 import FitnessCertificate from "./Components/FitnessCertificate/FitnessCertificate";
+import Profile from "./Components/Profile/Profile";
 
 // Navigation stack type
 const Stack = createStackNavigator();
@@ -159,13 +161,15 @@ export default function App(): React.JSX.Element {
 
     try {
       // Log the AWS exports for debugging
+      // Cast to any to avoid type errors for properties not in the type definition but present in the file
+      const exports = awsExports as any;
       console.log("📄 AWS Exports structure:", {
-        hasAuth: !!awsExports.Auth,
-        hasAPI: !!awsExports.API,
-        hasStorage: !!awsExports.Storage,
-        region: awsExports.aws_project_region,
-        userPoolId: awsExports.aws_user_pools_id,
-        userPoolWebClientId: awsExports.aws_user_pools_web_client_id,
+        hasAuth: !!exports.Auth,
+        hasAPI: !!exports.API,
+        hasStorage: !!exports.Storage,
+        region: exports.aws_project_region,
+        userPoolId: exports.aws_user_pools_id,
+        userPoolWebClientId: exports.aws_user_pools_web_client_id,
       });
 
       // Configure Amplify with the exports
@@ -255,8 +259,11 @@ export default function App(): React.JSX.Element {
           // Get auth session for additional details
           try {
             const session = await fetchAuthSession();
+            // Check for expiration safely using type assertion or checking properties
+            const sessionCreds = session.credentials as any;
             console.log("🎫 Auth session details:", {
-              isValid: !session.credentials?.expired,
+              // Fix for 'Property expired does not exist on type AWSCredentials'
+              isValid: sessionCreds ? (sessionCreds.expiration ? new Date(sessionCreds.expiration) > new Date() : !sessionCreds.expired) : false,
               identityId: session.identityId,
               hasTokens: !!session.tokens,
             });
@@ -308,7 +315,9 @@ export default function App(): React.JSX.Element {
       console.log("📱 App state changed:", appStateStatus, "->", nextAppState);
 
       // Suppress auth check if a critical operation is in progress
-      if (typeof window !== 'undefined' && window.isCriticalOperation) {
+      // Cast window to any to access isCriticalOperation
+      const win = typeof window !== 'undefined' ? (window as any) : undefined;
+      if (win && win.isCriticalOperation) {
         console.log("🔒 Suppressing auth check during critical operation");
         setAppStateStatus(nextAppState);
         return;
@@ -512,6 +521,8 @@ export default function App(): React.JSX.Element {
         <NavigationContainer
           ref={navigationRef}
           theme={{
+            // @ts-ignore - Explicit ignore for incomplete theme object for now, or spread default theme if imported
+            dark: false,
             colors: {
               background: "transparent",
               primary: COLORS.primary,
@@ -528,7 +539,7 @@ export default function App(): React.JSX.Element {
             initialRouteName={appState.initialRoute}
             screenOptions={{
               headerShown: false,
-              contentStyle: styles.screenContent,
+              // contentStyle is for native-stack, removed for stack navigator
               cardStyle: styles.cardStyle,
               gestureEnabled: true,
               cardStyleInterpolator: ({ current, layouts }) => {
@@ -551,12 +562,7 @@ export default function App(): React.JSX.Element {
             <Stack.Screen
               name="SignUp"
               component={SignUpScreen}
-              options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
-              }}
+              // Removed contentStyle as it is not a valid prop here for Stack.Screen options in @react-navigation/stack
               listeners={{
                 focus: () => console.log("📍 SignUp screen focused"),
                 blur: () => console.log("📍 SignUp screen blurred"),
@@ -566,12 +572,7 @@ export default function App(): React.JSX.Element {
             <Stack.Screen
               name="Login"
               component={SignInScreen}
-              options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
-              }}
+              // Removed contentStyle
               listeners={{
                 focus: () => console.log("📍 Login screen focused"),
                 blur: () => console.log("📍 Login screen blurred"),
@@ -580,13 +581,9 @@ export default function App(): React.JSX.Element {
 
             <Stack.Screen
               name="ConfirmUser"
-              component={ConfirmUser}
-              options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
-              }}
+              // Fix type incompatibility with any cast
+              component={ConfirmUser as any}
+              // Removed contentStyle
               listeners={{
                 focus: () => console.log("📍 ConfirmUser screen focused"),
                 blur: () => console.log("📍 ConfirmUser screen blurred"),
@@ -597,12 +594,7 @@ export default function App(): React.JSX.Element {
             <Stack.Screen
               name="DoctorDashboard"
               component={DoctorDashboard}
-              options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
-              }}
+              // Removed contentStyle
               initialParams={{ isAuthenticated: appState.isAuthenticated }}
               listeners={{
                 focus: () => console.log("📍 DoctorDashboard screen focused"),
@@ -614,10 +606,7 @@ export default function App(): React.JSX.Element {
               name="NewPatientForm"
               component={NewPatientForm}
               options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
+                // Removed contentStyle
                 gestureEnabled: true,
               }}
               listeners={{
@@ -630,10 +619,7 @@ export default function App(): React.JSX.Element {
               name="Appointments"
               component={Appointments}
               options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
+                // Removed contentStyle
                 gestureEnabled: true,
               }}
               listeners={{
@@ -643,14 +629,24 @@ export default function App(): React.JSX.Element {
             />
 
             <Stack.Screen
-              name="NewAppointmentModal"
-              component={NewAppointmentModal}
+              name="AppointmentDetails"
+              component={AppointmentDetails}
               options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
-                presentation: "modal",
+                gestureEnabled: true,
+              }}
+              listeners={{
+                focus: () => console.log("📍 AppointmentDetails screen focused"),
+                blur: () => console.log("📍 AppointmentDetails screen blurred"),
+              }}
+            />
+
+            <Stack.Screen
+              name="NewAppointmentModal"
+              // Fix type incompatibility with any cast
+              component={NewAppointmentModal as any}
+              options={{
+                // Removed contentStyle
+                presentation: "modal", // This might warn if using stack instead of native-stack, but kept as requested
                 gestureEnabled: true,
               }}
               listeners={{
@@ -665,10 +661,7 @@ export default function App(): React.JSX.Element {
               name="Patients"
               component={PatientsData}
               options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
+                // Removed contentStyle
                 gestureEnabled: true,
               }}
               listeners={{
@@ -679,18 +672,29 @@ export default function App(): React.JSX.Element {
 
             <Stack.Screen
               name="FitnessCertificate"
-              component={FitnessCertificate}
+              // Fix type incompatibility with any cast
+              component={FitnessCertificate as any}
               options={{
-                contentStyle: {
-                  marginTop: LAYOUT.TOP_OFFSET,
-                  paddingBottom: LAYOUT.BOTTOM_PADDING,
-                },
+                // Removed contentStyle
                 gestureEnabled: true,
               }}
               listeners={{
                 focus: () =>
                   console.log("📍 FitnessCertificate screen focused"),
                 blur: () => console.log("📍 FitnessCertificate screen blurred"),
+              }}
+            />
+
+            <Stack.Screen
+              name="Profile"
+              component={Profile}
+              options={{
+                // Removed contentStyle
+                gestureEnabled: true,
+              }}
+              listeners={{
+                focus: () => console.log("📍 Profile screen focused"),
+                blur: () => console.log("📍 Profile screen blurred"),
               }}
             />
           </Stack.Navigator>

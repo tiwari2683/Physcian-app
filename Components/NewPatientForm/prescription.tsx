@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -174,7 +175,7 @@ const TimingSelector = ({
               style={[
                 styles.timingButton,
                 selectedTimings.includes(timing.id) &&
-                  styles.timingButtonSelected,
+                styles.timingButtonSelected,
               ]}
               onPress={() => onToggle(timing.id)}
             >
@@ -182,7 +183,7 @@ const TimingSelector = ({
                 style={[
                   styles.timingButtonText,
                   selectedTimings.includes(timing.id) &&
-                    styles.timingButtonTextSelected,
+                  styles.timingButtonTextSelected,
                 ]}
               >
                 {timing.label}
@@ -212,7 +213,7 @@ const MedicationCard = ({
   removeMedication,
   medications,
   isCompressed = false,
-  toggleExpand = () => {},
+  toggleExpand = () => { },
   prescriptionDate = null, // Add prescription date parameter with fallback
   isNewPrescription = false, // Prop to indicate if this is a new prescription
 }) => {
@@ -374,12 +375,10 @@ const MedicationCard = ({
         </View>
         <Text style={styles.expirationText}>
           {remainingDays >= 0
-            ? `Expires in ${remainingDays} day${
-                remainingDays !== 1 ? "s" : ""
-              } (${formattedExpirationDate})`
-            : `Expired ${Math.abs(remainingDays)} day${
-                Math.abs(remainingDays) !== 1 ? "s" : ""
-              } ago (${formattedExpirationDate})`}
+            ? `Expires in ${remainingDays} day${remainingDays !== 1 ? "s" : ""
+            } (${formattedExpirationDate})`
+            : `Expired ${Math.abs(remainingDays)} day${Math.abs(remainingDays) !== 1 ? "s" : ""
+            } ago (${formattedExpirationDate})`}
         </Text>
       </View>
     );
@@ -920,14 +919,12 @@ const MedicationGroupCard = ({
                     </View>
                     <Text style={styles.expirationText}>
                       {expirationStatus.remainingDays >= 0
-                        ? `${expirationStatus.remainingDays} day${
-                            expirationStatus.remainingDays !== 1 ? "s" : ""
-                          }`
-                        : `${Math.abs(expirationStatus.remainingDays)} day${
-                            Math.abs(expirationStatus.remainingDays) !== 1
-                              ? "s"
-                              : ""
-                          } ago`}
+                        ? `${expirationStatus.remainingDays} day${expirationStatus.remainingDays !== 1 ? "s" : ""
+                        }`
+                        : `${Math.abs(expirationStatus.remainingDays)} day${Math.abs(expirationStatus.remainingDays) !== 1
+                          ? "s"
+                          : ""
+                        } ago`}
                     </Text>
                   </View>
                 )}
@@ -1033,14 +1030,12 @@ const MedicationGroupCard = ({
                 </View>
                 <Text style={styles.expirationText}>
                   {expirationStatus.remainingDays >= 0
-                    ? `Expires in ${expirationStatus.remainingDays} day${
-                        expirationStatus.remainingDays !== 1 ? "s" : ""
-                      } (${expirationStatus.formattedExpirationDate})`
-                    : `Expired ${Math.abs(expirationStatus.remainingDays)} day${
-                        Math.abs(expirationStatus.remainingDays) !== 1
-                          ? "s"
-                          : ""
-                      } ago (${expirationStatus.formattedExpirationDate})`}
+                    ? `Expires in ${expirationStatus.remainingDays} day${expirationStatus.remainingDays !== 1 ? "s" : ""
+                    } (${expirationStatus.formattedExpirationDate})`
+                    : `Expired ${Math.abs(expirationStatus.remainingDays)} day${Math.abs(expirationStatus.remainingDays) !== 1
+                      ? "s"
+                      : ""
+                    } ago (${expirationStatus.formattedExpirationDate})`}
                 </Text>
               </View>
             )}
@@ -1072,7 +1067,7 @@ const MedicationGroupCard = ({
                         <Text key={i} style={styles.doseText}>
                           {time}: {dose}
                           {i <
-                          Object.entries(JSON.parse(med.timingValues)).length -
+                            Object.entries(JSON.parse(med.timingValues)).length -
                             1
                             ? ", "
                             : ""}
@@ -1195,8 +1190,8 @@ const ReportsModal = ({ visible, setVisible, patientData, reportFiles }) => {
                           file.type?.includes("pdf")
                             ? "document-text-outline"
                             : file.type?.includes("image")
-                            ? "image-outline"
-                            : "document-outline"
+                              ? "image-outline"
+                              : "document-outline"
                         }
                         size={18}
                         color="#0070D6"
@@ -1651,7 +1646,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
     try {
       // Get effective patient ID with better fallback logic
       const effectivePatientId = patient?.patientId || patientData?.patientId || tempPatientId || permanentPatientId;
-      
+
       if (!effectivePatientId) {
         console.error("❌ No patient ID available to fetch diagnosis data");
         console.log("Patient object:", JSON.stringify(patient, null, 2));
@@ -1668,7 +1663,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
       // API endpoint
       const apiUrl =
-        "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+        API_ENDPOINTS.PATIENT_PROCESSOR;
 
       // Request body to get patient data including diagnosis
       const requestBody = {
@@ -2458,10 +2453,10 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                   {prescriptionModalMode === "new"
                     ? "New Prescription"
                     : prescriptionModalMode === "edit"
-                    ? "Edit Medication"
-                    : prescriptionModalMode === "add"
-                    ? "Add to Prescription"
-                    : "Copy Prescription"}
+                      ? "Edit Medication"
+                      : prescriptionModalMode === "add"
+                        ? "Add to Prescription"
+                        : "Copy Prescription"}
                 </Text>
                 <TouchableOpacity
                   onPress={() => setPrescriptionModalVisible(false)}
@@ -2472,15 +2467,15 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
               <ScrollView style={styles.modalScroll}>
                 <View style={styles.modalBody}>
                   {prescriptionModalMode === "new" ||
-                  prescriptionModalMode === "edit" ||
-                  prescriptionModalMode === "add" ? (
+                    prescriptionModalMode === "edit" ||
+                    prescriptionModalMode === "add" ? (
                     <View>
                       <Text style={styles.modalSubtitle}>
                         {prescriptionModalMode === "new"
                           ? "Enter details for the new medication"
                           : prescriptionModalMode === "edit"
-                          ? "Edit medication details"
-                          : "Add medication to this prescription"}
+                            ? "Edit medication details"
+                            : "Add medication to this prescription"}
                       </Text>
                       <Dropdown
                         label="Medication Name"
@@ -2586,7 +2581,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                           }}
                           medications={previewMedications}
                           isCompressed={false}
-                          toggleExpand={() => {}}
+                          toggleExpand={() => { }}
                           prescriptionDate={new Date().toISOString()}
                           isNewPrescription={true}
                         />
@@ -2618,20 +2613,20 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                     prescriptionModalMode === "new"
                       ? saveNewPrescription
                       : prescriptionModalMode === "edit"
-                      ? saveEditedMedication
-                      : prescriptionModalMode === "add"
-                      ? saveNewMedicationToGroup
-                      : saveCopiedMedications
+                        ? saveEditedMedication
+                        : prescriptionModalMode === "add"
+                          ? saveNewMedicationToGroup
+                          : saveCopiedMedications
                   }
                 >
                   <Text style={styles.saveButtonText}>
                     {prescriptionModalMode === "new"
                       ? "Add Prescription"
                       : prescriptionModalMode === "edit"
-                      ? "Save Changes"
-                      : prescriptionModalMode === "add"
-                      ? "Add to Prescription"
-                      : "Add to Prescription"}
+                        ? "Save Changes"
+                        : prescriptionModalMode === "add"
+                          ? "Add to Prescription"
+                          : "Add to Prescription"}
                   </Text>
                 </TouchableOpacity>
               </View>

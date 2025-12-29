@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -92,9 +93,8 @@ const areParametersEqual = (record1, record2) => {
 const getParameterHash = (record) => {
   if (!record) return "";
 
-  return `${record.inr || ""}_${record.hb || ""}_${record.wbc || ""}_${
-    record.platelet || ""
-  }_${record.bilirubin || ""}_${record.sgot || ""}_${record.sgpt || ""}`;
+  return `${record.inr || ""}_${record.hb || ""}_${record.wbc || ""}_${record.platelet || ""
+    }_${record.bilirubin || ""}_${record.sgot || ""}_${record.sgpt || ""}`;
 };
 
 // Helper function to check if two dates are the same day (ignoring time)
@@ -182,21 +182,23 @@ const ViewParametersModal = ({
   clinicalParameters,
   patientId,
   unmarshallDynamoDBObject,
-  initialHistoricalData = null, // Accept initial data from parent
+  initialHistoricalData = null as any[] | null, // Accept array or null
 }) => {
-  // Debug initial conditions
-  logJson("INITIALIZATION", "ViewParametersModal initializing", {
-    isVisible,
-    patientId,
-    hasInitialData: initialHistoricalData?.length > 0,
-  });
-
-  if (clinicalParameters) {
-    logJson("INITIALIZATION", "Initial clinical parameters", {
-      date: clinicalParameters.date,
-      inr: clinicalParameters.inr,
-      hb: clinicalParameters.hb,
+  // Debug initial conditions - only when visible to avoid console spam
+  if (isVisible) {
+    logJson("INITIALIZATION", "ViewParametersModal initializing", {
+      isVisible,
+      patientId,
+      hasInitialData: initialHistoricalData?.length ?? 0 > 0,
     });
+
+    if (clinicalParameters) {
+      logJson("INITIALIZATION", "Initial clinical parameters", {
+        date: clinicalParameters.date,
+        inr: clinicalParameters.inr,
+        hb: clinicalParameters.hb,
+      });
+    }
   }
 
   // ====================================================================
@@ -211,11 +213,14 @@ const ViewParametersModal = ({
   // Ensure only one record is marked as current
   const processedInitialData = ensureOnlyOneCurrentRecord(filteredInitialData);
 
-  logJson("DATA_PROCESSING", "Filtered initial data", {
-    initialCount: initialHistoricalData?.length || 0,
-    filteredCount: filteredInitialData.length,
-    processedCount: processedInitialData.length,
-  });
+  // Only log when visible to reduce console spam
+  if (isVisible) {
+    logJson("DATA_PROCESSING", "Filtered initial data", {
+      initialCount: initialHistoricalData?.length || 0,
+      filteredCount: filteredInitialData.length,
+      processedCount: processedInitialData.length,
+    });
+  }
 
   // State to store historical clinical parameters data
   const [historicalData, setHistoricalData] = useState(
@@ -570,7 +575,7 @@ const ViewParametersModal = ({
       try {
         logJson("API", "Fetching data from API");
         const apiUrl =
-          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+          API_ENDPOINTS.PATIENT_PROCESSOR;
 
         const response = await fetch(apiUrl, {
           method: "POST",

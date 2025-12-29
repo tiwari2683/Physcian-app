@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -11,7 +12,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import * as FileSystem from "expo-file-system";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import BasicTab from "./basic";
@@ -20,22 +21,16 @@ import DiagnosisTab from "./diagnosis";
 import PrescriptionTab from "./prescription";
 import * as DocumentPicker from "expo-document-picker";
 import KeyboardAwareScrollView from "./KeyboardAwareScrollView";
-import { API_ENDPOINTS } from "../../Config";
+import { logStateUpdate } from "../../Utils/Logger";
+import { fileToBase64, isFileAlreadyUploaded } from "../../Utils/FileUtils";
+import { usePatientForm } from "./hooks/usePatientForm";
 
 interface NewPatientFormProps {
   navigation: any;
   route: any;
 }
 
-// Debug function to log state changes
-const logStateUpdate = (label, data) => {
-  if (__DEV__) {
-    console.log(
-      `📊 ${label}:`,
-      typeof data === "object" ? JSON.stringify(data) : data
-    );
-  }
-};
+
 
 const NewPatientForm: React.FC<NewPatientFormProps> = ({
   navigation,
@@ -44,47 +39,79 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
   // Extract parameters from route
   const { patient, initialTab, prefillMode, hideBasicTab } = route.params || {};
 
-  // Form state
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeSection, setActiveSection] = useState<string>(
-    initialTab || "basic"
-  );
-
-  // Add state variable to track flow type and saved sections
-  const [isNormalFlow] = useState(!prefillMode && !initialTab);
-  const [savedSections, setSavedSections] = useState({
-    basic: false,
-    clinical: false,
-    prescription: false,
-    diagnosis: false,
+  // Use custom hook for form logic
+  const {
+    isSubmitting, setIsSubmitting,
+    activeSection, setActiveSection,
+    isNormalFlow,
+    savedSections, setSavedSections,
+    permanentPatientId, setPermanentPatientId,
+    patientId, // Now available from hook
+    isSavingHistory, setIsSavingHistory,
+    patientData, setPatientData,
+    clinicalParameters, setClinicalParameters,
+    medications, setMedications,
+    newPrescriptionIndices, setNewPrescriptionIndices,
+    expandedMedications, setExpandedMedications,
+    expandedGroups, setExpandedGroups,
+    showDatePicker, setShowDatePicker,
+    tempDate, setTempDate,
+    reportData, setReportData,
+    reportFiles, setReportFiles,
+    errors, setErrors,
+    updateField,
+    updateReportField,
+    validateForm,
+    pickDocument,
+    removeReportFile,
+    ensureFilesHaveBase64,
+    saveNewHistoryEntryToStorage,
+    includeNewHistoryEntry,
+    checkAndIncludePendingHistory,
+    handleDateChange
+  } = usePatientForm({
+    patient,
+    initialTab,
+    prefillMode,
+    hideBasicTab
   });
 
-  // Add a reference to the ScrollView for scrolling to top
-  const scrollViewRef = useRef(null);
+  // UI Refs
+  const scrollViewRef = useRef<any>(null);
+  const clinicalTabRef = useRef<any>(null);
+  const diagnosisTabRef = useRef<any>(null);
 
-  // Add state to track permanent patientId when saving sections
-  const [permanentPatientId, setPermanentPatientId] = useState<string | null>(
-    null
-  );
+  // Utility functions for date/time formatting
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "N/A";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    } catch (error: any) {
+      return "N/A";
+    }
+  };
 
-  // Add state to track if we're currently saving new history
-  const [isSavingHistory, setIsSavingHistory] = useState(false);
-
-  const clinicalTabRef = useRef(null);
-
-  // Add a ref for DiagnosisTab to access its methods
-  const diagnosisTabRef = useRef(null);
-
-  // Add useEffect to track permanentPatientId changes
-  useEffect(() => {
-    console.log(
-      `🔑 permanentPatientId changed to: ${permanentPatientId || "not set"}`
-    );
-  }, [permanentPatientId]);
+  const formatTime = (dateString: string) => {
+    if (!dateString) return "N/A";
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleTimeString("en-IN", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+    } catch (error: any) {
+      return "N/A";
+    }
+  };
 
   // Helper function to check if a section is saved
-  const isSectionSaved = (section) => {
-    return savedSections[section];
+  const isSectionSaved = (section: string) => {
+    return savedSections[section as keyof typeof savedSections];
   };
 
   // Helper function to check if navigation should be blocked
@@ -100,242 +127,6 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     );
   };
 
-  // Patient data state with potential pre-filled values - MODIFIED to separate medicalHistory and diagnosis
-  const [patientData, setPatientData] = useState({
-    name: prefillMode && patient ? patient.name : "",
-    age: prefillMode && patient ? patient.age.toString() : "",
-    sex: prefillMode && patient ? patient.sex : "Male",
-    mobile: prefillMode && patient ? patient.mobile : "",
-    address: prefillMode && patient ? patient.address : "",
-
-    // Medical history field for complaints and symptoms
-    medicalHistory: prefillMode && patient ? patient.medicalHistory || "" : "",
-
-    // Separate diagnosis field - initialize from patient.diagnosis if available
-    diagnosis: prefillMode && patient ? patient.diagnosis || "" : "",
-
-    // Keep the existing fields even if we're not showing them directly
-    prescription: prefillMode && patient ? patient.prescription : "",
-    treatment: prefillMode && patient ? patient.treatment : "",
-    reports: prefillMode && patient ? patient.reports : "",
-    advisedInvestigations:
-      prefillMode && patient ? patient.advisedInvestigations : "",
-    existingData: prefillMode && patient ? patient.existingData || "" : "",
-  });
-
-  // Add the new state variable for clinical parameters
-  const [clinicalParameters, setClinicalParameters] = useState({
-    date: new Date(),
-    inr: "",
-    hb: "",
-    wbc: "",
-    platelet: "",
-    bilirubin: "",
-    sgot: "",
-    sgpt: "",
-    alt: "",
-    tprAlb: "",
-    ureaCreat: "",
-    sodium: "",
-    fastingHBA1C: "",
-    pp: "",
-    tsh: "",
-    ft4: "",
-    others: "",
-  });
-
-  // Track which medications are new prescriptions
-  const [newPrescriptionIndices, setNewPrescriptionIndices] = useState<
-    number[]
-  >([]);
-
-  // Initialize medications from patient data if available, now with per-medication specialInstructions
-  const [medications, setMedications] = useState(() => {
-    if (
-      prefillMode &&
-      patient &&
-      patient.medications &&
-      patient.medications.length > 0
-    ) {
-      return patient.medications.map((med) => ({
-        name: med.name || "",
-        duration: med.duration || "",
-        timing: med.timing || "",
-        timingValues: med.timingValues || "{}",
-        specialInstructions: med.specialInstructions || "", // Add special instructions field
-        datePrescribed:
-          med.datePrescribed || patient.updatedAt || patient.createdAt,
-      }));
-    }
-    // Return an empty array for new patients instead of a default medication
-    return [];
-  });
-
-  // State to track expanded medication cards
-  const [expandedMedications, setExpandedMedications] = useState<number[]>([]);
-
-  // State to track expanded medication groups
-  const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
-
-  // State for prescription generation
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [tempDate, setTempDate] = useState(new Date());
-
-  // Add this useEffect to initialize clinicalParameters when opening an existing patient
-  useEffect(() => {
-    // Initialize clinical parameters from patient data if available
-    if (prefillMode && patient && patient.clinicalParameters) {
-      console.log("Loading clinical parameters from existing patient data");
-
-      // Create a copy of the patient's clinical parameters
-      const patientParams = { ...patient.clinicalParameters };
-
-      // Ensure date is a Date object
-      if (typeof patientParams.date === "string") {
-        patientParams.date = new Date(patientParams.date);
-      } else if (!patientParams.date) {
-        patientParams.date = new Date();
-      }
-
-      // Update clinical parameters state
-      setClinicalParameters(patientParams);
-
-      // Also update tempDate for the date picker
-      setTempDate(patientParams.date);
-
-      console.log(
-        "✅ Successfully loaded clinical parameters from patient record"
-      );
-    }
-  }, [prefillMode, patient]);
-
-  // Reset clinical parameters when patient changes
-  useEffect(() => {
-    // Check if patient has changed by looking at the ID
-    if (patient?.patientId) {
-      console.log(
-        `🔄 NewPatientForm: Patient changed to ${patient.name} (ID: ${patient.patientId})`
-      );
-
-      // Reset clinical parameters to defaults first
-      setClinicalParameters({
-        date: new Date(),
-        inr: "",
-        hb: "",
-        wbc: "",
-        platelet: "",
-        bilirubin: "",
-        sgot: "",
-        sgpt: "",
-        alt: "",
-        tprAlb: "",
-        ureaCreat: "",
-        sodium: "",
-        fastingHBA1C: "",
-        pp: "",
-        tsh: "",
-        ft4: "",
-        others: "",
-      });
-
-      console.log("🧹 NewPatientForm: Reset clinical parameters to defaults");
-
-      // Then load this patient's parameters if available
-      if (patient.clinicalParameters) {
-        console.log(
-          `📋 NewPatientForm: Loading clinical parameters for ${patient.name}`
-        );
-
-        try {
-          // Create a copy of the patient's clinical parameters
-          const patientParams = { ...patient.clinicalParameters };
-
-          // Ensure date is a Date object
-          if (typeof patientParams.date === "string") {
-            patientParams.date = new Date(patientParams.date);
-          } else if (!patientParams.date) {
-            patientParams.date = new Date();
-          }
-
-          // Update clinical parameters state
-          setClinicalParameters(patientParams);
-
-          // Also update tempDate for the date picker
-          setTempDate(patientParams.date);
-
-          console.log(
-            "✅ NewPatientForm: Successfully loaded clinical parameters"
-          );
-        } catch (error) {
-          console.error(
-            "❌ NewPatientForm: Error loading clinical parameters:",
-            error
-          );
-        }
-      }
-    }
-  }, [patient?.patientId]); // Only re-run if the patient ID changes
-
-  // If the component is using permanentPatientId for patients,
-  // add this useEffect to load clinical parameters when permanentPatientId changes
-  useEffect(() => {
-    // If we have a permanentPatientId, try to load the clinical parameters
-    const loadPatientClinicalData = async () => {
-      if (permanentPatientId && !prefillMode) {
-        console.log(
-          `🔄 Attempting to load clinical parameters for patient: ${permanentPatientId}`
-        );
-
-        try {
-
-
-          // Try fetching from API directly
-          const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
-
-          const response = await fetch(apiUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              "Cache-Control": "no-cache",
-            },
-            body: JSON.stringify({
-              action: "getPatient",
-              patientId: permanentPatientId,
-            }),
-          });
-
-          const result = await response.json();
-
-          // Parse nested response if needed
-          const data = result.body
-            ? typeof result.body === "string"
-              ? JSON.parse(result.body)
-              : result.body
-            : result;
-
-          if (data.success && data.patient && data.patient.clinicalParameters) {
-            console.log("Found clinical parameters in API response");
-
-            const apiParams = { ...data.patient.clinicalParameters };
-
-            // Ensure date is a Date object
-            if (typeof apiParams.date === "string") {
-              apiParams.date = new Date(apiParams.date);
-            }
-
-            setClinicalParameters(apiParams);
-            console.log("✅ Loaded clinical parameters from API");
-          }
-        } catch (error) {
-          console.error("❌ Error loading clinical parameters:", error);
-        }
-      }
-    };
-
-    loadPatientClinicalData();
-  }, [permanentPatientId]);
-
   // Effect to set initial expanded/collapsed state for medications
   useEffect(() => {
     if (initialTab === "prescription" && !prefillMode) {
@@ -347,7 +138,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
       setExpandedMedications([]);
 
       // If any medication doesn't have a name, expand it to prompt the user to select one
-      const incompleteIndices = medications.reduce((acc, med, index) => {
+      const incompleteIndices = medications.reduce((acc: number[], med: any, index: number) => {
         if (!med.name) acc.push(index);
         return acc;
       }, []);
@@ -368,165 +159,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     }, [initialTab])
   );
 
-  // Function to check if a file has already been uploaded to S3
-  const isFileAlreadyUploaded = (file) => {
-    if (!file.uri) return false;
 
-    return (
-      file.uri.includes("s3.amazonaws.com") ||
-      file.uri.includes("amazonaws.com") ||
-      file.uri.startsWith("https://")
-    );
-  };
-
-  // Function to pick document from device storage or handle file from child components
-  const pickDocument = async (file?: any) => {
-    try {
-      // If file is provided, use it directly (called from child component)
-      if (file) {
-        console.log("📄 Adding provided file:", file);
-        setReportFiles((prevFiles) => [...prevFiles, file]);
-        console.log(`✅ File added: ${file.name || "unnamed file"}`);
-        return;
-      }
-
-      // Otherwise, pick a document (internal call)
-      console.log("📄 Picking document...");
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ["image/*", "application/pdf"],
-        copyToCacheDirectory: true,
-      });
-
-      console.log("📄 Document picker result:", result);
-
-      if (result.type === "success") {
-        // Add the picked document to reportFiles
-        const newFile = {
-          uri: result.uri,
-          name: result.name,
-          type: result.mimeType || "application/octet-stream",
-          size: result.size,
-          category: "General", // Default category
-        };
-
-        setReportFiles((prevFiles) => [...prevFiles, newFile]);
-        console.log(`✅ Document added: ${result.name}`);
-      } else {
-        console.log("❌ Document picking cancelled");
-      }
-    } catch (error) {
-      console.error("❌ Error picking document:", error);
-      Alert.alert(
-        "Error",
-        "There was a problem selecting the document. Please try again."
-      );
-    }
-  };
-
-  // Function to remove a report file from the array by index
-  const removeReportFile = (index) => {
-    console.log(`🗑️ Removing file at index ${index}`);
-
-    // Ask for confirmation before removing
-    Alert.alert("Remove File", "Are you sure you want to remove this file?", [
-      {
-        text: "Cancel",
-        style: "cancel",
-      },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          setReportFiles((prevFiles) => {
-            const updatedFiles = [...prevFiles];
-            updatedFiles.splice(index, 1);
-            console.log(
-              `✅ File removed. ${updatedFiles.length} files remaining.`
-            );
-            return updatedFiles;
-          });
-        },
-      },
-    ]);
-  };
-
-  // Function to handle date selection from calendar
-  const handleDateChange = (event, selectedDate) => {
-    setShowDatePicker(false);
-
-    if (selectedDate) {
-      setTempDate(selectedDate);
-      setClinicalParameters((prev) => ({ ...prev, date: selectedDate })); // Update the clinical parameters state
-      const formattedDate = selectedDate.toISOString().split("T")[0]; // Format as YYYY-MM-DD
-      updateReportField("testDate", formattedDate);
-    }
-  };
-
-  // Report data state - initialize from patient if available
-  const [reportData, setReportData] = useState(() => {
-    if (prefillMode && patient && patient.reportData) {
-      return { ...patient.reportData };
-    }
-    return {
-      testName: "",
-      testDate: "",
-      testResults: "",
-      interpretation: "",
-      recommendations: "",
-    };
-  });
-
-  // Set up initial files from patient if available
-  const [reportFiles, setReportFiles] = useState<
-    Array<{ uri: string; name: string; type: string; category?: string }>
-  >(() => {
-    if (
-      prefillMode &&
-      patient &&
-      patient.reportFiles &&
-      patient.reportFiles.length > 0
-    ) {
-      // Convert reportFiles from patient to the format expected by the form
-      return patient.reportFiles.map((file) => ({
-        uri: file.url || "",
-        name: file.name || "",
-        type: file.type || "application/pdf",
-        category: file.category || "", // Include category if it exists
-      }));
-    }
-    return [];
-  });
-
-  // Error state - updated to include mobile
-  const [errors, setErrors] = useState({ name: "", age: "", mobile: "" });
-
-  // Function to save new history entry to AsyncStorage for later retrieval
-  const saveNewHistoryEntryToStorage = async (patientId, newHistoryText) => {
-    if (!patientId || !newHistoryText || newHistoryText.trim() === "") {
-      console.log("No valid patient ID or history text to save");
-      return false;
-    }
-
-    try {
-      console.log(
-        `Saving new history entry to AsyncStorage for patient: ${patientId}`
-      );
-      console.log(
-        `History text (first 30 chars): ${newHistoryText.substring(0, 30)}...`
-      );
-
-      const key = `pending_history_${patientId}`;
-      await AsyncStorage.setItem(key, newHistoryText);
-      console.log(`✅ Saved new history entry to AsyncStorage key: ${key}`);
-      return true;
-    } catch (error) {
-      console.error(
-        "❌ Error saving new history entry to AsyncStorage:",
-        error
-      );
-      return false;
-    }
-  };
 
   // Function to verify field values before submission - with enhanced logging
   const verifyFieldsBeforeSubmit = (section) => {
@@ -580,268 +213,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     }
   };
 
-  // Utility: convert file to base64 - UPDATED VERSION
-  const fileToBase64 = async (fileUri: string): Promise<string> => {
-    console.log(`🔍 FILE_TO_BASE64: Starting conversion for: ${fileUri}`);
 
-    try {
-      // Validate the URI first - don't attempt to process remote URLs
-      if (fileUri.startsWith("http://") || fileUri.startsWith("https://")) {
-        console.error(
-          "❌ FILE_TO_BASE64: Cannot convert remote URLs to base64"
-        );
-        throw new Error(
-          "Cannot convert remote URLs to base64 directly. Use local files only."
-        );
-      }
-
-      console.log(`📄 FILE_TO_BASE64: Reading local file: ${fileUri}`);
-
-      // Check if the file exists first with improved error details
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(fileUri);
-        if (!fileInfo.exists) {
-          console.error(
-            `❌ FILE_TO_BASE64: File does not exist at path: ${fileUri}`
-          );
-          throw new Error(`File does not exist at path: ${fileUri}`);
-        }
-        console.log(
-          `✅ FILE_TO_BASE64: File exists: Size=${fileInfo.size} bytes, URI=${fileUri}`
-        );
-
-        // Check file size and warn about potentially large files
-        if (fileInfo.size > 5000000) {
-          // 5MB
-          console.warn(
-            `⚠️ FILE_TO_BASE64: Large file detected (${(
-              fileInfo.size /
-              1024 /
-              1024
-            ).toFixed(2)}MB). This may cause issues with the API.`
-          );
-        }
-      } catch (fileCheckError) {
-        console.error(
-          `❌ FILE_TO_BASE64: Error checking file existence: ${fileCheckError.message}`
-        );
-        throw new Error(`Failed to verify file: ${fileCheckError.message}`);
-      }
-
-      // Only proceed with reading if file exists - with retry logic
-      let base64Data = null;
-      let attempts = 0;
-      const maxAttempts = 3;
-
-      while (attempts < maxAttempts && !base64Data) {
-        attempts++;
-        try {
-          console.log(
-            `📤 FILE_TO_BASE64: Reading file attempt ${attempts}/${maxAttempts}`
-          );
-
-          base64Data = await FileSystem.readAsStringAsync(fileUri, {
-            encoding: FileSystem.EncodingType.Base64,
-          });
-
-          // Verify we got valid data
-          if (!base64Data || base64Data.length === 0) {
-            console.error("❌ FILE_TO_BASE64: Empty base64 data returned");
-            throw new Error("Empty base64 data returned from FileSystem");
-          }
-
-          console.log(
-            `✅ FILE_TO_BASE64: Base64 read successful. Data length: ${base64Data.length} characters`
-          );
-          console.log(
-            `🔍 FILE_TO_BASE64: First 20 chars: ${base64Data.substring(
-              0,
-              20
-            )}...`
-          );
-          console.log(
-            `🔍 FILE_TO_BASE64: Last 20 chars: ${base64Data.substring(
-              base64Data.length - 20
-            )}...`
-          );
-        } catch (readError) {
-          console.error(
-            `❌ FILE_TO_BASE64: Read attempt ${attempts} failed: ${readError.message}`
-          );
-
-          if (attempts < maxAttempts) {
-            // Wait before retrying
-            console.log(`⏳ FILE_TO_BASE64: Waiting before retry...`);
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          } else {
-            throw new Error(
-              `Failed to read file after ${maxAttempts} attempts: ${readError.message}`
-            );
-          }
-        }
-      }
-
-      return base64Data;
-    } catch (error) {
-      console.error(`❌ FILE_TO_BASE64: Fatal error for ${fileUri}:`, error);
-      throw error;
-    }
-  };
-
-  // Enhanced version of updateField to better track changes
-  const updateField = (field, value) => {
-    // Add more detailed logging
-    console.log(`🔄 Updating field "${field}"`);
-    console.log(`   Current value: "${patientData[field]}"`);
-    console.log(`   New value: "${value}"`);
-    console.log(
-      `   Current length: ${patientData[field]?.length}, New length: ${value?.length}`
-    );
-
-    logStateUpdate(`Updating ${field}`, value?.substring?.(0, 30) + "...");
-
-    setPatientData((prev) => {
-      const updated = { ...prev, [field]: value };
-      // Log after state update
-      console.log(`   Updated state for ${field}: "${updated[field]}"`);
-      return updated;
-    });
-
-    if (errors[field]) {
-      setErrors((prev) => ({ ...prev, [field]: "" }));
-    }
-  };
-
-  // Update report data state with improved logging
-  const updateReportField = (field, value) => {
-    console.log(`🔄 Updating report field: "${field}"`);
-    console.log(`   Current value: "${reportData[field]}"`);
-    console.log(`   New value: "${value}"`);
-    console.log(
-      `   Current length: ${reportData[field]?.length}, New length: ${value?.length}`
-    );
-
-    setReportData((prev) => {
-      const updatedData = { ...prev, [field]: value };
-      console.log(
-        `   Updated reportData state for ${field}: "${updatedData[field]}"`
-      );
-      return updatedData;
-    });
-  };
-
-  // Update the ensureFilesHaveBase64 function to better handle duplicates
-  const ensureFilesHaveBase64 = async (files) => {
-    console.log(`🔄 Ensuring ${files.length} files have base64 data`);
-
-    // First deduplicate files using more robust criteria
-    const uniqueFileMap = new Map();
-    files.forEach((file) => {
-      // Create a unique key based on name, URI, or content
-      let key;
-      if (file.uri) {
-        key = file.uri;
-      } else if (file.name) {
-        key = file.name + "_" + (file.category || "uncategorized");
-      } else if (file.base64Data) {
-        // Use first 100 chars of base64 as a fingerprint
-        key = file.base64Data.substring(0, 100);
-      } else {
-        key = `unknown_${Date.now()}_${Math.random()}`;
-      }
-
-      // Only keep if not already in map
-      if (!uniqueFileMap.has(key)) {
-        uniqueFileMap.set(key, file);
-      } else {
-        console.log(`Skipping duplicate file: ${file.name || "unnamed file"}`);
-      }
-    });
-
-    const deduplicatedFiles = Array.from(uniqueFileMap.values());
-    console.log(
-      `After deduplication: ${deduplicatedFiles.length} files (from ${files.length})`
-    );
-
-    const processedFiles = [];
-
-    for (let i = 0; i < deduplicatedFiles.length; i++) {
-      const file = deduplicatedFiles[i];
-      console.log(
-        `Processing file ${i + 1}/${deduplicatedFiles.length}: ${file.name}`
-      );
-
-      // Skip files that are already remote URLs
-      if (isFileAlreadyUploaded(file)) {
-        console.log(
-          `File ${file.name} is a remote URL, skipping base64 conversion`
-        );
-        processedFiles.push(file);
-        continue;
-      }
-
-      // If file already has base64 data, use it
-      if (file.base64Data) {
-        console.log(`File ${file.name} already has base64 data`);
-        processedFiles.push(file);
-        continue;
-      }
-
-      // Otherwise, try to convert
-      try {
-        console.log(`Converting ${file.name} to base64`);
-        const rawBase64 = await fileToBase64(file.uri);
-        const contentType = file.type || "application/octet-stream";
-        const base64Data = `data:${contentType};base64,${rawBase64}`;
-
-        processedFiles.push({
-          ...file,
-          base64Data: base64Data,
-        });
-
-        console.log(`Converted ${file.name} to base64 successfully`);
-      } catch (error) {
-        console.error(
-          `Failed to convert ${file.name} to base64: ${error.message}`
-        );
-        // Add the file without base64 data - the server will handle this case
-        processedFiles.push(file);
-      }
-    }
-
-    return processedFiles;
-  };
-
-  // Validate fields - Updated to include mobile validation
-  const validateForm = () => {
-    let isValid = true;
-    const newErrors = { name: "", age: "", mobile: "" };
-
-    if (!patientData.name.trim()) {
-      newErrors.name = "Name is required";
-      isValid = false;
-    }
-
-    if (!patientData.age.trim()) {
-      newErrors.age = "Age is required";
-      isValid = false;
-    } else if (isNaN(Number(patientData.age)) || Number(patientData.age) <= 0) {
-      newErrors.age = "Please enter a valid age";
-      isValid = false;
-    }
-
-    // Add validation for mobile number
-    if (!patientData.mobile.trim()) {
-      newErrors.mobile = "Mobile number is required";
-      isValid = false;
-    } else if (!/^[0-9]{10}$/.test(patientData.mobile.trim())) {
-      newErrors.mobile = "Please enter a valid 10-digit mobile number";
-      isValid = false;
-    }
-
-    setErrors(newErrors);
-    return isValid;
-  };
 
   // UPDATED: getSubmitButtonText function to show "Save" instead of "Next" in normal flow
   const getSubmitButtonText = () => {
@@ -912,151 +284,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     setActiveSection(section);
   };
 
-  // Enhanced function to check and include pending history from AsyncStorage
-  // with additional checks and better timestamp formatting
-  const checkAndIncludePendingHistory = async (patientId) => {
-    if (!patientId) {
-      console.log(
-        "⚠️ No patientId available, cannot check for pending history"
-      );
-      return false;
-    }
 
-    try {
-      const key = `pending_history_${patientId}`;
-      const pendingHistory = await AsyncStorage.getItem(key);
-
-      if (pendingHistory && pendingHistory.trim()) {
-        console.log(
-          `🔍 Found pending history text in AsyncStorage (length: ${pendingHistory.length
-          }): ${pendingHistory.substring(0, 30)}...`
-        );
-
-        // Format the pending history with timestamp
-        const timestamp = new Date().toLocaleString();
-        let updatedHistory = "";
-
-        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-          // Check if the existing medical history already has this pending entry
-          // to avoid duplicate entries
-          if (
-            !patientData.medicalHistory.includes(
-              pendingHistory.substring(0, 20)
-            )
-          ) {
-            updatedHistory = `--- New Entry (${timestamp}) ---\n${pendingHistory}\n\n${patientData.medicalHistory}`;
-            console.log("Adding new entry on top of existing medical history");
-          } else {
-            console.log(
-              "Pending history appears to already be in medical history, keeping existing data"
-            );
-            updatedHistory = patientData.medicalHistory;
-          }
-        } else {
-          updatedHistory = `--- Entry (${timestamp}) ---\n${pendingHistory}`;
-          console.log(
-            "Creating initial medical history entry from pending history"
-          );
-        }
-
-        // Update the patient data with the combined history
-        console.log("📝 Including pending history in submission");
-
-        // Update patient data state directly
-        setPatientData((prev) => ({
-          ...prev,
-          medicalHistory: updatedHistory,
-        }));
-
-        // Clear the pending history from AsyncStorage
-        await AsyncStorage.removeItem(key);
-        console.log(`✅ Cleared pending history from AsyncStorage key: ${key}`);
-
-        return true;
-      } else {
-        console.log("📋 No pending history found in AsyncStorage");
-        return false;
-      }
-    } catch (error) {
-      console.error("❌ Error checking for pending history:", error);
-      return false;
-    }
-  };
-
-  // Function to directly add new history entry with improved error handling and validation
-  const includeNewHistoryEntry = async (patientId, newHistoryText) => {
-    if (!patientId) {
-      console.error("❌ Missing patientId in includeNewHistoryEntry");
-      return false;
-    }
-
-    if (!newHistoryText || newHistoryText.trim() === "") {
-      console.log("⚠️ No history text to include (empty text)");
-      return false;
-    }
-
-    try {
-      console.log(`📝 INCLUDING HISTORY: Starting for patient: ${patientId}`);
-      console.log(`Text length: ${newHistoryText.length} chars`);
-      console.log(`Preview: "${newHistoryText.substring(0, 50)}..."`);
-
-      // Format the new history with timestamp
-      const timestamp = new Date().toLocaleString();
-      let updatedHistory = "";
-
-      // Get current medical history
-      const currentHistory = patientData.medicalHistory || "";
-      console.log(
-        `Current medical history length: ${currentHistory.length} chars`
-      );
-
-      // Check if this history text might already be included
-      if (currentHistory.includes(newHistoryText.substring(0, 30))) {
-        console.log(
-          "⚠️ This history text may already be included in medical history"
-        );
-        console.log("Will continue anyway and force the update");
-      }
-
-      // Format with different prefix based on whether this is first entry
-      if (currentHistory.trim()) {
-        updatedHistory = `--- New Entry (${timestamp}) ---\n${newHistoryText}\n\n${currentHistory}`;
-        console.log("Adding new entry on top of existing medical history");
-      } else {
-        updatedHistory = `--- Entry (${timestamp}) ---\n${newHistoryText}`;
-        console.log("Creating initial medical history entry");
-      }
-
-      // Update patient data state with the combined history
-      console.log(
-        `Setting new medical history (${updatedHistory.length} chars)`
-      );
-
-      // Update the state directly and verify it was changed
-      setPatientData((prev) => {
-        const updated = {
-          ...prev,
-          medicalHistory: updatedHistory,
-        };
-        console.log(
-          `Updated state, new length: ${updated.medicalHistory.length} chars`
-        );
-        return updated;
-      });
-
-      // Set flag to force history update in API call
-      setIsSavingHistory(true);
-      console.log("✅ Set isSavingHistory flag to true");
-
-      // Log success
-      console.log(`✅ Successfully added history to medicalHistory field`);
-      return true;
-    } catch (error) {
-      console.error("❌ Error in includeNewHistoryEntry:", error);
-      console.error("Stack:", error.stack);
-      return false;
-    }
-  };
 
   // Add this in useEffect when component mounts (for tracing/debugging)
   useEffect(() => {
@@ -1080,7 +308,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           );
           diagnosisTabRef.current.clearDiagnosisAfterSave();
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("❌ Error in clearDiagnosisAfterSaveCompletion:", error);
       }
     };
@@ -1162,7 +390,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           // Give the UI a moment to update
           await new Promise((resolve) => setTimeout(resolve, 300));
         }
-      } catch (visualTransferError) {
+      } catch (visualTransferError: any) {
         console.error(
           "❌ Error during visual history transfer:",
           visualTransferError
@@ -1196,7 +424,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               "ℹ️ No history text was available in the input field via ref"
             );
           }
-        } catch (refError) {
+        } catch (refError: any) {
           console.error(
             "❌ Error using clinicalTabRef to save history:",
             refError
@@ -1267,7 +495,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               "📋 No text found in any history entry fields in AsyncStorage"
             );
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error(
             "❌ Error checking for history entry in AsyncStorage:",
             error
@@ -1338,7 +566,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
         console.log(`✅ Connection test result: ${testResponse.status}`);
         return true;
-      } catch (error) {
+      } catch (error: any) {
         console.error("❌ Connection test failed:", error);
         // Return false but don't throw, let the main flow handle it
         return false;
@@ -1395,7 +623,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
             // Define the API endpoint URL and verify it
             const apiUrl =
-              "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+              API_ENDPOINTS.PATIENT_PROCESSOR;
             console.log(`📡 API Endpoint: ${apiUrl}`);
 
             // Make the actual API call with timeout and retry logic
@@ -1442,7 +670,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                   `✅ Network request successful, status: ${response.status}`
                 );
                 break;
-              } catch (networkError) {
+              } catch (networkError: any) {
                 console.error(
                   `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                   }):`,
@@ -1492,7 +720,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 "📋 Parsed response:",
                 JSON.stringify(result, null, 2)
               );
-            } catch (parseError) {
+            } catch (parseError: any) {
               console.error("❌ Error parsing response:", parseError);
               throw new Error(
                 `Invalid response from server: ${parseError.message}`
@@ -1575,7 +803,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 },
               },
             ]);
-          } catch (error) {
+          } catch (error: any) {
             console.error("❌ Error saving basic information:", error);
 
             // Create a more user-friendly error message based on error type
@@ -1662,6 +890,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
           // In handleSubmit function when processing clinical section:
           const clinicalData = {
+            // ACTION FIELD - Required by Lambda
+            action: "updatePatientData",
+            updateSection: "clinical",
             // Get the LATEST medicalHistory directly from the state or ref
             medicalHistory: clinicalTabRef.current
               ? clinicalTabRef.current.getLatestMedicalHistory() ||
@@ -1754,7 +985,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
           // Define the API endpoint URL and verify it
           const apiUrl =
-            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+            API_ENDPOINTS.PATIENT_PROCESSOR;
           console.log(`📡 API Endpoint: ${apiUrl}`);
 
           // Make the actual API call with timeout and retry logic
@@ -1799,7 +1030,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 `✅ Network request successful, status: ${response.status}`
               );
               break;
-            } catch (networkError) {
+            } catch (networkError: any) {
               console.error(
                 `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
@@ -1843,7 +1074,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           try {
             result = JSON.parse(responseText);
             console.log("📋 Parsed response:", JSON.stringify(result, null, 2));
-          } catch (parseError) {
+          } catch (parseError: any) {
             console.error("❌ Error parsing response:", parseError);
             throw new Error(
               `Invalid response from server: ${parseError.message}`
@@ -1912,7 +1143,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               await AsyncStorage.removeItem(`new_history_input_${patId}`);
               await AsyncStorage.removeItem(`pending_history_${patId}`);
               console.log("✅ Cleared all pending history storage keys");
-            } catch (error) {
+            } catch (error: any) {
               console.error(
                 "❌ Error clearing pending history storage:",
                 error
@@ -1938,7 +1169,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               },
             },
           ]);
-        } catch (error) {
+        } catch (error: any) {
           console.error("❌ Error saving clinical information:", error);
 
           // Create a more user-friendly error message based on error type
@@ -1998,6 +1229,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           // Create the API request payload with ONLY prescription data
           // Include basic patient info
           const prescriptionData = {
+            action: "updatePatientData",
+            updateSection: "prescription",
             medications: processedMedications,
             saveSection: "prescription",
             isPartialSave: true,
@@ -2030,7 +1263,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
           // Define the API endpoint URL and verify it
           const apiUrl =
-            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+            API_ENDPOINTS.PATIENT_PROCESSOR;
           console.log(`📡 API Endpoint: ${apiUrl}`);
 
           // Make the actual API call with timeout and retry logic
@@ -2075,7 +1308,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 `✅ Network request successful, status: ${response.status}`
               );
               break;
-            } catch (networkError) {
+            } catch (networkError: any) {
               console.error(
                 `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
@@ -2119,7 +1352,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           try {
             result = JSON.parse(responseText);
             console.log("📋 Parsed response:", JSON.stringify(result, null, 2));
-          } catch (parseError) {
+          } catch (parseError: any) {
             console.error("❌ Error parsing response:", parseError);
             throw new Error(
               `Invalid response from server: ${parseError.message}`
@@ -2193,7 +1426,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               },
             ]
           );
-        } catch (error) {
+        } catch (error: any) {
           console.error("❌ Error saving prescription information:", error);
 
           // Create a more user-friendly error message based on error type
@@ -2302,6 +1535,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
           // Create diagnosis-specific data payload for the API
           const diagnosisData = {
+            action: "updatePatientData",
+            updateSection: "diagnosis",
             diagnosis: patientData.diagnosis || "",
             advisedInvestigations: patientData.advisedInvestigations || "",
             reportData: reportData,
@@ -2340,7 +1575,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             "-----------------------------------------------------------"
           );
           console.log(
-            `📡 Endpoint: https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction`
+            `📡 Endpoint: ${API_ENDPOINTS.PATIENT_PROCESSOR}`
           );
           console.log(`⏱️ Request started at: ${new Date().toISOString()}`);
 
@@ -2385,7 +1620,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 );
               }
             }
-          } catch (jsonError) {
+          } catch (jsonError: any) {
             console.error("❌ Error stringifying request body:", jsonError);
             throw new Error(`Failed to prepare request: ${jsonError.message}`);
           }
@@ -2410,7 +1645,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 : null;
 
               response = await fetch(
-                "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction",
+                API_ENDPOINTS.PATIENT_PROCESSOR,
                 {
                   method: "POST",
                   headers: {
@@ -2432,7 +1667,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 `✅ Network request successful, status: ${response.status}`
               );
               break;
-            } catch (networkError) {
+            } catch (networkError: any) {
               console.error(
                 `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1
                 }):`,
@@ -2475,7 +1710,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           try {
             result = JSON.parse(responseText);
             console.log("📋 Parsed response:", JSON.stringify(result, null, 2));
-          } catch (parseError) {
+          } catch (parseError: any) {
             console.error("❌ Error parsing response:", parseError);
             console.log("Raw response text:", responseText);
             throw new Error(
@@ -2664,7 +1899,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                         `🚩 Set current_patient_id to ${finalPatientId}`
                       );
                     }
-                  } catch (error) {
+                  } catch (error: any) {
                     console.error("❌ Error setting patient ID flags:", error);
                   }
 
@@ -2731,7 +1966,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                         console.log(
                           "📝 Saved diagnosis history to AsyncStorage"
                         );
-                      } catch (error) {
+                      } catch (error: any) {
                         console.error(
                           "❌ Error saving diagnosis history:",
                           error
@@ -2765,11 +2000,11 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                           console.log(
                             "Removed blockDiagnosisRefetch flag after timeout"
                           );
-                        } catch (error) {
+                        } catch (error: any) {
                           console.error("Error removing block flag:", error);
                         }
                       }, 10000);
-                    } catch (error) {
+                    } catch (error: any) {
                       console.error(
                         "❌ Error setting diagnosis blocking flags:",
                         error
@@ -2793,7 +2028,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               },
             ]
           );
-        } catch (error) {
+        } catch (error: any) {
           console.log("\n❌ SUBMISSION ERROR");
           console.log(
             "-----------------------------------------------------------"
@@ -2914,7 +2149,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 } else {
                   console.log("📋 No text found in new history entry field");
                 }
-              } catch (error) {
+              } catch (error: any) {
                 console.error(
                   "❌ Error checking for new history entry field text:",
                   error
@@ -2973,6 +2208,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             // Include clinicalParameters with new timestamp and create history flag
             updateData = {
               ...updateData,
+              // CRITICAL FIX: Include basic patient data for API validation
+              name: patient?.name || patientData.name || "",
+              age: patient?.age || patientData.age || "0",
+              sex: patient?.sex || patientData.sex || "Male",
+              mobile: patient?.mobile || patientData.mobile || "",
+              address: patient?.address || patientData.address || "",
               // Use the most up-to-date medical history directly from ref
               medicalHistory: updatedMedicalHistory,
               // FORCE these flags to ensure history is processed
@@ -3006,7 +2247,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                   }`
                 );
                 console.log(
-                  `   Category: ${file.category || "uncategorized"}, Size: ${file.size || "unknown"
+                  `   Category: ${file.category || "uncategorized"}, Size: ${(file as any).size || "unknown"
                   }, Already uploaded: ${isFileAlreadyUploaded(file)}`
                 );
               });
@@ -3043,7 +2284,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                     `📊 First file base64 data length: ${processedReportFiles[0].base64Data.length} chars`
                   );
                 }
-              } catch (fileError) {
+              } catch (fileError: any) {
                 console.error(
                   `❌ Error processing report files for clinical update: ${fileError.message}`
                 );
@@ -3081,6 +2322,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
             updateData = {
               ...updateData,
+              // CRITICAL FIX: Include basic patient data for API validation
+              name: patient?.name || patientData.name || "",
+              age: patient?.age || patientData.age || "0",
+              sex: patient?.sex || patientData.sex || "Male",
+              mobile: patient?.mobile || patientData.mobile || "",
+              address: patient?.address || patientData.address || "",
               medications: processedMedications,
             };
             console.log("📝 Prescription update data prepared");
@@ -3113,6 +2360,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             // ADD THESE LINES FOR THE DIAGNOSIS HISTORY FEATURE:
             updateData = {
               ...updateData,
+              // CRITICAL FIX: Include basic patient data for API validation
+              name: patient?.name || patientData.name || "",
+              age: patient?.age || patientData.age || "0",
+              sex: patient?.sex || patientData.sex || "Male",
+              mobile: patient?.mobile || patientData.mobile || "",
+              address: patient?.address || patientData.address || "",
               updateSection: "diagnosis",
               reportData: cleanReportData,
               // IMPORTANT: Explicitly include diagnosis field from patient data
@@ -3186,7 +2439,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               : null;
 
             response = await fetch(
-              "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction",
+              API_ENDPOINTS.PATIENT_PROCESSOR,
               {
                 method: "POST",
                 headers: {
@@ -3208,7 +2461,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               `✅ Network request successful, status: ${response.status}`
             );
             break;
-          } catch (networkError) {
+          } catch (networkError: any) {
             console.error(
               `❌ Network error (attempt ${retryCount + 1}/${maxRetries + 1}):`,
               networkError
@@ -3250,7 +2503,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         try {
           result = JSON.parse(responseText);
           console.log("📋 Parsed response:", JSON.stringify(result, null, 2));
-        } catch (parseError) {
+        } catch (parseError: any) {
           console.error("❌ Error parsing response:", parseError);
           throw new Error(
             `Invalid response from server: ${parseError.message}`
@@ -3334,7 +2587,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
                 console.log(
                   "✅ Cleared history input storage after successful update"
                 );
-              } catch (error) {
+              } catch (error: any) {
                 console.error("❌ Error clearing history storage:", error);
               }
             }
@@ -3352,7 +2605,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               const cacheKey = `diagnosis_history_${patient.patientId}`;
               await AsyncStorage.removeItem(cacheKey);
               console.log("✅ Cleared diagnosis history cache after update");
-            } catch (error) {
+            } catch (error: any) {
               console.error(
                 "❌ Error clearing diagnosis history cache:",
                 error
@@ -3399,7 +2652,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
               // Then clear the diagnosis field
               updateField("diagnosis", "");
-            } catch (error) {
+            } catch (error: any) {
               console.error(
                 "❌ Error handling diagnosis history in prefill mode:",
                 error
@@ -3430,7 +2683,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             { text: "OK", onPress: nextAction },
           ]);
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("❌ Error updating patient data:", error);
 
         // Create a more user-friendly error message based on error type

@@ -21,10 +21,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
+import { API_ENDPOINTS } from "../../Config";
 
 const { width } = Dimensions.get("window");
-const API_URL =
-  "https://0kcyg9xic1.execute-api.us-east-1.amazonaws.com/default/DoctorDataWhisperer";
+const API_URL = API_ENDPOINTS.PATIENT_PROCESSOR;
 
 // Types
 interface Patient {
@@ -135,14 +135,17 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
                 setIsDeletingPatient(patient.patientId);
 
                 const response = await fetch(API_URL, {
-                  method: "DELETE",
+                  method: "POST", // Changed to POST for Lambda
                   headers: {
                     "Content-Type": "application/json",
                     "Cache-Control": "no-cache, no-store, must-revalidate",
                     Pragma: "no-cache",
                     Expires: "0",
                   },
-                  body: JSON.stringify({ patientId: patient.patientId }),
+                  body: JSON.stringify({
+                    action: "deletePatient",
+                    patientId: patient.patientId,
+                  }),
                 });
 
                 if (!response.ok) {
@@ -193,12 +196,16 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
       setError(null);
       console.log("Fetching patients data from API...");
 
+      // Updated to POST with getAllPatients action
       const response = await fetch(API_URL, {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "Cache-Control": "no-cache, no-store, must-revalidate",
           Pragma: "no-cache",
           Expires: "0",
         },
+        body: JSON.stringify({ action: "getAllPatients" }),
       });
 
       if (!response.ok) {
@@ -719,7 +726,7 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
                                 accessibilityLabel={`View image ${report.name}`}
                               >
                                 <Image
-                                  source={{ uri: report.url }}
+                                  source={{ uri: report.url || report.uri }}
                                   style={styles.reportThumbnail}
                                 />
                                 <Text

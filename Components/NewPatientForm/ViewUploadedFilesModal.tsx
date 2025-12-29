@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   Modal,
   View,
@@ -78,7 +79,7 @@ const ViewUploadedFilesModal = ({
       console.log(`🔄 Fetching S3 files for patient: ${patientId}`);
 
       const apiUrl =
-        "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+        API_ENDPOINTS.PATIENT_PROCESSOR;
 
       const response = await fetch(apiUrl, {
         method: "POST",
@@ -88,7 +89,7 @@ const ViewUploadedFilesModal = ({
           "Cache-Control": "no-cache",
         },
         body: JSON.stringify({
-          action: "getPatientFiles",
+          action: "getPatient",
           patientId: patientId,
         }),
       });
@@ -110,11 +111,12 @@ const ViewUploadedFilesModal = ({
           : result.body
         : result;
 
-      if (data.success && data.files && Array.isArray(data.files)) {
-        console.log(`✅ Successfully fetched ${data.files.length} S3 files`);
+      if (data.success && data.patient) {
+        const files = data.patient.reportFiles || [];
+        console.log(`✅ Successfully fetched ${files.length} S3 files`);
 
         // Convert S3 files to the format expected by the UI
-        const s3Files = data.files.map((file) => ({
+        const s3Files = files.map((file) => ({
           uri: file.url,
           name: file.name || file.key || "Unknown file",
           type: file.type || guessFileType(file.name || file.key),
@@ -260,10 +262,8 @@ const ViewUploadedFilesModal = ({
       // Show info for non-image files
       Alert.alert(
         file.name || "File Info",
-        `Type: ${file.type || "Unknown"}\n${
-          file.size ? `Size: ${Math.round(file.size / 1024)} KB\n` : ""
-        }${file.dateAdded ? `Date: ${file.dateAdded}\n` : ""}Storage: ${
-          file.isS3File ? "S3 Cloud" : "Local (Pending Upload)"
+        `Type: ${file.type || "Unknown"}\n${file.size ? `Size: ${Math.round(file.size / 1024)} KB\n` : ""
+        }${file.dateAdded ? `Date: ${file.dateAdded}\n` : ""}Storage: ${file.isS3File ? "S3 Cloud" : "Local (Pending Upload)"
         }`,
         [{ text: "OK" }]
       );
@@ -323,8 +323,8 @@ const ViewUploadedFilesModal = ({
               item.type?.includes("pdf")
                 ? "document-text"
                 : item.type?.includes("image")
-                ? "image"
-                : "document"
+                  ? "image"
+                  : "document"
             }
             size={24}
             color={item.isS3File ? "#FFFFFF" : "#0070D6"}
@@ -489,8 +489,8 @@ const ViewUploadedFilesModal = ({
                 {activeFilter === "all"
                   ? "No files uploaded yet"
                   : activeFilter === "s3"
-                  ? "No files in S3 storage yet"
-                  : "No pending files for upload"}
+                    ? "No files in S3 storage yet"
+                    : "No pending files for upload"}
               </Text>
             </View>
           )}

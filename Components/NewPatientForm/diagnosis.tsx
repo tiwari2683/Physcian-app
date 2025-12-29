@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -27,9 +28,9 @@ const getLogTimestamp = () => {
     .getMinutes()
     .toString()
     .padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}.${now
-    .getMilliseconds()
-    .toString()
-    .padStart(3, "0")}`;
+      .getMilliseconds()
+      .toString()
+      .padStart(3, "0")}`;
 };
 
 // Enhanced console log function
@@ -191,7 +192,7 @@ const groupDiagnosesByDate = (diagnosisHistory) => {
   const groupedDiagnoses = {};
 
   if (!diagnosisHistory || diagnosisHistory.length === 0) {
-    logWarning("No diagnosis history to group");
+    // Silent return to avoid log noise
     return [];
   }
 
@@ -379,10 +380,8 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
         .join("\n");
 
       logInfo(
-        `InvestigationsSelector - Parsed ${
-          selected.length
-        } selected investigations and ${
-          custom.length > 0 ? "custom text" : "no custom text"
+        `InvestigationsSelector - Parsed ${selected.length
+        } selected investigations and ${custom.length > 0 ? "custom text" : "no custom text"
         }`
       );
 
@@ -406,8 +405,7 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
         : [...prev, investigation];
 
       logInfo(
-        `Investigation ${
-          prev.includes(investigation) ? "deselected" : "selected"
+        `Investigation ${prev.includes(investigation) ? "deselected" : "selected"
         }: ${investigation}`
       );
 
@@ -447,13 +445,12 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
       selected.length > 0 && formattedCustomText
         ? `${formattedInvestigations}\n${formattedCustomText}`
         : selected.length > 0
-        ? formattedInvestigations
-        : formattedCustomText;
+          ? formattedInvestigations
+          : formattedCustomText;
 
     // Update the parent component
     logInfo(
-      `Updating parent with ${selected.length} investigations and ${
-        customText.length > 0 ? "custom text" : "no custom text"
+      `Updating parent with ${selected.length} investigations and ${customText.length > 0 ? "custom text" : "no custom text"
       }`
     );
     onChangeText(combinedText);
@@ -472,7 +469,7 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
               style={[
                 styles.checkbox,
                 selectedInvestigations.includes(investigation) &&
-                  styles.checkboxSelected,
+                styles.checkboxSelected,
                 disabled && styles.disabledCheckbox,
               ]}
               onPress={() => toggleInvestigation(investigation)}
@@ -843,8 +840,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
 
     try {
       logInfo(
-        `Saving diagnosis history to API (attempt ${retryCount + 1}/${
-          maxRetries + 1
+        `Saving diagnosis history to API (attempt ${retryCount + 1}/${maxRetries + 1
         })`
       );
       logInfo(`Patient ID: ${patientId}`);
@@ -852,7 +848,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
 
       // API URL
       const apiUrl =
-        "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+        API_ENDPOINTS.PATIENT_PROCESSOR;
 
       // Enhanced request body with additional metadata
       const requestBody = {
@@ -1056,9 +1052,8 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
     log(
       "Diagnosis value to be cleared:",
       diagnosisToSave
-        ? `"${diagnosisToSave.substring(0, 100)}${
-            diagnosisToSave.length > 100 ? "..." : ""
-          }"`
+        ? `"${diagnosisToSave.substring(0, 100)}${diagnosisToSave.length > 100 ? "..." : ""
+        }"`
         : "empty"
     );
 
@@ -1334,12 +1329,11 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         const isDifferentFromPrevious =
           prevHistory.length === 0 ||
           prevHistory[0]?.advisedInvestigations !==
-            patientData.advisedInvestigations;
+          patientData.advisedInvestigations;
 
         if (isDifferentFromPrevious) {
           console.log(
-            `🔄 Adding new investigation to history (now ${
-              prevHistory.length + 1
+            `🔄 Adding new investigation to history (now ${prevHistory.length + 1
             } items)`
           );
           logInfo(
@@ -1414,9 +1408,8 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
     log(
       "Current advisedInvestigations state:",
       patientData.advisedInvestigations
-        ? `"${patientData.advisedInvestigations.substring(0, 100)}${
-            patientData.advisedInvestigations.length > 100 ? "..." : ""
-          }"`
+        ? `"${patientData.advisedInvestigations.substring(0, 100)}${patientData.advisedInvestigations.length > 100 ? "..." : ""
+        }"`
         : "empty"
     );
 
@@ -1550,9 +1543,8 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
     log(
       "advisedInvestigations value:",
       patientData.advisedInvestigations
-        ? `"${patientData.advisedInvestigations.substring(0, 30)}${
-            patientData.advisedInvestigations.length > 30 ? "..." : ""
-          }"`
+        ? `"${patientData.advisedInvestigations.substring(0, 30)}${patientData.advisedInvestigations.length > 30 ? "..." : ""
+        }"`
         : "empty"
     );
     log("------------------------------------------------");
@@ -1779,7 +1771,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       try {
         // Get API URL
         const apiUrl =
-          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+          API_ENDPOINTS.PATIENT_PROCESSOR;
 
         // Create the request body with multiple patient ID attempts
         const requestBody = {
@@ -1874,7 +1866,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
 
         try {
           const apiUrl =
-            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+            API_ENDPOINTS.PATIENT_PROCESSOR;
 
           const patientRequestBody = {
             action: "getPatient", // Use the action to get the full patient record
@@ -1972,7 +1964,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
             item.diagnosis === currentPatientDiagnosis.diagnosis &&
             Math.abs(
               new Date(item.date).getTime() -
-                new Date(currentPatientDiagnosis.date).getTime()
+              new Date(currentPatientDiagnosis.date).getTime()
             ) < 60000 // Within 1 minute
         );
 
@@ -2141,11 +2133,11 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
               firstItem:
                 parsedData.length > 0
                   ? {
-                      date: parsedData[0].date,
-                      content:
-                        parsedData[0].advisedInvestigations?.substring(0, 30) +
-                        "...",
-                    }
+                    date: parsedData[0].date,
+                    content:
+                      parsedData[0].advisedInvestigations?.substring(0, 30) +
+                      "...",
+                  }
                   : null,
             })
           );
@@ -2174,7 +2166,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       try {
         // Get API URL
         const apiUrl =
-          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+          API_ENDPOINTS.PATIENT_PROCESSOR;
 
         // Create the request body
         const requestBody = {

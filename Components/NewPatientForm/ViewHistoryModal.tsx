@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -13,28 +14,30 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
-  console.log("🔍 ViewHistoryModal rendering, props:", {
-    isVisible,
-    patientId,
-    historyText: historyText ? `${historyText.substring(0, 30)}...` : "none",
-  });
-
+  // PERFORMANCE FIX: Early return if modal is not visible
+  // This prevents unnecessary state initialization, logging, and effects
   const [historyEntries, setHistoryEntries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("current");
   const [lastSavedText, setLastSavedText] = useState("");
 
-  // Log when component mounts
+  // Log when component mounts - only in development
   useEffect(() => {
-    console.log("🔄 ViewHistoryModal mounted");
+    if (__DEV__) {
+      console.log("🔄 ViewHistoryModal mounted");
+    }
     return () => {
-      console.log("🔄 ViewHistoryModal unmounted");
+      if (__DEV__) {
+        console.log("🔄 ViewHistoryModal unmounted");
+      }
     };
   }, []);
 
-  // Log when visibility changes
+  // Log when visibility changes - only when actually visible
   useEffect(() => {
-    console.log(`🔍 Modal visibility changed: ${isVisible}`);
+    if (isVisible && __DEV__) {
+      console.log(`🔍 Modal visibility changed: ${isVisible}`);
+    }
   }, [isVisible]);
 
   // Helper function to parse dates robustly
@@ -134,8 +137,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
       console.log("🔍 Checking if history text changed:");
       console.log(`Current text: ${historyText.substring(0, 30)}...`);
       console.log(
-        `Last saved: ${
-          lastSavedText ? lastSavedText.substring(0, 30) + "..." : "none"
+        `Last saved: ${lastSavedText ? lastSavedText.substring(0, 30) + "..." : "none"
         }`
       );
 
@@ -177,7 +179,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
       try {
         console.log("🌐 Attempting to fetch history from API...");
         const apiUrl =
-          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+          API_ENDPOINTS.PATIENT_PROCESSOR;
         const requestBody = {
           action: "getMedicalHistory",
           patientId: patientId,
@@ -404,7 +406,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
         try {
           console.log("🌐 Attempting to save history to API");
           const apiUrl =
-            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+            API_ENDPOINTS.PATIENT_PROCESSOR;
           const requestBody = {
             action: "updatePatientData",
             updateMode: true,
@@ -596,11 +598,11 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
           </View> */}
 
           {/* Content area */}
-        
-            <ScrollView style={styles.modalBody}>
-              {formatHistoryDisplay(historyText)}
-            </ScrollView>
-         
+
+          <ScrollView style={styles.modalBody}>
+            {formatHistoryDisplay(historyText)}
+          </ScrollView>
+
 
           <View style={styles.buttonContainer}>
             <TouchableOpacity

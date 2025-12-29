@@ -62,6 +62,12 @@ exports.handler = async (event) => {
                 body.status = "upcoming";
             }
 
+            // Allow patientId to be passed
+            if (body.patientId) {
+                // We trust the frontend to provide a valid patientId
+                // In a stricter system, we might verify it exists in the Patients table here
+            }
+
             // 2. DOUBLE BOOKING CHECK
             if (body.date && body.time && body.status !== "canceled") {
                 const scanParams = {

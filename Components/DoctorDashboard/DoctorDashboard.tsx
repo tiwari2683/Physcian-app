@@ -161,11 +161,12 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
               );
 
               const response = await fetch(API_URL, {
-                method: "DELETE",
+                method: "POST", // Changed to POST for Lambda
                 headers: {
                   "Content-Type": "application/json",
                 },
                 body: JSON.stringify({
+                  action: "deletePatient",
                   patientId: patient.patientId,
                 }),
               });
@@ -264,7 +265,14 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
         setIsLoading(true);
         setError(null);
 
-        const response = await fetch(API_URL);
+        // Updated to POST with getAllPatients action
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action: "getAllPatients" }),
+        });
 
         if (!response.ok) {
           throw new Error(`API Error: ${response.status}`);
@@ -298,7 +306,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
       }
     };
 
-    // Automatic polling function (runs every 5 seconds)
+    // Automatic polling function (runs every 30 seconds)
     const autoPollData = async () => {
       // Skip if component unmounted
       if (!isComponentMounted) return;
@@ -308,12 +316,16 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
         setIsFetching(true);
 
         // Fetch fresh data with cache control headers
+        // Updated to POST with getAllPatients action
         const response = await fetch(API_URL, {
+          method: "POST",
           headers: {
+            "Content-Type": "application/json",
             "Cache-Control": "no-cache, no-store, must-revalidate",
             Pragma: "no-cache",
             Expires: "0",
           },
+          body: JSON.stringify({ action: "getAllPatients" }),
         });
 
         if (!response.ok) {
@@ -365,7 +377,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
     // Initial fetch when component mounts
     initialFetchData();
 
-    // Set up polling interval for automatic refreshes every 5 seconds
+    // Set up polling interval for automatic refreshes every 30 seconds
     const intervalId = setInterval(autoPollData, POLLING_INTERVAL);
     console.log("Auto-polling started with interval:", POLLING_INTERVAL, "ms");
 
@@ -433,6 +445,60 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
       navigation.navigate("Profile");
     }
   };
+
+  // Helper to match NewAppointmentModal's date format (e.g., "Dec 29, 2025")
+  const getTodayDateString = () => {
+    const date = new Date();
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    // Note: NewAppointmentModal uses `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
+    return `${months[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`;
+  };
+
+  // State for appointments count
+  const [todaysAppointmentCount, setTodaysAppointmentCount] = useState<number>(0);
+
+  // Fetch appointments function
+  const fetchAppointmentsCount = async () => {
+    try {
+      // Use the APPOINTMENTS endpoint from Config
+      const response = await fetch(API_ENDPOINTS.APPOINTMENTS);
+      if (!response.ok) return; // Silent fail for dashboard stats
+
+      const data = await response.json();
+      if (Array.isArray(data)) {
+        const todayStr = getTodayDateString();
+        // Filter for appointments that match today's date string
+        const count = data.filter((app: any) => app.date === todayStr).length;
+        setTodaysAppointmentCount(count);
+      }
+    } catch (error) {
+      console.error("Failed to fetch appointment count:", error);
+    }
+  };
+
+  // Add fetchAppointmentsCount to the existing polling and initial load
+  // We can modify the existing useEffect or add a new one. 
+  // Let's hook into the existing polling mechanism by adding a separate effect for cleaner separation
+  // that runs on the same schedule.
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadAppointments = async () => {
+      if (isMounted) await fetchAppointmentsCount();
+    };
+
+    // Initial load
+    loadAppointments();
+
+    // Poll every 30s
+    const interval = setInterval(loadAppointments, POLLING_INTERVAL);
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   // View full image and reset zoom
   const handleViewImage = (imageUrl: string) => {
@@ -653,7 +719,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                       color="#FF9800"
                     />
                     <View style={styles.statContent}>
-                      <Text style={styles.statValue}>5</Text>
+                      <Text style={styles.statValue}>{todaysAppointmentCount}</Text>
                       <Text style={styles.statLabel}>Appointments</Text>
                     </View>
                   </View>
@@ -774,11 +840,13 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                 <View style={styles.patientCardHeader}>
                   <View style={styles.patientNameRow}>
                     <Text style={styles.patientName}>{patient.name}</Text>
-                    <View style={styles.patientMetaInfo}>
-                      <Text style={styles.patientId}>
-                        ID: {patient.patientId.substring(0, 8)}
-                      </Text>
-                    </View>
+                    {patient.patientId ? (
+                      <View style={styles.patientIdBadge}>
+                        <Text style={styles.patientIdText}>
+                          ID: #{patient.patientId.slice(-6).toUpperCase()}
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                   <View style={styles.patientInfo}>
                     <View style={styles.patientInfoItem}>
@@ -790,6 +858,11 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                       <Text style={styles.patientInfoText}>
                         {patient.age} years • {patient.sex}
                       </Text>
+                      {patient.status === 'PRE_REGISTERED' && (
+                        <View style={{ backgroundColor: '#E3F2FD', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 }}>
+                          <Text style={{ fontSize: 10, color: '#0070D6', fontWeight: '600' }}>PRE-REG</Text>
+                        </View>
+                      )}
                     </View>
                     <View style={styles.patientInfoItem}>
                       <Ionicons name="time-outline" size={14} color="#718096" />
@@ -1446,21 +1519,27 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 4,
+    marginBottom: 6,
   },
   patientName: {
     fontSize: 16,
     fontWeight: "600",
     color: "#2D3748",
+    flex: 1, // Allow name to take available space
+    marginRight: 8,
   },
-  patientMetaInfo: {
-    flexDirection: "row",
-    alignItems: "center",
+  patientIdBadge: {
+    backgroundColor: "#F7FAFC",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
-  patientId: {
-    fontSize: 12,
-    color: "#718096",
-    fontWeight: "500",
+  patientIdText: {
+    fontSize: 11,
+    color: "#4A5568",
+    fontWeight: "600",
   },
   patientInfo: {
     flexDirection: "row",

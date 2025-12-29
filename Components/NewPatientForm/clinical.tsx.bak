@@ -1,4 +1,4 @@
-﻿import React, {
+import React, {
   // Force rebuild
   useState,
   useRef,
@@ -121,7 +121,7 @@ const formatHistoryForDisplay = (historyText) => {
       } catch (e) {
         // If date parsing fails, use a default date
         console.log(
-          `âŒ Error parsing date from timestamp: ${markers[i].timestamp}`,
+          `❌ Error parsing date from timestamp: ${markers[i].timestamp}`,
           e
         );
         date = new Date(0);
@@ -164,30 +164,8 @@ const formatHistoryForDisplay = (historyText) => {
   );
 };
 
-// Define TypeScript interface for ClinicalTab props
-interface ClinicalTabProps {
-  patientData: any;
-  updateField: (field: string, value: any) => void;
-  reportFiles: any[];
-  clinicalParameters: any;
-  setClinicalParameters: (params: any) => void;
-  showDatePicker: boolean;
-  setShowDatePicker: (show: boolean) => void;
-  tempDate: Date;
-  setTempDate: (date: Date) => void;
-  handleDateChange: (event: any, selectedDate?: Date) => void;
-  pickDocument: (file?: any) => void;
-  removeReportFile: (index: number) => void;
-  isFileAlreadyUploaded: (file: any) => boolean;
-  savedSections: any;
-  patientId: string;
-  prefillMode?: boolean;
-  hideBasicTab?: boolean;
-  saveNewHistoryEntryToStorage?: (pId: string, text: string) => Promise<boolean>;
-}
-
-// Modify the component definition to use forwardRef with proper typing
-const ClinicalTab = forwardRef<any, ClinicalTabProps>(
+// Modify the component definition to use forwardRef
+const ClinicalTab = forwardRef(
   (
     {
       patientData,
@@ -249,11 +227,1331 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       patientData,
     });
 
+    // Enhanced function to remove report file from both frontend and backend
+    const removeReportFileWithBackend = async (index) => {
+      try {
+        console.log(`🗑️ Starting removal of file at index ${index}`);
+
+        if (!reportFiles || index < 0 || index >= reportFiles.length) {
+          console.error(`❌ Invalid file index: ${index}`);
+          Alert.alert("Error", "Invalid file selection for removal.");
+          return;
+        }
+
+        const fileToRemove = reportFiles[index];
+        console.log(`🗑️ Removing file: ${fileToRemove.name || "unnamed"}`);
+        console.log(
+          `🗑️ File URL: ${fileToRemove.url || fileToRemove.uri || "no URL"}`
+        );
+
+        // Show confirmation dialog
+        Alert.alert(
+          "Delete File",
+          `Are you sure you want to delete "${fileToRemove.name || "this file"
+          }"? This action cannot be undone.`,
+          [
+            {
+              text: "Cancel",
+              style: "cancel",
+            },
+            {
+              text: "Delete",
+              style: "destructive",
+              onPress: async () => {
+                try {
+                  console.log(
+                    `🗑️ User confirmed deletion of file: ${fileToRemove.name}`
+                  );
+
+                  // If we have a patientId and the file has a URL, call backend deletion
+                  if (patientId && (fileToRemove.url || fileToRemove.uri)) {
+                    console.log(
+                      `🗑️ Calling backend deletion for patient ${patientId}`
+                    );
+
+                    const apiUrl =
+                      "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+                    const requestBody = {
+                      action: "deletePatientFile",
+                      patientId: patientId,
+                      fileUrl: fileToRemove.url || fileToRemove.uri,
+                      fileName: fileToRemove.name,
+                    };
+
+                    console.log(
+                      `📤 Sending deletion request:`,
+                      JSON.stringify(requestBody, null, 2)
+                    );
+
+                    const response = await fetch(apiUrl, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Accept: "application/json",
+                        "Cache-Control": "no-cache",
+                      },
+                      body: JSON.stringify(requestBody),
+                    });
+
+                    console.log(
+                      `📥 Deletion response status: ${response.status}`
+                    );
+
+                    const responseText = await response.text();
+                    console.log(
+                      `📥 Raw response: ${responseText.substring(0, 500)}`
+                    );
+
+                    let result;
+                    try {
+                      result = JSON.parse(responseText);
+                    } catch (parseError) {
+                      console.error(
+                        `❌ Error parsing deletion response: ${parseError.message}`
+                      );
+                      throw new Error("Invalid response from server");
+                    }
+
+                    // FIXED: Handle nested response structure from AWS Lambda
+                    let actualResult = result;
+
+                    // Check if this is a Lambda response with statusCode and body
+                    if (result.statusCode && result.body) {
+                      console.log(
+                        "🔄 Detected Lambda response format, extracting body"
+                      );
+                      try {
+                        // Parse the body if it's a string
+                        actualResult =
+                          typeof result.body === "string"
+                            ? JSON.parse(result.body)
+                            : result.body;
+                        console.log(
+                          "✅ Successfully extracted body from Lambda response"
+                        );
+                      } catch (bodyParseError) {
+                        console.error(
+                          `❌ Error parsing Lambda response body: ${bodyParseError.message}`
+                        );
+                        throw new Error("Invalid Lambda response body format");
+                      }
+                    }
+
+                    console.log(
+                      "🔍 Final parsed result:",
+                      JSON.stringify(actualResult, null, 2)
+                    );
+
+                    // Handle the response using the actual result
+                    if (actualResult.success) {
+                      console.log(`✅ Backend deletion successful`);
+                      console.log(`📋 Deletion details:`, actualResult.details);
+
+                      // Remove from local state only if backend deletion was successful
+                      removeReportFile(index);
+
+                      // Show success message
+                      Alert.alert(
+                        "Success",
+                        `File "${fileToRemove.name}" has been deleted successfully.`,
+                        [{ text: "OK" }]
+                      );
+                    } else {
+                      console.error(
+                        `❌ Backend deletion failed: ${actualResult.error || "Unknown error"
+                        }`
+                      );
+
+                      // Ask user if they want to remove from local state anyway
+                      Alert.alert(
+                        "Deletion Warning",
+                        `Failed to delete file from server: ${actualResult.error || "Unknown error"
+                        }\n\nWould you like to remove it from the list anyway?`,
+                        [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Remove from List",
+                            style: "destructive",
+                            onPress: () => {
+                              removeReportFile(index);
+                              console.log(
+                                `⚠️ Removed file from local state despite backend failure`
+                              );
+                            },
+                          },
+                        ]
+                      );
+                    }
+                  } else {
+                    // No patientId or no URL - just remove from local state
+                    console.log(
+                      `🗑️ No backend deletion needed (no patientId or URL), removing from local state only`
+                    );
+                    removeReportFile(index);
+
+                    Alert.alert(
+                      "Removed",
+                      `File "${fileToRemove.name}" has been removed from the list.`,
+                      [{ text: "OK" }]
+                    );
+                  }
+                } catch (error) {
+                  console.error(
+                    `❌ Error during file deletion: ${error.message}`
+                  );
+                  console.error(error.stack);
+
+                  // Ask user if they want to remove from local state anyway
+                  Alert.alert(
+                    "Deletion Error",
+                    `An error occurred while deleting the file: ${error.message}\n\nWould you like to remove it from the list anyway?`,
+                    [
+                      { text: "Cancel", style: "cancel" },
+                      {
+                        text: "Remove from List",
+                        style: "destructive",
+                        onPress: () => {
+                          removeReportFile(index);
+                          console.log(
+                            `⚠️ Removed file from local state after error`
+                          );
+                        },
+                      },
+                    ]
+                  );
+                }
+              },
+            },
+          ]
+        );
+      } catch (error) {
+        console.error(
+          `❌ Error in removeReportFileWithBackend: ${error.message}`
+        );
+        Alert.alert("Error", `Failed to remove file: ${error.message}`);
+      }
+    };
+
+    // Handle app state changes for navigation persistence - FIXED to prevent infinite loops
+    useEffect(() => {
+      let isComponentMounted = true;
+
+      const handleAppStateChange = (nextAppState) => {
+        if (!isComponentMounted || !patientId) return;
+
+        console.log(`📱 App state changed to: ${nextAppState}`);
+
+        if (nextAppState === "background") {
+          // Save current state when going to background (especially important for picker operations)
+          const currentState = {
+            timestamp: Date.now(),
+            expandedSections,
+            patientId,
+            routeName: "ClinicalTab",
+            currentRoute: "NewPatientForm", // Important: Save that we're in NewPatientForm
+            isPickerOperation: isPickerActive, // Track if this is a picker operation
+            hideBasicTab: true, // Preserve the hideBasicTab state
+            initialTab: "clinical", // Preserve the initial tab
+          };
+
+          // Save to multiple keys for better recovery
+          AsyncStorage.multiSet([
+            ["NAVIGATION_STATE_CLINICAL", JSON.stringify(currentState)],
+            [
+              "CURRENT_PATIENT_STATE",
+              JSON.stringify({
+                patientId,
+                routeName: "NewPatientForm",
+                hideBasicTab: true,
+                initialTab: "clinical",
+                timestamp: Date.now(),
+              }),
+            ],
+            [
+              "APP_LIFECYCLE_STATE",
+              JSON.stringify({
+                isPickerOperation: isPickerActive,
+                lastActiveTime: Date.now(),
+                currentRoute: "NewPatientForm",
+              }),
+            ],
+          ])
+            .then(() =>
+              console.log("💾 Complete app state saved for picker operation")
+            )
+            .catch((error) =>
+              console.error("❌ Error saving complete app state:", error)
+            );
+        }
+      };
+
+      const subscription = AppState.addEventListener(
+        "change",
+        handleAppStateChange
+      );
+
+      // One-time restore on component mount with delay - FIXED to prevent infinite loops
+      const initializeState = async () => {
+        if (!isComponentMounted || !patientId) return;
+
+        await new Promise((resolve) => setTimeout(resolve, 300)); // Slightly longer delay
+
+        if (!isComponentMounted) return;
+
+        try {
+          const savedState = await AsyncStorage.getItem(
+            "NAVIGATION_STATE_CLINICAL"
+          );
+          if (savedState && isComponentMounted) {
+            const parsedState = JSON.parse(savedState);
+            if (
+              parsedState.patientId === patientId &&
+              parsedState.expandedSections
+            ) {
+              console.log(
+                "🔄 One-time initial restore:",
+                parsedState.expandedSections
+              );
+              setExpandedSections(parsedState.expandedSections);
+
+              // Clear the saved state after restoring to prevent repeated restores
+              await AsyncStorage.removeItem("NAVIGATION_STATE_CLINICAL");
+              console.log(
+                "🧹 Cleared navigation state after restore to prevent loops"
+              );
+            }
+          }
+        } catch (error) {
+          console.error("❌ Initial restore error:", error);
+        }
+      };
+
+      // Only initialize once per patient
+      initializeState();
+
+      return () => {
+        isComponentMounted = false;
+        subscription?.remove();
+      };
+    }, [patientId]); // REMOVED expandedSections and isPickerActive to prevent infinite loops
+
+    // Enhanced function to create permanent file storage
+    const createPermanentFileStorage = async (tempUri, fileName) => {
+      try {
+        console.log(`📁 Creating permanent storage for: ${fileName}`);
+
+        // Create reports directory if it doesn't exist
+        const reportsDir = `${FileSystem.documentDirectory}reportFiles/`;
+        const dirInfo = await FileSystem.getInfoAsync(reportsDir);
+
+        if (!dirInfo.exists) {
+          console.log("📁 Creating reportFiles directory");
+          await FileSystem.makeDirectoryAsync(reportsDir, {
+            intermediates: true,
+          });
+        }
+
+        // Generate unique filename to prevent conflicts
+        const timestamp = Date.now();
+        const cleanFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, "_");
+        const permanentPath = `${reportsDir}${timestamp}_${cleanFileName}`;
+
+        console.log(`📋 Copying from ${tempUri} to ${permanentPath}`);
+
+        // Copy file from temporary location to permanent storage
+        await FileSystem.copyAsync({
+          from: tempUri,
+          to: permanentPath,
+        });
+
+        // Verify the copy was successful
+        const fileInfo = await FileSystem.getInfoAsync(permanentPath);
+        if (!fileInfo.exists) {
+          throw new Error("File copy verification failed");
+        }
+
+        console.log(`✅ File successfully stored at: ${permanentPath}`);
+        console.log(`📏 File size: ${fileInfo.size} bytes`);
+
+        return {
+          success: true,
+          permanentPath,
+          fileSize: fileInfo.size,
+        };
+      } catch (error) {
+        console.error("❌ Error creating permanent file storage:", error);
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+    };
+
+    // Enhanced pickDocument wrapper with proper error handling
+    const safePickDocument = async (fileObject) => {
+      console.log("🔄 SafePickDocument called with:", {
+        name: fileObject?.name,
+        type: fileObject?.type,
+        uri: fileObject?.uri ? fileObject.uri.substring(0, 50) + "..." : "none",
+      });
+
+      try {
+        // Validate the file object
+        if (!fileObject || !fileObject.uri) {
+          throw new Error("Invalid file object provided to pickDocument");
+        }
+
+        // Store original function reference to avoid issues
+        const originalPickDocument = pickDocument;
+
+        if (typeof originalPickDocument !== "function") {
+          throw new Error("pickDocument is not available or not a function");
+        }
+
+        // Create permanent storage for the file
+        const storageResult = await createPermanentFileStorage(
+          fileObject.uri,
+          fileObject.name || "unknown_file"
+        );
+
+        if (!storageResult.success) {
+          throw new Error(`File storage failed: ${storageResult.error}`);
+        }
+
+        // Update file object with permanent path
+        const updatedFileObject = {
+          ...fileObject,
+          uri: storageResult.permanentPath,
+          originalUri: fileObject.uri,
+          size: storageResult.fileSize,
+          isPermanent: true,
+        };
+
+        console.log(
+          "📤 Calling original pickDocument with updated file object"
+        );
+        await originalPickDocument(updatedFileObject);
+
+        console.log("✅ File successfully added to reportFiles");
+        return true;
+      } catch (error) {
+        console.error("❌ Error in safePickDocument:", error);
+        const errorDetails = ImagePickerErrorHandler.handleError(
+          error,
+          "safePickDocument"
+        );
+
+        Alert.alert("File Processing Error", errorDetails.userMessage, [
+          { text: "OK" },
+        ]);
+
+        return false;
+      }
+    };
+
+    // Add this function to save the history text
+    // Enhanced function to save the history text with improved AsyncStorage handling
+    const saveDirectHistoryToMedicalHistory = async () => {
+      if (directHistoryText.trim()) {
+        console.log("📝 Saving direct history text to medical history");
+        console.log(`Current text: "${directHistoryText.substring(0, 30)}..."`);
+
+        // Check if there's existing medical history
+        const timestamp = new Date().toLocaleString();
+        let updatedHistory = "";
+
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+          console.log("Adding entry to existing medical history");
+        } else {
+          updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+          console.log("Creating first medical history entry");
+        }
+
+        // Call the updateField function to update the medicalHistory field
+        updateField("medicalHistory", updatedHistory);
+        console.log(
+          `Updated medicalHistory field, new length: ${updatedHistory.length}`
+        );
+
+        // Clear the pending history from ALL AsyncStorage keys for this patient
+        if (patientId) {
+          try {
+            await AsyncStorage.removeItem(`pending_history_${patientId}`);
+            await AsyncStorage.removeItem(`new_history_input_${patientId}`);
+            console.log(
+              `✅ Cleared all history cache from AsyncStorage for ${patientId}`
+            );
+          } catch (clearError) {
+            console.error("Error clearing AsyncStorage:", clearError);
+          }
+        }
+
+        // Clear the input after updating
+        setDirectHistoryText("");
+
+        console.log("✅ History text updated in patientData, ready for save");
+        return true;
+      } else {
+        console.log("⚠️ No history text to save (empty input)");
+        return false;
+      }
+    };
+
+    const getLatestMedicalHistory = () => {
+      console.log("📋 Getting latest medical history for API request");
+
+      // If directHistoryText has content, include it in the return value
+      if (directHistoryText && directHistoryText.trim()) {
+        console.log(
+          "📝 Including pending direct history text in medical history"
+        );
+        const timestamp = new Date().toLocaleString();
+
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          return `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+        } else {
+          return `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+        }
+      }
+
+      return patientData.medicalHistory;
+    };
+
+    const transferHistoryText = () => {
+      if (directHistoryText.trim()) {
+        console.log("📝 Transferring history text to medical history display");
+
+        // Create a timestamp for the new entry
+        const timestamp = new Date().toLocaleString();
+        let updatedHistory = "";
+
+        // Format the new history with the timestamp
+        if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+          updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+        } else {
+          updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+        }
+
+        // Update the medicalHistory field to make it visible in the UI
+        updateField("medicalHistory", updatedHistory);
+        console.log(
+          `✅ Visibly updated medicalHistory field, length: ${updatedHistory.length}`
+        );
+
+        // Clear the input field
+        setDirectHistoryText("");
+
+        // Clear AsyncStorage
+        if (patientId) {
+          AsyncStorage.removeItem(`pending_history_${patientId}`);
+          AsyncStorage.removeItem(`new_history_input_${patientId}`);
+        }
+
+        return true;
+      }
+      return false;
+    };
+
+    // Expose methods to parent via ref
     useImperativeHandle(ref, () => ({
       saveDirectHistoryToMedicalHistory,
       getLatestMedicalHistory,
       transferHistoryText, // Add this new function
     }));
+
+    // Use effect to save the direct history text to AsyncStorage as soon as it changes
+    useEffect(() => {
+      // Only save to AsyncStorage if there's actual text and a patientId
+      if (directHistoryText.trim() && patientId) {
+        console.log(
+          `📝 Saving pending history text to AsyncStorage for patient ${patientId}`
+        );
+        const savePendingHistory = async () => {
+          try {
+            // Save to both key formats for maximum compatibility
+            await AsyncStorage.setItem(
+              `pending_history_${patientId}`,
+              directHistoryText
+            );
+            await AsyncStorage.setItem(
+              `new_history_input_${patientId}`,
+              directHistoryText
+            );
+            console.log(
+              "✅ Pending history saved to AsyncStorage using both key formats"
+            );
+          } catch (error) {
+            console.error(
+              "❌ Error saving pending history to AsyncStorage:",
+              error
+            );
+          }
+        };
+
+        savePendingHistory();
+      }
+    }, [directHistoryText, patientId]);
+
+    // Function to handle saving new history - MODIFIED to properly prepend new entries
+    const handleSaveNewHistory = (newHistoryText) => {
+      // If there's existing history, prepend the new one with a timestamp and separator
+      const timestamp = new Date().toLocaleString();
+      let updatedHistory = "";
+
+      if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
+        updatedHistory = `--- New Entry (${timestamp}) ---\n${newHistoryText}\n\n${patientData.medicalHistory}`;
+      } else {
+        updatedHistory = `--- Entry (${timestamp}) ---\n${newHistoryText}`;
+      }
+
+      // Call the updateField function to update the medicalHistory field
+      updateField("medicalHistory", updatedHistory);
+
+      // Close the modal
+      setAddHistoryModalVisible(false);
+
+      // Show confirmation to user
+      Alert.alert("Success", "New history entry has been added.");
+
+      // Force refresh history display if needed
+      if (historyModalVisible) {
+        setHistoryModalVisible(false);
+        setTimeout(() => setHistoryModalVisible(true), 100);
+      }
+    };
+
+    // Toggle function for collapsible sections - FIXED to prevent infinite loops
+    const toggleSection = (section) => {
+      setExpandedSections((prev) => ({
+        ...prev,
+        [section]: !prev[section],
+      }));
+      // Removed saveNavigationState() call that was causing infinite loops
+    };
+
+    // Simplified debounced save of navigation state - FIXED to reduce frequency
+    useEffect(() => {
+      if (!patientId) return;
+
+      const timeoutId = setTimeout(() => {
+        // Only save if we have valid, changed data and not during initial setup
+        if (
+          expandedSections &&
+          Object.keys(expandedSections).length > 0 &&
+          JSON.stringify(expandedSections) !==
+          JSON.stringify({
+            history: true,
+            reports: false,
+            clinicalParameters: false,
+          })
+        ) {
+          // Don't save if it's just the default state
+
+          const currentState = {
+            timestamp: Date.now(),
+            expandedSections,
+            patientId,
+            routeName: "ClinicalTab",
+          };
+
+          AsyncStorage.setItem(
+            "NAVIGATION_STATE_CLINICAL_BACKUP",
+            JSON.stringify(currentState)
+          )
+            .then(() => console.log("💾 Backup navigation state saved"))
+            .catch((error) =>
+              console.error("❌ Error saving backup navigation state:", error)
+            );
+        }
+      }, 1000); // Increased debounce to 1 second
+
+      return () => clearTimeout(timeoutId);
+    }, [expandedSections, patientId]);
+
+    // Key fix: Add a useEffect that resets parameters when patient changes
+    useEffect(() => {
+      // This effect runs when the patientId changes (i.e., when viewing a different patient)
+      console.log(`🔄 Patient ID changed to: ${patientId || "not set"}`);
+
+      if (patientId) {
+        // Clear the current parameters first to avoid showing old data
+        setClinicalParameters({
+          date: new Date(),
+          inr: "",
+          hb: "",
+          wbc: "",
+          platelet: "",
+          bilirubin: "",
+          sgot: "",
+          sgpt: "",
+          alt: "",
+          tprAlb: "",
+          ureaCreat: "",
+          sodium: "",
+          fastingHBA1C: "",
+          pp: "",
+          tsh: "",
+          ft4: "",
+          others: "",
+        });
+
+        console.log("🧹 Cleared old clinical parameters");
+
+        // Then fetch data for the current patient
+        fetchCurrentPatientData();
+      }
+    }, [patientId]); // This ensures the effect runs when patientId changes
+
+    // Add handler for parameter updates that forces a new timestamp
+    const handleParameterUpdate = (field, value) => {
+      console.log(`🔄 Updating parameter: ${field} = ${value}`);
+      setClinicalParameters((prev) => {
+        // Create a copy of previous state with the updated field
+        const updated = {
+          ...prev,
+          [field]: value,
+          // Force a new timestamp for each update to ensure unique timestamps in history
+          date: new Date(),
+        };
+
+        console.log(
+          "📋 Updated clinical parameters:",
+          JSON.stringify({
+            [field]: value,
+            date: updated.date,
+          })
+        );
+
+        // Store the updated parameters in AsyncStorage for persistence
+        if (patientId) {
+          try {
+            const storageKey = `clinical_params_${patientId}`;
+            AsyncStorage.setItem(storageKey, JSON.stringify(updated))
+              .then(() =>
+                console.log(
+                  `✅ Saved parameter update to storage for: ${patientId}`
+                )
+              )
+              .catch((err) =>
+                console.error(
+                  `❌ Error saving parameter update: ${err.message}`
+                )
+              );
+          } catch (e) {
+            console.error("❌ Error preparing storage update:", e);
+          }
+        }
+
+        return updated;
+      });
+    };
+
+    // Add this helper function to update input fields from a record
+    const updateInputFieldsFromRecord = (record) => {
+      if (!record) {
+        console.log(
+          "⚠️ updateInputFieldsFromRecord: Received null or undefined record"
+        );
+        return;
+      }
+
+      console.log(
+        "📋 Updating input fields with data:",
+        Object.keys(record).join(", ")
+      );
+
+      // Log the actual values for debugging
+      Object.keys(record).forEach((key) => {
+        console.log(`📝 ${key}: ${record[key]}`);
+      });
+
+      // Create a copy of the record
+      const updatedParams = { ...record };
+
+      // Convert date string to Date object if needed
+      if (typeof updatedParams.date === "string") {
+        console.log(
+          `🗓️ Converting date string to Date object: ${updatedParams.date}`
+        );
+        updatedParams.date = new Date(updatedParams.date);
+      } else if (!updatedParams.date) {
+        console.log("🗓️ No date found, using current date");
+        updatedParams.date = new Date();
+      }
+
+      console.log("🔄 Setting clinical parameters state");
+      // Update clinical parameters state
+      setClinicalParameters(updatedParams);
+
+      // Also update the date picker
+      if (updatedParams.date) {
+        console.log(`🗓️ Setting tempDate: ${updatedParams.date}`);
+        setTempDate(updatedParams.date);
+      }
+
+      console.log("✅ Updated clinical parameters with data from record");
+    };
+
+    // Improved fetchCurrentPatientData function to handle DynamoDB formatted data
+    const fetchCurrentPatientData = async () => {
+      try {
+        console.log(
+          `🔍 FETCH CALLED: Getting clinical data for patient: ${patientId}`
+        );
+
+        // Add at the top of the function:
+        if (!patientId) {
+          console.log("⚠️ No patient ID available, skipping data fetch");
+          return;
+        }
+
+        // Reset any previous errors
+        setApiError(null);
+
+        const apiUrl =
+          "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+        console.log("📡 API URL:", apiUrl);
+
+        const requestBody = {
+          action: "getPatient",
+          patientId: patientId,
+        };
+
+        console.log("📤 Request body:", JSON.stringify(requestBody, null, 2));
+
+        console.log("⏳ Sending API request...");
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+            "Cache-Control": "no-cache",
+          },
+          body: JSON.stringify(requestBody),
+        });
+
+        console.log(`📥 Response received, status: ${response.status}`);
+        const responseText = await response.text();
+        console.log(
+          `📄 Raw Response (first 500 chars): ${responseText.substring(0, 500)}`
+        );
+
+        let result;
+        try {
+          console.log("🔄 Parsing response JSON...");
+          result = JSON.parse(responseText);
+          console.log(
+            "📋 Parsed response:",
+            JSON.stringify(result, null, 2).substring(0, 500) + "..."
+          );
+        } catch (parseError) {
+          console.error("❌ Error parsing response JSON:", parseError);
+          console.log("📄 Raw response that couldn't be parsed:", responseText);
+          setApiError("Failed to parse API response: " + parseError.message);
+          return;
+        }
+
+        // Parse nested response if needed
+        const data = result.body
+          ? typeof result.body === "string"
+            ? JSON.parse(result.body)
+            : result.body
+          : result;
+
+        console.log(
+          "🔄 Processed data after handling nested structures:",
+          Object.keys(data).join(", ")
+        );
+
+        if (data.success && data.patient) {
+          console.log("✅ Patient data received successfully");
+          console.log(
+            "📋 Patient data structure:",
+            Object.keys(data.patient).join(", ")
+          );
+
+          // Check for clinicalParameters in different possible formats
+          let clinicalParams = null;
+
+          if (data.patient.clinicalParameters) {
+            console.log("📋 Found clinicalParameters field in patient data");
+            console.log(
+              "🔍 Raw clinicalParameters:",
+              JSON.stringify(data.patient.clinicalParameters).substring(0, 500)
+            );
+
+            // Check if it's in DynamoDB format or plain JS format
+            if (data.patient.clinicalParameters.M) {
+              console.log("🔄 Detected DynamoDB format, converting...");
+              try {
+                clinicalParams = unmarshallDynamoDBObject(
+                  data.patient.clinicalParameters
+                );
+                console.log("✅ Successfully converted from DynamoDB format");
+              } catch (conversionError) {
+                console.error(
+                  "❌ Error converting from DynamoDB format:",
+                  conversionError
+                );
+                setApiError(
+                  "Error processing clinical parameters: " +
+                  conversionError.message
+                );
+              }
+            } else {
+              console.log("✅ clinicalParameters already in standard format");
+              clinicalParams = data.patient.clinicalParameters;
+            }
+
+            if (clinicalParams) {
+              console.log(
+                "📋 Parameters after processing:",
+                Object.keys(clinicalParams).join(", ")
+              );
+              // Log each parameter value
+              Object.keys(clinicalParams).forEach((key) => {
+                console.log(`📊 ${key}: ${clinicalParams[key]}`);
+              });
+              updateInputFieldsFromRecord(clinicalParams);
+            } else {
+              console.warn("⚠️ clinicalParams is null after processing");
+            }
+          } else {
+            console.log("📋 No clinicalParameters found in patient data");
+            console.log(
+              "📋 Available fields in patient data:",
+              Object.keys(data.patient).join(", ")
+            );
+
+            // Check if there are other fields in the patient data that might have the clinical parameters
+            Object.keys(data.patient).forEach((key) => {
+              console.log(`🔍 Examining field: ${key}`);
+              if (
+                typeof data.patient[key] === "object" &&
+                data.patient[key] !== null
+              ) {
+                console.log(
+                  `📊 Type of ${key}: Object with keys: ${Object.keys(
+                    data.patient[key]
+                  ).join(", ")}`
+                );
+              } else {
+                console.log(`📊 Type of ${key}: ${typeof data.patient[key]}`);
+              }
+            });
+          }
+        } else {
+          console.warn("⚠️ No valid patient data found in API response");
+          if (data.error) {
+            console.error("❌ API Error:", data.error);
+            setApiError("API Error: " + data.error);
+          } else {
+            console.log(
+              "📋 Data returned without patient info:",
+              JSON.stringify(data, null, 2)
+            );
+            setApiError("No patient data returned from API");
+          }
+        }
+      } catch (error) {
+        console.error("❌ Error fetching current patient data:", error);
+        console.error("📚 Error stack:", error.stack);
+        setApiError("Error: " + error.message);
+
+        // Attempt to retrieve values from localStorage as a fallback
+        console.log(
+          "🔄 Attempting to retrieve values from localStorage as fallback"
+        );
+        try {
+          const storageKey = `clinical_params_${patientId}`;
+          const storedData = await AsyncStorage.getItem(storageKey);
+
+          if (storedData) {
+            console.log("✅ Found stored clinical parameters");
+            const parsedParams = JSON.parse(storedData);
+            updateInputFieldsFromRecord(parsedParams);
+          } else {
+            console.log("❌ No stored clinical parameters found");
+          }
+        } catch (storageError) {
+          console.error("❌ Error retrieving from localStorage:", storageError);
+        }
+      }
+    };
+
+    // Effect to fetch historical data when patient ID changes or when the section is saved
+    useEffect(() => {
+      if (patientId && savedSections?.clinical) {
+        fetchHistoricalData();
+      }
+    }, [patientId, savedSections?.clinical]);
+
+    // Add this effect to initialize clinical parameters when component mounts
+    useEffect(() => {
+      // Try to initialize clinical parameters when patientId becomes available
+      if (
+        patientId &&
+        patientId !== "undefined" &&
+        !patientId.startsWith("temp_")
+      ) {
+        console.log(
+          "🔄 Initializing clinical parameters for existing patient:",
+          patientId
+        );
+        fetchCurrentPatientData();
+      }
+    }, [patientId]);
+
+    // Improved fetchHistoricalData function to handle DynamoDB formatted data
+    const fetchHistoricalData = async (forceRefresh = false) => {
+      // Start loading state
+      setIsLoading(true);
+
+      console.log(
+        "🔄 Fetching historical clinical data for patient:",
+        patientId
+      );
+
+      try {
+        // Ensure we have a date for the current parameters
+        if (!clinicalParameters.date) {
+          console.log(
+            "🗓️ No date in current parameters, setting to current date"
+          );
+          setClinicalParameters((prev) => ({
+            ...prev,
+            date: new Date(),
+          }));
+        }
+
+        // Create a record with the current parameters
+        const currentRecord = {
+          ...clinicalParameters,
+          isCurrent: true,
+          date: clinicalParameters.date || new Date(),
+        };
+
+        console.log(
+          "📋 Current parameters record:",
+          JSON.stringify(currentRecord, null, 2)
+        );
+
+        // Start with at least the current record in the historical data
+        let updatedHistoricalData = [currentRecord];
+        setHistoricalData(updatedHistoricalData);
+        setDataFetched(true);
+
+        // First try to get data from AsyncStorage (for offline access)
+        if (patientId) {
+          const storageKey = `clinical_history_${patientId}`;
+          console.log("🔍 Checking AsyncStorage for key:", storageKey);
+
+          try {
+            const storedData = await AsyncStorage.getItem(storageKey);
+
+            if (storedData) {
+              console.log("✅ Found stored historical data");
+              let parsedData;
+              try {
+                parsedData = JSON.parse(storedData);
+                console.log(
+                  `📋 Found ${parsedData.length} historical records in storage`
+                );
+              } catch (parseError) {
+                console.error("❌ Error parsing stored data:", parseError);
+                console.log("📄 Raw stored data:", storedData);
+              }
+
+              if (parsedData && Array.isArray(parsedData)) {
+                // Don't overwrite current parameters with stored data
+                // Instead, combine them with current at the beginning
+                const filteredStoredData = parsedData.filter((item) => {
+                  // Keep all items regardless of date - we'll use timestamp to differentiate
+                  if (!item.date) return false;
+                  if (!currentRecord.date) return true;
+
+                  // Instead of just comparing the date, compare the full timestamp to avoid filtering out same-day entries
+                  const itemTimestamp = new Date(item.date).getTime();
+                  const currentTimestamp = new Date(
+                    currentRecord.date
+                  ).getTime();
+
+                  // Only filter out exact matching timestamps (allowing multiple entries per day)
+                  return itemTimestamp !== currentTimestamp;
+                });
+
+                console.log(
+                  `📋 After filtering, ${filteredStoredData.length} records remain`
+                );
+                updatedHistoricalData = [currentRecord, ...filteredStoredData];
+                setHistoricalData(updatedHistoricalData);
+              }
+            } else {
+              console.log("📋 No stored historical data found");
+            }
+          } catch (storageError) {
+            console.error("❌ Error accessing AsyncStorage:", storageError);
+          }
+
+          // Also fetch from API to get the latest data
+          console.log("🔄 Fetching data from API");
+          const apiUrl =
+            "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+
+          // Use getPatient action instead of fetchClinicalHistory for better compatibility
+          const requestBody = {
+            action: "getPatient",
+            patientId: patientId,
+          };
+
+          // Make the API call
+          console.log(
+            "📤 Sending API request:",
+            JSON.stringify(requestBody, null, 2)
+          );
+          try {
+            const response = await fetch(apiUrl, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                Pragma: "no-cache",
+                Expires: "0",
+              },
+              body: JSON.stringify(requestBody),
+            });
+
+            console.log(`📥 Response received, status: ${response.status}`);
+            const responseText = await response.text();
+
+            // Only log a portion of potentially large responses
+            console.log(
+              `📄 Raw response (first 500 chars): ${responseText.substring(
+                0,
+                500
+              )}`
+            );
+
+            let result;
+            try {
+              result = JSON.parse(responseText);
+            } catch (parseError) {
+              console.error("❌ Error parsing response JSON:", parseError);
+              console.log(
+                "❌ Raw response that couldn't be parsed:",
+                responseText
+              );
+              throw new Error("Failed to parse API response");
+            }
+
+            // Check if the response contains a body that needs to be parsed
+            const data = result.body
+              ? typeof result.body === "string"
+                ? JSON.parse(result.body)
+                : result.body
+              : result;
+
+            console.log(
+              "📋 Processed API response data:",
+              Object.keys(data).join(", ")
+            );
+
+            // Process the patient data to get clinical parameters
+            if (data.success && data.patient) {
+              console.log("✅ Patient data received from API");
+              let patientClinicalParams = data.patient.clinicalParameters;
+
+              console.log(
+                "🔍 Raw clinicalParameters from API:",
+                patientClinicalParams
+                  ? JSON.stringify(patientClinicalParams).substring(0, 500)
+                  : "undefined or null"
+              );
+
+              // Check if clinicalParameters is in DynamoDB format and convert if needed
+              if (patientClinicalParams && patientClinicalParams.M) {
+                console.log(
+                  "🔄 Converting DynamoDB formatted clinicalParameters from API response"
+                );
+                try {
+                  patientClinicalParams = unmarshallDynamoDBObject(
+                    patientClinicalParams
+                  );
+                  console.log("✅ Successfully converted from DynamoDB format");
+                } catch (conversionError) {
+                  console.error(
+                    "❌ Error converting from DynamoDB format:",
+                    conversionError
+                  );
+                  throw new Error(
+                    "Error processing clinical parameters: " +
+                    conversionError.message
+                  );
+                }
+              }
+
+              if (patientClinicalParams) {
+                console.log(
+                  "📋 Clinical parameters found in API response:",
+                  Object.keys(patientClinicalParams).join(", ")
+                );
+
+                // Compare full timestamps instead of just dates
+                const apiParamsTimestamp = patientClinicalParams.date
+                  ? new Date(patientClinicalParams.date).getTime()
+                  : null;
+                const currentParamsTimestamp = currentRecord.date
+                  ? new Date(currentRecord.date).getTime()
+                  : null;
+
+                console.log(
+                  `🗓️ API timestamp: ${apiParamsTimestamp}, Current timestamp: ${currentParamsTimestamp}`
+                );
+
+                // Add to history unless it's exactly the same timestamp (allowing multiple entries per day)
+                if (
+                  apiParamsTimestamp &&
+                  apiParamsTimestamp !== currentParamsTimestamp
+                ) {
+                  console.log(
+                    "📋 API data has different date, adding to history"
+                  );
+                  updatedHistoricalData.push({
+                    ...patientClinicalParams,
+                    isCurrent: false,
+                  });
+
+                  console.log(
+                    `📊 Historical data now has ${updatedHistoricalData.length} entries`
+                  );
+                } else {
+                  console.log(
+                    "📋 API data has same date as current, not adding to history"
+                  );
+                }
+
+                // Sort by date (newest first)
+                updatedHistoricalData = updatedHistoricalData.sort((a, b) => {
+                  return new Date(b.date) - new Date(a.date);
+                });
+
+                // Update state and cache
+                console.log(
+                  `📊 Final historical data has ${updatedHistoricalData.length} entries`
+                );
+                setHistoricalData(updatedHistoricalData);
+                try {
+                  await AsyncStorage.setItem(
+                    storageKey,
+                    JSON.stringify(updatedHistoricalData)
+                  );
+                  console.log("✅ Saved historical data to AsyncStorage");
+                } catch (saveError) {
+                  console.error("❌ Error saving to AsyncStorage:", saveError);
+                }
+              } else {
+                console.log("⚠️ No clinical parameters found in API response");
+              }
+            } else if (
+              data.success &&
+              data.clinicalHistory &&
+              data.clinicalHistory.length > 0
+            ) {
+              // Handle response if it contains clinicalHistory directly
+              console.log(
+                `📋 Fetched ${data.clinicalHistory.length} historical records from API`
+              );
+
+              // Check if clinicalHistory items are in DynamoDB format
+              console.log("🔍 Examining clinicalHistory format");
+              const processedHistory = data.clinicalHistory.map(
+                (item, index) => {
+                  console.log(`📊 Item ${index} type:`, typeof item);
+                  if (typeof item === "object") {
+                    console.log(
+                      `📊 Item ${index} keys:`,
+                      Object.keys(item).join(", ")
+                    );
+                  }
+
+                  // Check if this item is in DynamoDB format
+                  if (item.M) {
+                    console.log(
+                      `🔄 Item ${index} is in DynamoDB format, converting`
+                    );
+                    return unmarshallDynamoDBObject(item);
+                  }
+                  return item;
+                }
+              );
+
+              // Add all historical records but only filter out exact duplicates
+              const apiRecords = processedHistory.filter((item) => {
+                if (!item.date) return true;
+                // Compare full timestamps to allow multiple entries per day
+                const itemTimestamp = new Date(item.date).getTime();
+                const currentTimestamp = new Date(currentRecord.date).getTime();
+                return itemTimestamp !== currentTimestamp;
+              });
+
+              console.log(
+                `📊 After filtering, ${apiRecords.length} API records remain`
+              );
+
+              // Combine with current record
+              updatedHistoricalData = [currentRecord, ...apiRecords];
+
+              // Sort by date (newest first)
+              updatedHistoricalData = updatedHistoricalData.sort((a, b) => {
+                return new Date(b.date) - new Date(a.date);
+              });
+
+              // Update state and cache in AsyncStorage
+              console.log(
+                `📊 Final historical data has ${updatedHistoricalData.length} entries`
+              );
+              setHistoricalData(updatedHistoricalData);
+              try {
+                await AsyncStorage.setItem(
+                  storageKey,
+                  JSON.stringify(updatedHistoricalData)
+                );
+                console.log("✅ Saved historical data to AsyncStorage");
+              } catch (saveError) {
+                console.error("❌ Error saving to AsyncStorage:", saveError);
+              }
+            } else {
+              console.log("📋 No clinical history data found in API response");
+            }
+          } catch (apiError) {
+            console.error("❌ API error in fetchHistoricalData:", apiError);
+            console.error("📚 Error stack:", apiError.stack);
+            // We don't throw here, just log the error and continue with local data
+          }
+        }
+      } catch (error) {
+        console.error("❌ Error fetching clinical history:", error);
+        console.error("📚 Error stack:", error.stack);
+
+        // If API call failed but we have current parameters, still show those
+        if (clinicalParameters && clinicalParameters.date) {
+          console.log("📋 Using current parameters as fallback");
+          const currentRecord = {
+            ...clinicalParameters,
+            isCurrent: true,
+            date: clinicalParameters.date || new Date(),
+          };
+          setHistoricalData([currentRecord]);
+          setDataFetched(true);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
     // Function to show upload options (Gallery, Camera, Document)
     const showUploadOptions = () => {
@@ -298,7 +1596,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       }
     };
 
-    async function clearAllPickerFlags() {
+    const clearAllPickerFlags = async () => {
       try {
         const keysToRemove = [
           "PICKER_OPERATION_ACTIVE",
@@ -314,10 +1612,10 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         console.error("❌ Error clearing picker flags:", error);
         return false;
       }
-    }
+    };
 
     // Enhanced camera launch function with comprehensive error handling and state management
-    async function launchCamera() {
+    const launchCamera = async () => {
       if (isPickerActive) {
         console.log("🚫 Camera picker already active, ignoring request");
         return;
@@ -462,7 +1760,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           fileInfo = await FileSystem.getInfoAsync(normalizedUri);
           console.log("📄 File info:", {
             exists: fileInfo.exists,
-            size: 'size' in fileInfo && fileInfo.size
+            size: fileInfo.size
               ? `${Math.round(fileInfo.size / 1024)}KB`
               : "unknown",
             isDirectory: fileInfo.isDirectory,
@@ -540,7 +1838,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         }
 
         // Call safePickDocument with the file - this will handle file storage and state updates
-        console.log("📥 Calling safePickDocument with camera file");
+        console.log("📤 Calling safePickDocument with camera file");
         const success = await safePickDocument(file);
 
         if (success) {
@@ -591,9 +1889,9 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             "Failed to add image to reports. Please try again."
           );
         }
-      } catch (error: any) {
+      } catch (error) {
         console.error("❌ Error taking photo:", error);
-        console.error("❌ Error stack:", error?.stack);
+        console.error("❌ Error stack:", error.stack);
 
         // Clear picker operation flag on error
         await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
@@ -618,19 +1916,19 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         }
         console.log("🔓 Camera picker operation completed, all flags cleared");
       }
-    }
+    };
 
     // Enhanced picker launch function with navigation protection
-    async function launchImageLibrary() {
+    const launchImageLibrary = async () => {
       if (isPickerActive) {
-        console.log("ðŸš« Gallery picker already active, ignoring request");
+        console.log("🚫 Gallery picker already active, ignoring request");
         return;
       }
 
       setIsPickerActive(true);
 
       try {
-        console.log("ðŸ–¼ï¸ Launching image gallery for report upload...");
+        console.log("🖼️ Launching image gallery for report upload...");
 
         // Save complete navigation context before picker launch
         const prePickerState = {
@@ -665,14 +1963,14 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           ],
         ]);
 
-        console.log("ðŸ’¾ Pre-picker state saved for navigation protection");
+        console.log("💾 Pre-picker state saved for navigation protection");
 
         // Request media library permissions
         const { status } =
           await ImagePicker.requestMediaLibraryPermissionsAsync();
 
         if (status !== "granted") {
-          console.log("âŒ Media library permission denied");
+          console.log("❌ Media library permission denied");
           Alert.alert(
             "Permission Denied",
             "Media library permission is required to select images."
@@ -680,7 +1978,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           return;
         }
 
-        console.log("ðŸ–¼ï¸ Gallery permissions granted, launching picker");
+        console.log("🖼️ Gallery permissions granted, launching picker");
 
         // Use memory-conscious settings and updated API
         const result = await ImagePicker.launchImageLibraryAsync({
@@ -693,8 +1991,8 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           allowsMultipleSelection: false,
         });
 
-        console.log("ðŸ–¼ï¸ Gallery operation completed");
-        console.log("ðŸ–¼ï¸ Gallery result structure:", {
+        console.log("🖼️ Gallery operation completed");
+        console.log("🖼️ Gallery result structure:", {
           canceled: result.canceled,
           assetsLength: result.assets?.length || 0,
           hasUri: result.assets?.[0]?.uri ? "yes" : "no",
@@ -705,7 +2003,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
 
         // Robust result validation
         if (result.canceled) {
-          console.log("ðŸ–¼ï¸ Gallery selection was cancelled by user");
+          console.log("🖼️ Gallery selection was cancelled by user");
           return;
         }
 
@@ -714,7 +2012,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           !Array.isArray(result.assets) ||
           result.assets.length === 0
         ) {
-          console.error("âŒ Invalid result structure from gallery:", result);
+          console.error("❌ Invalid result structure from gallery:", result);
           Alert.alert("Error", "Invalid image data received from gallery.");
           return;
         }
@@ -722,12 +2020,12 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         const selectedImage = result.assets[0];
 
         if (!selectedImage || !selectedImage.uri) {
-          console.error("âŒ No valid image URI from gallery:", selectedImage);
+          console.error("❌ No valid image URI from gallery:", selectedImage);
           Alert.alert("Error", "No valid image was selected.");
           return;
         }
 
-        console.log("ðŸ–¼ï¸ Processing gallery image:", {
+        console.log("🖼️ Processing gallery image:", {
           uri: selectedImage.uri
             ? selectedImage.uri.substring(0, 50) + "..."
             : "none",
@@ -742,10 +2040,10 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         try {
           normalizedUri = await normalizeUri(selectedImage.uri);
           console.log(
-            `ðŸ”„ Normalized URI: ${normalizedUri.substring(0, 50)}...`
+            `🔄 Normalized URI: ${normalizedUri.substring(0, 50)}...`
           );
         } catch (normalizationError) {
-          console.error("âŒ Error normalizing URI:", normalizationError);
+          console.error("❌ Error normalizing URI:", normalizationError);
           normalizedUri = selectedImage.uri; // Fallback to original
         }
 
@@ -756,7 +2054,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         });
 
         if (!validationResult.exists || validationResult.errors.length > 0) {
-          console.error("âŒ Image validation failed:", validationResult);
+          console.error("❌ Image validation failed:", validationResult);
           Alert.alert(
             "Image Validation Failed",
             `The selected image has issues: ${validationResult.errors.join(
@@ -770,7 +2068,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         let fileInfo;
         try {
           fileInfo = await FileSystem.getInfoAsync(normalizedUri);
-          console.log("ðŸ“„ File info:", {
+          console.log("📄 File info:", {
             exists: fileInfo.exists,
             size: fileInfo.size
               ? `${Math.round(fileInfo.size / 1024)}KB`
@@ -778,7 +2076,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             isDirectory: fileInfo.isDirectory,
           });
         } catch (fileError) {
-          console.error("âŒ Error getting file info:", fileError);
+          console.error("❌ Error getting file info:", fileError);
           fileInfo = {
             exists: true,
             size: selectedImage.fileSize || null,
@@ -787,7 +2085,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
 
         if (!fileInfo.exists) {
           console.error(
-            "âŒ Gallery image file does not exist at URI:",
+            "❌ Gallery image file does not exist at URI:",
             normalizedUri
           );
           Alert.alert("Error", "The selected image could not be found.");
@@ -824,7 +2122,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           isCropped: true, // Mark as cropped since allowsEditing was true
         };
 
-        console.log("ðŸ“„ Prepared gallery file object:", {
+        console.log("📄 Prepared gallery file object:", {
           name: file.name,
           type: file.type,
           size: file.size ? `${Math.round(file.size / 1024)}KB` : "unknown",
@@ -836,14 +2134,14 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         // Validate and call safePickDocument
         if (typeof safePickDocument !== "function") {
           console.error(
-            "âŒ safePickDocument is not a function:",
+            "❌ safePickDocument is not a function:",
             typeof safePickDocument
           );
           Alert.alert("Error", "Cannot process image due to internal error.");
           return;
         }
 
-        console.log("ðŸ“¤ Calling safePickDocument with gallery file");
+        console.log("📤 Calling safePickDocument with gallery file");
 
         // Call safePickDocument with timeout protection
         const success = await Promise.race([
@@ -854,7 +2152,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         ]);
 
         if (success) {
-          console.log("âœ… Successfully processed gallery image");
+          console.log("✅ Successfully processed gallery image");
 
           // Clear all picker-related storage after successful operation
           await AsyncStorage.multiRemove([
@@ -863,15 +2161,15 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             "LAST_KNOWN_ROUTE",
           ]);
         } else {
-          console.log("âŒ Failed to process gallery image");
+          console.log("❌ Failed to process gallery image");
           Alert.alert(
             "Error",
             "Failed to add image to reports. Please try again."
           );
         }
       } catch (error) {
-        console.error("âŒ Error selecting image:", error);
-        console.error("âŒ Error stack:", error.stack);
+        console.error("❌ Error selecting image:", error);
+        console.error("❌ Error stack:", error.stack);
 
         // Clear picker operation flag on error
         await AsyncStorage.removeItem("PICKER_OPERATION_ACTIVE");
@@ -887,22 +2185,22 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       } finally {
         setIsPickerActive(false);
         console.log(
-          "ðŸ”“ Gallery picker operation completed, isPickerActive reset"
+          "🔓 Gallery picker operation completed, isPickerActive reset"
         );
       }
-    }
+    };
 
     // Enhanced document picker function
-    async function launchDocumentPicker() {
+    const launchDocumentPicker = async () => {
       if (isPickerActive) {
-        console.log("ðŸš« Document picker already active, ignoring request");
+        console.log("🚫 Document picker already active, ignoring request");
         return;
       }
 
       setIsPickerActive(true);
 
       try {
-        console.log("ðŸ“‘ Launching document picker for report upload...");
+        console.log("📑 Launching document picker for report upload...");
 
         // Launch document picker
         const result = await DocumentPicker.getDocumentAsync({
@@ -915,7 +2213,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           copyToCacheDirectory: true,
         });
 
-        // console.log("ðŸ“‘ Document picker result type:", result.type);
+        // console.log("📑 Document picker result type:", result.type);
 
         // Check if a document was selected successfully
         if (
@@ -925,7 +2223,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         ) {
           const document = result.assets[0];
           console.log(
-            "ðŸ“‘ Document selected:",
+            "📑 Document selected:",
             JSON.stringify({
               uri: document.uri
                 ? document.uri.substring(0, 30) + "..."
@@ -942,7 +2240,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           const validationResult = await validateImageFile(document);
           if (validationResult.errors.length > 0) {
             console.warn(
-              "âš ï¸ Document validation warnings:",
+              "⚠️ Document validation warnings:",
               validationResult.errors
             );
             // Continue anyway for documents (they might not be images)
@@ -968,7 +2266,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           };
 
           console.log(
-            "ðŸ“„ Prepared document file object:",
+            "📄 Prepared document file object:",
             JSON.stringify({
               name: file.name,
               type: file.type,
@@ -980,15 +2278,15 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
 
           // Call safePickDocument with the file
           if (typeof safePickDocument === "function") {
-            console.log("ðŸ“¤ Calling safePickDocument with document file");
+            console.log("📤 Calling safePickDocument with document file");
             const success = await safePickDocument(file);
 
             if (success) {
-              console.log("âœ… Successfully processed document");
+              console.log("✅ Successfully processed document");
 
               Alert.alert("Success", "Document added to reports successfully!");
             } else {
-              console.log("âŒ Failed to process document");
+              console.log("❌ Failed to process document");
               Alert.alert(
                 "Error",
                 "Failed to add document to reports. Please try again."
@@ -996,7 +2294,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             }
           } else {
             console.error(
-              "âŒ safePickDocument is not a function:",
+              "❌ safePickDocument is not a function:",
               safePickDocument
             );
             Alert.alert(
@@ -1005,11 +2303,11 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             );
           }
         } else {
-          console.log("ðŸ“‘ Document selection cancelled or failed");
+          console.log("📑 Document selection cancelled or failed");
         }
       } catch (error) {
-        console.error("âŒ Error selecting document:", error);
-        console.error("âŒ Error stack:", error.stack);
+        console.error("❌ Error selecting document:", error);
+        console.error("❌ Error stack:", error.stack);
 
         const errorDetails = ImagePickerErrorHandler.handleError(
           error,
@@ -1022,10 +2320,31 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       } finally {
         setIsPickerActive(false);
         console.log(
-          "ðŸ”“ Document picker operation completed, isPickerActive reset"
+          "🔓 Document picker operation completed, isPickerActive reset"
         );
       }
-    }
+    };
+
+    // Function to save pending history text to AsyncStorage - NEW FUNCTION
+    const savePendingHistoryText = async (text) => {
+      if (!patientId) {
+        console.log("⚠️ No patientId available, cannot save pending history");
+        return;
+      }
+
+      try {
+        const key = `pending_history_${patientId}`;
+        await AsyncStorage.setItem(key, text);
+        console.log(
+          `✅ Saved pending history text to AsyncStorage with key: ${key}`
+        );
+      } catch (error) {
+        console.error(
+          "❌ Error saving pending history to AsyncStorage:",
+          error
+        );
+      }
+    };
 
     return (
       <View style={styles.formSection}>
@@ -1061,7 +2380,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
               <AutoBulletTextArea
                 value={patientData.medicalHistory}
                 onChangeText={(text) => updateField("medicalHistory", text)}
-                placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (â€¢) at the beginning of a line for auto-bulleting."
+                placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
                 style={[styles.textArea, { minHeight: 200 }]}
                 numberOfLines={12}
               />
@@ -1084,12 +2403,48 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                             )}...`
                           );
                           setDirectHistoryText(text);
+
+                          // Save to AsyncStorage as user types (for recovery if they click Update & Next directly)
+                          savePendingHistoryText(text);
                         }}
                         placeholder="Enter new history entry here..."
                         style={[styles.textArea, { minHeight: 100 }]}
                         numberOfLines={6}
                         // Modify onEndEditing handler to update patientData directly using updateField
-                        onEndEditing={transferHistoryText}
+                        onEndEditing={() => {
+                          if (directHistoryText.trim()) {
+                            // Check if there's existing medical history
+                            const timestamp = new Date().toLocaleString();
+                            let updatedHistory = "";
+
+                            if (
+                              patientData.medicalHistory &&
+                              patientData.medicalHistory.trim()
+                            ) {
+                              updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
+                            } else {
+                              updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
+                            }
+
+                            // Immediately update the medicalHistory field to make it visible
+                            updateField("medicalHistory", updatedHistory);
+
+                            // Clear the pending history from AsyncStorage
+                            AsyncStorage.removeItem(
+                              `pending_history_${patientId}`
+                            );
+                            AsyncStorage.removeItem(
+                              `new_history_input_${patientId}`
+                            );
+
+                            // Clear the input after updating
+                            setDirectHistoryText("");
+
+                            console.log(
+                              "History text visibly transferred to medical history"
+                            );
+                          }
+                        }}
                       />
                     </View>
                     <View style={styles.historyButtonsRow}>
@@ -1182,16 +2537,16 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
               onPress={() => {
                 if (isPickerActive) {
                   console.log(
-                    "ðŸš« Upload button disabled - picker operation in progress"
+                    "🚫 Upload button disabled - picker operation in progress"
                   );
                   return;
                 }
 
                 console.log(
-                  `ðŸ“ Current reportFiles count before upload: ${reportFiles.length}`
+                  `📁 Current reportFiles count before upload: ${reportFiles.length}`
                 );
                 if (reportFiles.length > 0) {
-                  console.log("ðŸ“ Existing reportFiles preview:");
+                  console.log("📁 Existing reportFiles preview:");
                   reportFiles.forEach((file, idx) => {
                     console.log(
                       `     File ${idx + 1}: ${file.name}, Category: ${file.category || "uncategorized"
@@ -1594,11 +2949,11 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                   onPress={() => {
                     // Prepare current parameters before showing the modal
                     if (clinicalParameters) {
-                      console.log("ðŸ” Preparing data for parameters table...");
+                      console.log("🔍 Preparing data for parameters table...");
 
                       // Ensure we have a date before showing
                       if (!clinicalParameters.date) {
-                        console.log("ðŸ—“ï¸ No date found, setting current date");
+                        console.log("🗓️ No date found, setting current date");
                         const updatedParams = {
                           ...clinicalParameters,
                           date: new Date(),
@@ -1614,11 +2969,11 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                         // Pre-populate historical data with at least this record
                         setHistoricalData([tempRecord]);
                         console.log(
-                          "ðŸ“Š Pre-populated historical data with current record"
+                          "📊 Pre-populated historical data with current record"
                         );
                       } else {
                         console.log(
-                          `ðŸ—“ï¸ Using existing date: ${clinicalParameters.date}`
+                          `🗓️ Using existing date: ${clinicalParameters.date}`
                         );
 
                         // Create a temporary record for immediate use
@@ -1630,13 +2985,13 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                         // Pre-populate historical data with at least this record
                         setHistoricalData([tempRecord]);
                         console.log(
-                          "ðŸ“Š Pre-populated historical data with current record"
+                          "📊 Pre-populated historical data with current record"
                         );
                       }
                     }
 
                     // Log before showing modal
-                    console.log("ðŸ“Š About to show modal with prepared data");
+                    console.log("📊 About to show modal with prepared data");
 
                     // Show the modal immediately
                     setTableModalVisible(true);
@@ -1655,7 +3010,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         <ViewParametersModal
           isVisible={tableModalVisible}
           onClose={() => {
-            console.log("ðŸ”’ Closing parameters modal");
+            console.log("🔒 Closing parameters modal");
             setTableModalVisible(false);
           }}
           clinicalParameters={clinicalParameters}

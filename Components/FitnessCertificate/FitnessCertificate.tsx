@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
   View,
@@ -34,7 +35,7 @@ const { width } = Dimensions.get("window");
 
 // API Configuration
 const API_BASE_URL =
-  "https://7pgwoalueh.execute-api.us-east-1.amazonaws.com/default/PatientDataProcessorFunction";
+  API_ENDPOINTS.PATIENT_PROCESSOR;
 
 interface Patient {
   name: string;
@@ -107,10 +108,10 @@ interface FormData {
   // Medical Opinion - Modified section
   opinion: string;
   selectedOpinionType:
-    | "surgery_fitness"
-    | "medication_modification"
-    | "fitness_reserved"
-    | null;
+  | "surgery_fitness"
+  | "medication_modification"
+  | "fitness_reserved"
+  | null;
   surgeryFitnessOption: string;
   medicationModificationText: string; // Changed from option to text
   fitnessReservedText: string; // Changed from option to text
@@ -1017,8 +1018,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
         console.log("⚠️ Save failed, but offering share option");
         Alert.alert(
           "⚠️ Save Issue",
-          `Certificate generated but save failed.\n\nError: ${
-            saveError?.message || "Unknown error"
+          `Certificate generated but save failed.\n\nError: ${saveError?.message || "Unknown error"
           }\n\nYou can still share the certificate.`,
           [
             {
@@ -1103,9 +1103,8 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       if (Platform.OS === "ios") {
         await Share.share({
           url: uri,
-          message: `Fitness Certificate for ${
-            formData.patientName
-          } - Generated on ${new Date().toLocaleDateString()}`,
+          message: `Fitness Certificate for ${formData.patientName
+            } - Generated on ${new Date().toLocaleDateString()}`,
           title: "Fitness Certificate",
         });
       } else {
@@ -1121,9 +1120,8 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
 
         await Share.share({
           url: fileUri,
-          message: `Fitness Certificate for ${
-            formData.patientName
-          } - Generated on ${new Date().toLocaleDateString()}`,
+          message: `Fitness Certificate for ${formData.patientName
+            } - Generated on ${new Date().toLocaleDateString()}`,
           title: "Fitness Certificate",
         });
       }
@@ -1158,8 +1156,8 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     let success;
     if (typeof window !== 'undefined') window.isCriticalOperation = true;
     setIsGenerating(true);
-    console.log('generating' );
-    
+    console.log('generating');
+
     success = await generateCertificate();
     setIsGenerating(false);
     if (typeof window !== 'undefined') window.isCriticalOperation = false;
@@ -1290,7 +1288,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
             <Text style={styles.doctorName}>Dr. Diapk Gawli</Text>
             <Text style={styles.doctorCredentials}>MBBS, DNB General Medicine</Text>
             <Text style={styles.clinicDetails}>
-              
+
             </Text>
           </View>
 
@@ -1532,7 +1530,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                   style={[
                     styles.radioCircle,
                     formData.selectedOpinionType === "surgery_fitness" &&
-                      styles.radioSelected,
+                    styles.radioSelected,
                   ]}
                 />
                 <Text style={styles.radioLabel}>Surgery Fitness</Text>
@@ -1577,7 +1575,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                         style={[
                           styles.dropdownOption,
                           index === surgeryFitnessOptions.length - 1 &&
-                            styles.lastDropdownOption,
+                          styles.lastDropdownOption,
                         ]}
                         onPress={() =>
                           handleDropdownSelect("surgeryFitnessOption", option)
@@ -1610,7 +1608,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                   style={[
                     styles.radioCircle,
                     formData.selectedOpinionType ===
-                      "medication_modification" && styles.radioSelected,
+                    "medication_modification" && styles.radioSelected,
                   ]}
                 />
                 <Text style={styles.radioLabel}>Medication Modification</Text>
@@ -1662,7 +1660,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                   style={[
                     styles.radioCircle,
                     formData.selectedOpinionType === "fitness_reserved" &&
-                      styles.radioSelected,
+                    styles.radioSelected,
                   ]}
                 />
                 <Text style={styles.radioLabel}>Fitness Reserved For</Text>
@@ -1869,7 +1867,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                   style={[
                     styles.validityOption,
                     formData.validityPeriod === period &&
-                      styles.validitySelected,
+                    styles.validitySelected,
                   ]}
                   onPress={() => updateFormData("validityPeriod", period)}
                 >
@@ -1877,7 +1875,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                     style={[
                       styles.validityOptionText,
                       formData.validityPeriod === period &&
-                        styles.validitySelectedText,
+                      styles.validitySelectedText,
                     ]}
                   >
                     {period}

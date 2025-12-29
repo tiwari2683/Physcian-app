@@ -20,6 +20,7 @@ const { width } = Dimensions.get("window");
 // Types
 interface Appointment {
   id: number;
+  patientId?: string; // LINKED PATIENT ID
   patientName: string;
   patientAge: number;
   date: string;
