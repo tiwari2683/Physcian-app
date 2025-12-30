@@ -274,7 +274,10 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           body: JSON.stringify({ action: "getAllPatients" }),
         });
 
+
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error("API Error Response:", errorText);
           throw new Error(`API Error: ${response.status}`);
         }
 
@@ -328,7 +331,10 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           body: JSON.stringify({ action: "getAllPatients" }),
         });
 
+
         if (!response.ok) {
+          const errorText = await response.text();
+          console.error("Polling API Error Response:", errorText);
           console.error(
             "Polling error: API returned status " + response.status
           );

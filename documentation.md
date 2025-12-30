@@ -46,6 +46,20 @@ Files: NewPatientForm.tsx
   - `Components/Appointments/AppointmentDetails.tsx`: Added profile linking navigation.
   - `Components/DoctorDashboard/DoctorDashboard.tsx`: Added status badge.
 
+### 2025-12-30: S3 Upload and Viewing Fixes
+- **Issue**: Reports were failing to upload (S3 Access Denied) or appearing as white squares (Private Access Link) in the dashboard.
+- **Root Cause**:
+  1.  **IAM Permissions**: Lambda role `PatientDataProcessorFunction-role-86qjrw0h` lacked `s3:PutObject` and `s3:GetObject` permissions.
+  2.  **Incorrect Bucket/Region**: Code was targeting a different bucket/region than configured.
+  3.  **Private File Access**: Files were private by default, preventing the app from displaying them via standard HTTP links.
+- **Fixes Implemented**:
+  1.  **IAM Policy**: Added inline policy to Lambda role allowing S3 actions on `dr-gawli-patient-files`.
+  2.  **Presigned URLs**: Updated `lambdaForCreateAsWellAsUpdate.js` (specifically `handleGetPatient`) to generate secure, time-limited signed URLs for `reportFiles`.
+  3.  **UI Refinements**: Cleaned up filenames in `PatientsData.tsx` and fixed label layout issues.
+- **Files Modified**:
+  - `lambdaForCreateAsWellAsUpdate.js`
+  - `Components/PatientsData/PatientsData.tsx`
+
 ## Manual Configuration Guide (No Amplify CLI)
 
 If you cannot use the Amplify CLI, follow these steps to set up the backend services manually:

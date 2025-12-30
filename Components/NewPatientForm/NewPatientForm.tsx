@@ -165,27 +165,27 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
   const verifyFieldsBeforeSubmit = (section) => {
     switch (section) {
       case "basic":
-        console.log("🔍 DETAILED BASIC FIELDS:");
-        console.log(
-          `   Name: "${patientData.name}" (length: ${patientData.name?.length})`
-        );
-        console.log(
-          `   Age: "${patientData.age}" (length: ${patientData.age?.length})`
-        );
-        console.log(`   Sex: "${patientData.sex}"`);
-        console.log(
-          `   Mobile: "${patientData.mobile}" (length: ${patientData.mobile?.length})`
-        );
-        console.log(
-          `   Address: "${patientData.address}" (length: ${patientData.address?.length})`
-        );
-        logStateUpdate("Basic Fields", {
-          name: patientData.name,
-          age: patientData.age,
-          sex: patientData.sex,
-          mobile: patientData.mobile,
-          address: patientData.address,
-        });
+        // console.log("🔍 DETAILED BASIC FIELDS:");
+        // console.log(
+        //   `   Name: "${patientData.name}" (length: ${patientData.name?.length})`
+        // );
+        // console.log(
+        //   `   Age: "${patientData.age}" (length: ${patientData.age?.length})`
+        // );
+        // console.log(`   Sex: "${patientData.sex}"`);
+        // console.log(
+        //   `   Mobile: "${patientData.mobile}" (length: ${patientData.mobile?.length})`
+        // );
+        // console.log(
+        //   `   Address: "${patientData.address}" (length: ${patientData.address?.length})`
+        // );
+        // logStateUpdate("Basic Fields", {
+        //   name: patientData.name,
+        //   age: patientData.age,
+        //   sex: patientData.sex,
+        //   mobile: patientData.mobile,
+        //   address: patientData.address,
+        // });
         break;
       case "clinical":
         logStateUpdate("Clinical Fields", {
@@ -534,14 +534,14 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     }
 
     // Print the current state of all patient data to debug
-    console.log("🔍 CURRENT PATIENT DATA STATE:");
-    Object.keys(patientData).forEach((key) => {
-      const value = patientData[key];
-      console.log(
-        `   ${key}: ${typeof value === "string" ? `"${value}"` : value
-        } (${typeof value})`
-      );
-    });
+    // console.log("🔍 CURRENT PATIENT DATA STATE:");
+    // Object.keys(patientData).forEach((key) => {
+    //   const value = patientData[key];
+    //   console.log(
+    //     `   ${key}: ${typeof value === "string" ? `"${value}"` : value
+    //     } (${typeof value})`
+    //   );
+    // });
 
     // Log status of permanentPatientId and other tracking variables
     console.log("🔍 SESSION TRACKING:");
@@ -704,6 +704,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             }
 
             // At this point, we have a valid response
+            if (!response) {
+              throw new Error("No response received from server");
+            }
             console.log(`⏱️ Response received at: ${new Date().toISOString()}`);
             console.log(`📊 HTTP Status code: ${response.status}`);
 
@@ -979,8 +982,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           }
 
           console.log(
-            "📝 Clinical data payload:",
-            JSON.stringify(clinicalData, null, 2)
+            "📝 Clinical data payload length:",
+            JSON.stringify(clinicalData).length
           );
 
           // Define the API endpoint URL and verify it
@@ -1063,6 +1066,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             }
           }
 
+          if (!response) {
+            throw new Error("No response received from server");
+          }
           console.log(`⏱️ Response received at: ${new Date().toISOString()}`);
           console.log(`📊 HTTP Status code: ${response.status}`);
 

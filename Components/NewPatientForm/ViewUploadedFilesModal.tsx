@@ -43,9 +43,9 @@ const ViewUploadedFilesModal = ({
   // State to track loading of S3 files
   const [loading, setLoading] = useState(false);
   // State to store all files (S3 + local)
-  const [allFiles, setAllFiles] = useState([]);
+  const [allFiles, setAllFiles] = useState<any[]>([]);
   // State for file being previewed
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFile, setSelectedFile] = useState<any>(null);
   // State to track any errors
   const [error, setError] = useState("");
   // State to track file types for filtering
@@ -56,6 +56,9 @@ const ViewUploadedFilesModal = ({
     local: 0,
     total: 0,
   });
+  // State for image preview loading/error
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [imageError, setImageError] = useState(false);
 
   // Function to fetch S3 files from the backend
   const fetchS3Files = async () => {
@@ -115,8 +118,7 @@ const ViewUploadedFilesModal = ({
         const files = data.patient.reportFiles || [];
         console.log(`✅ Successfully fetched ${files.length} S3 files`);
 
-        // Convert S3 files to the format expected by the UI
-        const s3Files = files.map((file) => ({
+        const s3Files = files.map((file: any) => ({
           uri: file.url,
           name: file.name || file.key || "Unknown file",
           type: file.type || guessFileType(file.name || file.key),
@@ -133,7 +135,7 @@ const ViewUploadedFilesModal = ({
           .filter((localFile) => {
             // Skip local files that have the same URI as an S3 file or are already uploaded
             const isAlreadyInS3 = s3Files.some(
-              (s3File) =>
+              (s3File: any) =>
                 s3File.name === localFile.name || s3File.uri === localFile.uri
             );
             const isAlreadyUploaded = isFileAlreadyUploaded(localFile);
@@ -193,20 +195,20 @@ const ViewUploadedFilesModal = ({
   };
 
   // Helper function to update file counts
-  const updateFileCounts = (files) => {
+  const updateFileCounts = (files: any[]) => {
     const counts = {
-      s3: files.filter((f) => f.source === "s3" || f.isS3File).length,
-      local: files.filter((f) => f.source === "local" && !f.isS3File).length,
+      s3: files.filter((f: any) => f.source === "s3" || f.isS3File).length,
+      local: files.filter((f: any) => f.source === "local" && !f.isS3File).length,
       total: files.length,
     };
     setFileCounts(counts);
   };
 
   // Helper function to guess file type from name
-  const guessFileType = (filename) => {
+  const guessFileType = (filename: string) => {
     if (!filename) return "application/octet-stream";
 
-    const extension = filename.split(".").pop().toLowerCase();
+    const extension = (filename.split(".").pop() || "").toLowerCase();
 
     switch (extension) {
       case "pdf":
@@ -226,7 +228,7 @@ const ViewUploadedFilesModal = ({
   };
 
   // Helper function to format date
-  const formatDate = (timestamp) => {
+  const formatDate = (timestamp: string | number | Date) => {
     if (!timestamp) return null;
 
     try {
@@ -254,10 +256,12 @@ const ViewUploadedFilesModal = ({
   };
 
   // Handle file preview
-  const handleFilePress = (file) => {
+  const handleFilePress = (file: any) => {
     // Only preview images for now
     if (file.type?.includes("image")) {
       setSelectedFile(file);
+      setIsImageLoading(true);
+      setImageError(false);
     } else {
       // Show info for non-image files
       Alert.alert(
@@ -276,7 +280,7 @@ const ViewUploadedFilesModal = ({
   };
 
   // Handle removing files
-  const handleRemoveFile = (file, index) => {
+  const handleRemoveFile = (file: any, index: number) => {
     // Show different message based on if it's S3 or local
     const message = file.isS3File
       ? "This file is stored in S3. It will only be removed from this view but not from the server."
@@ -309,7 +313,7 @@ const ViewUploadedFilesModal = ({
   };
 
   // Render each file item
-  const renderFileItem = ({ item, index }) => (
+  const renderFileItem = ({ item, index }: { item: any; index: number }) => (
     <View style={styles.fileItem}>
       <View style={styles.fileDetails}>
         <View
@@ -524,11 +528,29 @@ const ViewUploadedFilesModal = ({
               </View>
 
               <View style={styles.previewImageContainer}>
-                <Image
-                  source={{ uri: selectedFile.uri }}
-                  style={styles.previewImage}
-                  resizeMode="contain"
-                />
+                {isImageLoading && (
+                  <ActivityIndicator size="large" color="#FFFFFF" style={{ position: "absolute", zIndex: 10 }} />
+                )}
+
+                {imageError ? (
+                  <View style={{ alignItems: "center" }}>
+                    <Ionicons name="alert-circle-outline" size={48} color="#FF5252" />
+                    <Text style={{ color: "#FFFFFF", marginTop: 10 }}>Failed to load image</Text>
+                  </View>
+                ) : (
+                  <Image
+                    source={{ uri: selectedFile.uri }}
+                    style={[styles.previewImage, isImageLoading && { opacity: 0 }]}
+                    resizeMode="contain"
+                    onLoadStart={() => setIsImageLoading(true)}
+                    onLoadEnd={() => setIsImageLoading(false)}
+                    onError={(e) => {
+                      console.error("❌ Preview Image Load Error:", e.nativeEvent.error);
+                      setIsImageLoading(false);
+                      setImageError(true);
+                    }}
+                  />
+                )}
               </View>
 
               <View style={styles.previewFooter}>

@@ -51,6 +51,7 @@ interface Patient {
     name: string;
     url: string;
     type: string;
+    uri?: string;
   }>;
   createdAt: string;
   updatedAt: string;
@@ -91,6 +92,8 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
   const [isDeletingPatient, setIsDeletingPatient] = useState<string | null>(
     null
   );
+  const [isImageLoading, setIsImageLoading] = useState<boolean>(false);
+  const [imageError, setImageError] = useState<boolean>(false);
 
   // Fade animation for modals
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -336,6 +339,9 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
     setImageScale(1);
     setLastDistance(0);
     setImageModalVisible(true);
+    // Reset states
+    setIsImageLoading(true);
+    setImageError(false);
   };
 
   // Get last prescribed medication
@@ -733,9 +739,14 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
                                   style={styles.reportImageName}
                                   numberOfLines={1}
                                 >
-                                  {report.name.length > 20
-                                    ? report.name.substring(0, 20) + "..."
-                                    : report.name}
+                                  {(() => {
+                                    // Clean up filename by removing timestamp prefix if present
+                                    // Format is typically: timestamp-random-originalName
+                                    const cleanName = report.name.replace(/^\d+-\d+-/, '');
+                                    return cleanName.length > 20
+                                      ? cleanName.substring(0, 20) + "..."
+                                      : cleanName;
+                                  })()}
                                 </Text>
                               </TouchableOpacity>
                             ) : (
@@ -817,14 +828,44 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
           >
             <Ionicons name="close-circle" size={36} color="#FFFFFF" />
           </TouchableOpacity>
+
           <View style={styles.zoomHintContainer}>
             <Text style={styles.zoomHintText}>Pinch to zoom in/out</Text>
           </View>
-          <Image
-            source={{ uri: selectedImage }}
-            style={[styles.fullImage, { transform: [{ scale: imageScale }] }]}
-            resizeMode="contain"
-          />
+
+          {isImageLoading && (
+            <ActivityIndicator size="large" color="#FFFFFF" style={{ position: "absolute" }} />
+          )}
+
+          {imageError ? (
+            <View style={{ alignItems: "center", padding: 20 }}>
+              <Ionicons name="alert-circle-outline" size={48} color="#FF5252" />
+              <Text style={{ color: "#FFFFFF", marginTop: 10, textAlign: "center" }}>
+                Failed to load image.
+              </Text>
+              <Text style={{ color: "#AAAAAA", marginTop: 5, fontSize: 10 }}>
+                {selectedImage ? selectedImage.substring(0, 50) + "..." : "No URL"}
+              </Text>
+            </View>
+          ) : (
+            <Image
+              source={{ uri: selectedImage }}
+              style={[
+                styles.fullImage,
+                { transform: [{ scale: imageScale }] },
+                (isImageLoading) && { opacity: 0 }
+              ]}
+              resizeMode="contain"
+              onLoadStart={() => setIsImageLoading(true)}
+              onLoadEnd={() => setIsImageLoading(false)}
+              onError={(e) => {
+                console.error("❌ Image Load Error:", e.nativeEvent.error);
+                setIsImageLoading(false);
+                setImageError(true);
+              }}
+            />
+          )}
+
           <TouchableOpacity
             style={styles.resetZoomButton}
             onPress={() => setImageScale(1)}
@@ -1291,7 +1332,7 @@ const styles = StyleSheet.create({
   },
   patientInfoRow: { flexDirection: "row", marginBottom: 8 },
   patientInfoLabel: {
-    width: 100,
+    width: 130, // Increased from 100 to prevent wrapping of "Recommendations"
     fontSize: 14,
     color: "#718096",
     fontWeight: "500",

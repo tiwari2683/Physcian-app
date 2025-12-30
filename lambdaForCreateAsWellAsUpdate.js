@@ -1,17 +1,18 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
 // Initialize AWS clients - using only region for simplest configuration
-const dynamoClient = new DynamoDBClient({ region: "us-east-1" });
+const dynamoClient = new DynamoDBClient({ region: "ap-southeast-2" });
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient, {
     marshallOptions: {
         removeUndefinedValues: true
     }
 });
-const s3 = new S3Client({ 
-    region: "us-east-1",
+const s3 = new S3Client({
+    region: "ap-southeast-2",
     // No custom credentials - use Lambda's execution role
     forcePathStyle: true
 });
@@ -27,21 +28,21 @@ const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 // Table name for investigations history entries
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
 // S3 bucket name - this must match exactly
-const REPORTS_BUCKET = 'mypatientsbucket';
+const REPORTS_BUCKET = 'dr-gawli-patient-files';
 
 // Using public URL for the S3 objects - path style for maximum compatibility
-const S3_URL_PREFIX = `https://s3.amazonaws.com/${REPORTS_BUCKET}/`;
+const S3_URL_PREFIX = `https://${REPORTS_BUCKET}.s3.ap-southeast-2.amazonaws.com/`;
 
 // Function to unmarshall DynamoDB data
 function unmarshallDynamoDBItem(item) {
     if (!item) return null;
-    
+
     // Convert DynamoDB JSON to regular JSON
     const unmarshalledItem = {};
-    
+
     for (const key in item) {
         const value = item[key];
-        
+
         // Handle different types of DynamoDB attributes
         if (value.S !== undefined) {
             unmarshalledItem[key] = value.S;
@@ -71,7 +72,7 @@ function unmarshallDynamoDBItem(item) {
             unmarshalledItem[key] = value; // Fallback
         }
     }
-    
+
     return unmarshalledItem;
 }
 
@@ -79,7 +80,7 @@ function unmarshallDynamoDBItem(item) {
 async function fetchInvestigationsHistory(patientId, includeAll = true) {
     try {
         console.log(`Fetching investigations history for patient: ${patientId}, includeAll: ${includeAll}`);
-        
+
         // Check if the history table exists
         let historyExists = false;
         try {
@@ -93,10 +94,10 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
             console.warn(`Investigations history table does not exist or cannot be accessed: ${error.message}`);
             // We'll try a fallback approach if table doesn't exist
         }
-        
+
         // Array to store complete investigations history
         let investigationsHistory = [];
-        
+
         if (historyExists) {
             // Query the dedicated history table for this patient
             try {
@@ -108,7 +109,7 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                     },
                     ScanIndexForward: false // Return newest first
                 }));
-                
+
                 if (queryResult.Items && queryResult.Items.length > 0) {
                     console.log(`Found ${queryResult.Items.length} investigations history entries for patient ${patientId} in dedicated table`);
                     investigationsHistory = queryResult.Items;
@@ -120,17 +121,17 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                 console.error(queryError.stack);
             }
         }
-        
+
         // If no dedicated table or no results, try getting history from the diagnosis history table
         // since advised investigations are often stored alongside diagnoses
         if (investigationsHistory.length === 0) {
             console.log(`Trying to get investigations history from diagnosis history table: ${patientId}`);
             try {
                 const diagnosisHistory = await fetchDiagnosisHistory(patientId, false);
-                
+
                 if (diagnosisHistory.success && diagnosisHistory.diagnosisHistory && diagnosisHistory.diagnosisHistory.length > 0) {
                     console.log(`Found ${diagnosisHistory.diagnosisHistory.length} diagnosis records with potential investigations`);
-                    
+
                     // Filter only entries that have advisedInvestigations
                     investigationsHistory = diagnosisHistory.diagnosisHistory
                         .filter(entry => entry.advisedInvestigations && entry.advisedInvestigations.trim() !== '')
@@ -147,7 +148,7 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                             } : null,
                             doctor: entry.doctor || "Dr. Diapk Gawli" // Default doctor name
                         }));
-                    
+
                     console.log(`Extracted ${investigationsHistory.length} investigation entries from diagnosis history`);
                 } else {
                     console.log(`No diagnosis history with investigations found for patient ${patientId}`);
@@ -156,7 +157,7 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                 console.error(`Error getting investigations from diagnosis history: ${diagnosisError.message}`);
             }
         }
-        
+
         // If still no results, try getting directly from the patient record as fallback
         if (investigationsHistory.length === 0) {
             console.log(`Trying to get investigations history from patient record: ${patientId}`);
@@ -165,11 +166,11 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 const patient = patientResult.Item;
                 if (patient) {
                     console.log(`Found patient record for ID: ${patientId}`);
-                    
+
                     // Check all possible places where investigations history might be stored
                     if (patient.investigationsHistory && Array.isArray(patient.investigationsHistory)) {
                         console.log(`Found ${patient.investigationsHistory.length} entries in patient.investigationsHistory`);
@@ -179,14 +180,14 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                         investigationsHistory = patient.history.investigations;
                     } else {
                         console.log(`No investigations history found in patient record: ${patientId}`);
-                        
+
                         // If we still don't have history but includeAll is true, create at least one entry from current investigations
                         if (includeAll && patient.advisedInvestigations && patient.advisedInvestigations.trim() !== '') {
                             console.log(`Creating synthetic history entry from current advisedInvestigations`);
-                            
+
                             // Get the most recent update timestamp or fall back to now
                             const timestamp = patient.updatedAt || new Date().toISOString();
-                            
+
                             // Create a history entry from the current investigations
                             investigationsHistory = [{
                                 patientId: patientId,
@@ -206,14 +207,14 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                 console.error(patientError.stack);
             }
         }
-        
+
         // Log the results
         console.log(`Final investigations history result count: ${investigationsHistory.length}`);
         if (investigationsHistory.length > 0) {
             // Log a sample of the first entry
             console.log(`Sample history entry: ${JSON.stringify(investigationsHistory[0]).substring(0, 200)}...`);
         }
-        
+
         // Sort history by date (newest first) if we have entries
         if (investigationsHistory.length > 0) {
             investigationsHistory.sort((a, b) => {
@@ -224,10 +225,10 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                 // Fall back to date string comparison
                 return new Date(b.date).getTime() - new Date(a.date).getTime();
             });
-            
+
             console.log(`Sorted investigations history by date (newest first)`);
         }
-        
+
         // Format dates for better display in the UI
         investigationsHistory = investigationsHistory.map(item => {
             try {
@@ -250,7 +251,7 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
                 return item;
             }
         });
-        
+
         return {
             success: true,
             investigationsHistory: investigationsHistory
@@ -269,17 +270,17 @@ async function fetchInvestigationsHistory(patientId, includeAll = true) {
 async function saveInvestigationsHistoryEntry(patientId, advisedInvestigations, doctor = "Dr. Dipak Gawli") {
     try {
         console.log(`Saving investigations history entry for patient ${patientId}`);
-        
+
         if (!advisedInvestigations || advisedInvestigations.trim() === '') {
             console.log("No investigations provided, skipping history save");
             return false;
         }
-        
+
         // Create a timestamp that we'll use for sorting
         const now = new Date();
         const timestamp = now.getTime();
         const isoTimestamp = now.toISOString();
-        
+
         // Create a history record with timestamp
         const historyRecord = {
             patientId: patientId,
@@ -289,22 +290,22 @@ async function saveInvestigationsHistoryEntry(patientId, advisedInvestigations, 
             advisedInvestigations: advisedInvestigations,
             doctor: doctor
         };
-        
+
         console.log(`Created investigations history record with ID: ${historyRecord.entryId}`);
-        
+
         // Try to save to dedicated investigations history table first
         try {
             await dynamodb.send(new PutCommand({
                 TableName: INVESTIGATIONS_HISTORY_TABLE,
                 Item: historyRecord
             }));
-            
+
             console.log(`Successfully saved investigations history to dedicated table: ${INVESTIGATIONS_HISTORY_TABLE}`);
             return true;
         } catch (tableError) {
             console.warn(`Error saving to investigations history table: ${tableError.message}`);
             console.warn("This is expected if the table doesn't exist, falling back to storing in patient record");
-            
+
             // Fall back to storing in the patient record
             try {
                 // Get current patient record
@@ -312,16 +313,16 @@ async function saveInvestigationsHistoryEntry(patientId, advisedInvestigations, 
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 if (!patientRecord.Item) {
                     console.error(`Patient ${patientId} not found for investigations history fallback`);
                     return false;
                 }
-                
+
                 // Initialize or append to investigationsHistory array
                 const currentHistory = patientRecord.Item.investigationsHistory || [];
                 currentHistory.push(historyRecord);
-                
+
                 // Update the patient record with the history
                 await dynamodb.send(new UpdateCommand({
                     TableName: PATIENTS_TABLE,
@@ -331,7 +332,7 @@ async function saveInvestigationsHistoryEntry(patientId, advisedInvestigations, 
                         ":history": currentHistory
                     }
                 }));
-                
+
                 console.log(`Saved investigations history to patient record, ${currentHistory.length} total entries`);
                 return true;
             } catch (fallbackError) {
@@ -350,7 +351,7 @@ async function saveInvestigationsHistoryEntry(patientId, advisedInvestigations, 
 async function fetchDiagnosisHistory(patientId, includeAll = true) {
     try {
         console.log(`Fetching diagnosis history for patient: ${patientId}, includeAll: ${includeAll}`);
-        
+
         // Check if the history table exists
         let historyExists = false;
         try {
@@ -364,10 +365,10 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
             console.warn(`Diagnosis history table does not exist or cannot be accessed: ${error.message}`);
             // We'll try a fallback approach if table doesn't exist
         }
-        
+
         // Array to store complete diagnosis history
         let diagnosisHistory = [];
-        
+
         if (historyExists) {
             // Query the dedicated history table for this patient
             try {
@@ -379,7 +380,7 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                     },
                     ScanIndexForward: false // Return newest first
                 }));
-                
+
                 if (queryResult.Items && queryResult.Items.length > 0) {
                     console.log(`Found ${queryResult.Items.length} diagnosis history entries for patient ${patientId} in dedicated table`);
                     diagnosisHistory = queryResult.Items;
@@ -391,7 +392,7 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                 console.error(queryError.stack);
             }
         }
-        
+
         // If no dedicated table or no results, try getting history from the patient record itself
         if (diagnosisHistory.length === 0) {
             console.log(`Trying to get diagnosis history from patient record: ${patientId}`);
@@ -400,11 +401,11 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 const patient = patientResult.Item;
                 if (patient) {
                     console.log(`Found patient record for ID: ${patientId}`);
-                    
+
                     // Check all possible places where diagnosis history might be stored
                     if (patient.diagnosisHistory && Array.isArray(patient.diagnosisHistory)) {
                         console.log(`Found ${patient.diagnosisHistory.length} diagnosis history entries in patient.diagnosisHistory`);
@@ -414,14 +415,14 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                         diagnosisHistory = patient.history.diagnosis;
                     } else {
                         console.log(`No diagnosis history found in patient record: ${patientId}`);
-                        
+
                         // If we still don't have history but includeAll is true, create at least one entry from current diagnosis
                         if (includeAll && patient.diagnosis) {
                             console.log(`Creating synthetic history entry from current diagnosis`);
-                            
+
                             // Get the most recent update timestamp or fall back to now
                             const timestamp = patient.updatedAt || new Date().toISOString();
-                            
+
                             // Create a history entry from the current diagnosis
                             diagnosisHistory = [{
                                 patientId: patientId,
@@ -441,14 +442,14 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                 console.error(patientError.stack);
             }
         }
-        
+
         // Log the results
         console.log(`Final diagnosis history result count: ${diagnosisHistory.length}`);
         if (diagnosisHistory.length > 0) {
             // Log a sample of the first entry
             console.log(`Sample history entry: ${JSON.stringify(diagnosisHistory[0]).substring(0, 200)}...`);
         }
-        
+
         // Sort history by date (newest first) if we have entries
         if (diagnosisHistory.length > 0) {
             diagnosisHistory.sort((a, b) => {
@@ -459,10 +460,10 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                 // Fall back to date string comparison
                 return new Date(b.date).getTime() - new Date(a.date).getTime();
             });
-            
+
             console.log(`Sorted diagnosis history by date (newest first)`);
         }
-        
+
         // Format dates for better display in the UI
         diagnosisHistory = diagnosisHistory.map(item => {
             try {
@@ -485,7 +486,7 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
                 return item;
             }
         });
-        
+
         return {
             success: true,
             diagnosisHistory: diagnosisHistory
@@ -504,17 +505,17 @@ async function fetchDiagnosisHistory(patientId, includeAll = true) {
 async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigations = "") {
     try {
         console.log(`Saving diagnosis history entry for patient ${patientId}`);
-        
+
         if (!diagnosis) {
             console.log("No diagnosis text provided, skipping history save");
             return false;
         }
-        
+
         // Create a timestamp that we'll use for sorting
         const now = new Date();
         const timestamp = now.getTime();
         const isoTimestamp = now.toISOString();
-        
+
         // Create a history record with timestamp
         const historyRecord = {
             patientId: patientId,
@@ -524,18 +525,18 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
             diagnosis: diagnosis,
             advisedInvestigations: advisedInvestigations || ""
         };
-        
+
         console.log(`Created diagnosis history record with ID: ${historyRecord.entryId}`);
-        
+
         // Try to save to dedicated diagnosis history table first
         try {
             await dynamodb.send(new PutCommand({
                 TableName: DIAGNOSIS_HISTORY_TABLE,
                 Item: historyRecord
             }));
-            
+
             console.log(`Successfully saved diagnosis history to dedicated table: ${DIAGNOSIS_HISTORY_TABLE}`);
-            
+
             // Also save investigations history separately if provided
             if (advisedInvestigations && advisedInvestigations.trim() !== '') {
                 try {
@@ -546,12 +547,12 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
                     // Continue even if this fails
                 }
             }
-            
+
             return true;
         } catch (tableError) {
             console.warn(`Error saving to diagnosis history table: ${tableError.message}`);
             console.warn("This is expected if the table doesn't exist, falling back to storing in patient record");
-            
+
             // Fall back to storing in the patient record
             try {
                 // Get current patient record
@@ -559,16 +560,16 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 if (!patientRecord.Item) {
                     console.error(`Patient ${patientId} not found for diagnosis history fallback`);
                     return false;
                 }
-                
+
                 // Initialize or append to diagnosisHistory array
                 const currentHistory = patientRecord.Item.diagnosisHistory || [];
                 currentHistory.push(historyRecord);
-                
+
                 // Update the patient record with the history
                 await dynamodb.send(new UpdateCommand({
                     TableName: PATIENTS_TABLE,
@@ -578,15 +579,15 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
                         ":history": currentHistory
                     }
                 }));
-                
+
                 console.log(`Saved diagnosis history to patient record, ${currentHistory.length} total entries`);
-                
+
                 // Also try to save investigations history to fallback
                 if (advisedInvestigations && advisedInvestigations.trim() !== '') {
                     try {
                         // Initialize or append to investigationsHistory array
                         const currentInvHistory = patientRecord.Item.investigationsHistory || [];
-                        
+
                         // Create investigations history record
                         const invHistoryRecord = {
                             patientId: patientId,
@@ -599,9 +600,9 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
                                 entryId: historyRecord.entryId
                             }
                         };
-                        
+
                         currentInvHistory.push(invHistoryRecord);
-                        
+
                         // Update the patient record with the investigations history
                         await dynamodb.send(new UpdateCommand({
                             TableName: PATIENTS_TABLE,
@@ -611,14 +612,14 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
                                 ":history": currentInvHistory
                             }
                         }));
-                        
+
                         console.log(`Saved investigations history to patient record fallback, ${currentInvHistory.length} total entries`);
                     } catch (invFallbackError) {
                         console.error(`Error saving investigations history to fallback: ${invFallbackError.message}`);
                         // Continue even if this fails
                     }
                 }
-                
+
                 return true;
             } catch (fallbackError) {
                 console.error(`Error saving diagnosis history to fallback: ${fallbackError.message}`);
@@ -636,7 +637,7 @@ async function saveDiagnosisHistoryEntry(patientId, diagnosis, advisedInvestigat
 async function fetchMedicalHistory(patientId) {
     try {
         console.log(`Fetching medical history entries for patient: ${patientId}`);
-        
+
         // Check if the history table exists
         let historyExists = false;
         try {
@@ -650,7 +651,7 @@ async function fetchMedicalHistory(patientId) {
             console.warn(`Medical history table does not exist or cannot be accessed: ${error.message}`);
             // We'll return empty history if table doesn't exist
         }
-        
+
         if (!historyExists) {
             console.log("No medical history table found, returning empty history");
             return {
@@ -658,7 +659,7 @@ async function fetchMedicalHistory(patientId) {
                 medicalHistory: []
             };
         }
-        
+
         // Query the history table for entries matching this patient ID
         const queryResult = await dynamodb.send(new QueryCommand({
             TableName: MEDICAL_HISTORY_TABLE,
@@ -668,9 +669,9 @@ async function fetchMedicalHistory(patientId) {
             },
             ScanIndexForward: false // Return newest first
         }));
-        
+
         console.log(`Found ${queryResult.Items?.length || 0} medical history entries for patient ${patientId}`);
-        
+
         return {
             success: true,
             medicalHistory: queryResult.Items || []
@@ -689,7 +690,7 @@ async function fetchMedicalHistory(patientId) {
 async function fetchClinicalHistory(patientId) {
     try {
         console.log(`Fetching clinical parameters history for patient: ${patientId}`);
-        
+
         // Check if the history table exists
         let historyExists = false;
         try {
@@ -703,7 +704,7 @@ async function fetchClinicalHistory(patientId) {
             console.warn(`Clinical history table does not exist or cannot be accessed: ${error.message}`);
             // We'll return empty history if table doesn't exist
         }
-        
+
         if (!historyExists) {
             console.log("No history table found, returning empty history");
             return {
@@ -711,7 +712,7 @@ async function fetchClinicalHistory(patientId) {
                 clinicalHistory: []
             };
         }
-        
+
         // Query the history table for entries matching this patient ID
         const queryResult = await dynamodb.send(new QueryCommand({
             TableName: CLINICAL_HISTORY_TABLE,
@@ -721,9 +722,9 @@ async function fetchClinicalHistory(patientId) {
             },
             ScanIndexForward: false // Return newest first
         }));
-        
+
         console.log(`Found ${queryResult.Items?.length || 0} clinical history entries for patient ${patientId}`);
-        
+
         return {
             success: true,
             clinicalHistory: queryResult.Items || []
@@ -742,23 +743,23 @@ async function fetchClinicalHistory(patientId) {
 async function handleGetPatient(patientId, forceRefresh = false) {
     try {
         console.log(`Getting patient data for ID: ${patientId}, forceRefresh: ${forceRefresh}`);
-        
+
         // Get the patient record from DynamoDB - using raw DynamoDB client with GetItemCommand
         const command = new GetItemCommand({
             TableName: PATIENTS_TABLE,
             Key: { "patientId": { "S": patientId } }
         });
-        
+
         // Add ConsistentRead option if forceRefresh is set
         if (forceRefresh) {
             command.input.ConsistentRead = true;
             console.log("Using ConsistentRead to get fresh data");
         }
-        
+
         const result = await dynamoClient.send(command);
-        
+
         console.log(`Raw DynamoDB response keys: ${Object.keys(result).join(', ')}`);
-        
+
         if (!result.Item) {
             console.log(`No patient found with ID: ${patientId}`);
             return {
@@ -766,27 +767,54 @@ async function handleGetPatient(patientId, forceRefresh = false) {
                 message: `Patient not found with ID: ${patientId}`
             };
         }
-        
+
         // Transform DynamoDB format to plain JavaScript objects
         const patientData = unmarshallDynamoDBItem(result.Item);
-        
+
         console.log(`Successfully unmarshalled patient data. Found ${patientData.clinicalParameters ? 'with' : 'without'} clinical parameters`);
         if (patientData.clinicalParameters) {
             console.log(`Clinical parameters keys: ${Object.keys(patientData.clinicalParameters).join(', ')}`);
         }
-        
+
+        // SIGN PRE-SIGNED URLS FOR REPORT FILES
+        if (patientData.reportFiles && Array.isArray(patientData.reportFiles)) {
+            console.log("Signing S3 URLs for patient view...");
+            try {
+                patientData.reportFiles = await Promise.all(patientData.reportFiles.map(async (file) => {
+                    // Only sign if we have a key and it looks like an S3 file
+                    if (file.key && (file.uploadedToS3 || !file.storedLocally)) {
+                        try {
+                            const getCommand = new GetObjectCommand({
+                                Bucket: REPORTS_BUCKET,
+                                Key: file.key
+                            });
+                            // Generate URL valid for 1 hour
+                            const signedUrl = await getSignedUrl(s3, getCommand, { expiresIn: 3600 });
+                            return { ...file, url: signedUrl };
+                        } catch (e) {
+                            console.warn(`Failed to sign URL for ${file.key}:`, e.message);
+                            return file;
+                        }
+                    }
+                    return file;
+                }));
+            } catch (err) {
+                console.error("Error signing URLs:", err);
+            }
+        }
+
         // Get clinical history for this patient
         const clinicalHistoryResponse = await fetchClinicalHistory(patientId);
-        
+
         // Get medical history entries for this patient
         const medicalHistoryResponse = await fetchMedicalHistory(patientId);
-        
+
         // Get diagnosis history for this patient
         const diagnosisHistoryResponse = await fetchDiagnosisHistory(patientId);
-        
+
         // Get investigations history for this patient
         const investigationsHistoryResponse = await fetchInvestigationsHistory(patientId);
-        
+
         // Return success response with transformed data
         return {
             success: true,
@@ -811,27 +839,27 @@ async function handleGetPatient(patientId, forceRefresh = false) {
 async function handleGetPatientFiles(patientId) {
     try {
         console.log(`Getting files for patient ID: ${patientId}`);
-        
+
         // Initialize array for all files
         let allFiles = [];
-        
+
         // First, try to get files from patient record in DynamoDB
         let recordFiles = [];
         try {
             console.log(`Checking DynamoDB for patient record files: ${patientId}`);
-            
+
             const patientRecord = await dynamodb.send(new GetCommand({
                 TableName: PATIENTS_TABLE,
                 Key: { patientId }
             }));
-            
+
             if (patientRecord.Item && patientRecord.Item.reportFiles && Array.isArray(patientRecord.Item.reportFiles)) {
                 recordFiles = patientRecord.Item.reportFiles;
                 console.log(`Found ${recordFiles.length} files in patient record`);
-                
+
                 // Log file details for first few files
                 recordFiles.slice(0, 3).forEach((file, idx) => {
-                    console.log(`Record file ${idx+1}: Name: ${file.name}, URL: ${file.url?.substring(0, 30) || 'none'}, Type: ${file.type || 'unknown'}`);
+                    console.log(`Record file ${idx + 1}: Name: ${file.name}, URL: ${file.url?.substring(0, 30) || 'none'}, Type: ${file.type || 'unknown'}`);
                 });
             } else {
                 console.log(`No files found in patient record: ${patientId}`);
@@ -840,22 +868,22 @@ async function handleGetPatientFiles(patientId) {
             console.error(`Error querying DynamoDB for patient files: ${dbError.message}`);
             console.log(`Continuing with S3 file search`);
         }
-        
+
         // Next, try to list objects in S3 for this patient
         let s3Files = [];
         try {
             console.log(`Listing objects in S3 bucket: ${REPORTS_BUCKET} for prefix: ${patientId}/`);
-            
+
             const s3ListParams = {
                 Bucket: REPORTS_BUCKET,
                 Prefix: `${patientId}/`
             };
-            
+
             const listObjectsResult = await s3.send(new ListObjectsV2Command(s3ListParams));
-            
+
             if (listObjectsResult.Contents && listObjectsResult.Contents.length > 0) {
                 console.log(`Found ${listObjectsResult.Contents.length} objects in S3 for patient ${patientId}`);
-                
+
                 // Process each S3 object
                 s3Files = await Promise.all(listObjectsResult.Contents.map(async (object) => {
                     try {
@@ -863,9 +891,9 @@ async function handleGetPatientFiles(patientId) {
                         const objectKey = object.Key;
                         const fileNameMatch = objectKey.match(/[^\/]+$/);
                         const fileName = fileNameMatch ? fileNameMatch[0] : objectKey;
-                        
+
                         console.log(`Processing S3 object: ${fileName}`);
-                        
+
                         // Try to get metadata
                         let metadata = {};
                         try {
@@ -873,24 +901,41 @@ async function handleGetPatientFiles(patientId) {
                                 Bucket: REPORTS_BUCKET,
                                 Key: objectKey
                             }));
-                            
+
                             metadata = headResult.Metadata || {};
                             console.log(`Got metadata for ${fileName}: ${JSON.stringify(metadata)}`);
                         } catch (metadataError) {
                             console.warn(`Couldn't get metadata for ${fileName}: ${metadataError.message}`);
                         }
-                        
+
                         // Determine file type from key or metadata
-                        const fileType = metadata['content-type'] || 
-                                        (fileName.endsWith('.pdf') ? 'application/pdf' : 
-                                        fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') ? 'image/jpeg' :
-                                        fileName.endsWith('.png') ? 'image/png' : 'application/octet-stream');
-                        
+                        const fileType = metadata['content-type'] ||
+                            (fileName.endsWith('.pdf') ? 'application/pdf' :
+                                fileName.endsWith('.jpg') || fileName.endsWith('.jpeg') ? 'image/jpeg' :
+                                    fileName.endsWith('.png') ? 'image/png' : 'application/octet-stream');
+
+
+                        // Generate presigned URL for secure access
+                        let signedUrl = "";
+                        try {
+                            const getCommand = new GetObjectCommand({
+                                Bucket: REPORTS_BUCKET,
+                                Key: objectKey
+                            });
+                            // Generate URL valid for 1 hour
+                            signedUrl = await getSignedUrl(s3, getCommand, { expiresIn: 3600 });
+                            console.log(`Generated signed URL for ${fileName}`);
+                        } catch (signError) {
+                            console.error(`Error generating signed URL: ${signError.message}`);
+                            // Fallback to standard URL if signing fails
+                            signedUrl = `${S3_URL_PREFIX}${objectKey}`;
+                        }
+
                         // Create file object
                         return {
                             name: metadata['original-name'] || fileName,
                             key: objectKey,
-                            url: `${S3_URL_PREFIX}${objectKey}`,
+                            url: signedUrl,
                             type: fileType,
                             size: object.Size,
                             lastModified: object.LastModified?.toISOString(),
@@ -909,7 +954,7 @@ async function handleGetPatientFiles(patientId) {
                         };
                     }
                 }));
-                
+
                 console.log(`Processed ${s3Files.length} S3 files for patient ${patientId}`);
             } else {
                 console.log(`No objects found in S3 for patient ${patientId}`);
@@ -918,17 +963,17 @@ async function handleGetPatientFiles(patientId) {
             console.error(`Error listing objects in S3: ${s3Error.message}`);
             console.log(`Continuing with record files only`);
         }
-        
+
         // Combine files and deduplicate
         const fileMap = new Map();
-        
+
         // Add S3 files first (they're more reliable)
         s3Files.forEach(file => {
             if (file.url) {
                 fileMap.set(file.url, file);
             }
         });
-        
+
         // Then add record files, but don't overwrite S3 files with same URL
         recordFiles.forEach(file => {
             // Only add if we have a URL
@@ -939,12 +984,12 @@ async function handleGetPatientFiles(patientId) {
                 });
             }
         });
-        
+
         // Convert map back to array
         allFiles = Array.from(fileMap.values());
-        
+
         console.log(`Found a total of ${allFiles.length} unique files for patient ${patientId}`);
-        
+
         return {
             success: true,
             files: allFiles
@@ -966,24 +1011,38 @@ export const handler = async (event, context) => {
         console.log("Lambda function started");
         console.log("Event type:", typeof event);
         console.log("Event structure:", JSON.stringify(event, null, 2).substring(0, 1000));
-        
+
         // Don't wait for event loop to empty (allows for faster response)
         context.callbackWaitsForEmptyEventLoop = false;
-        
+
+        // Handle OPTIONS for CORS preflight
+        if (event.httpMethod === "OPTIONS" || (event.requestContext && event.requestContext.http && event.requestContext.http.method === "OPTIONS")) {
+            console.log("Handling OPTIONS preflight request");
+            return {
+                statusCode: 200,
+                headers: {
+                    "Access-Control-Allow-Origin": "*",
+                    "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+                },
+                body: ""
+            };
+        }
+
         // Enhanced request body handling for different integration types
         let requestData;
-        
+
         // Handle different possible event formats from API Gateway
         if (event.body) {
             // Standard API Gateway proxy integration
             let rawBody = event.body;
-            
+
             // Handle base64 encoded bodies
             if (event.isBase64Encoded) {
                 console.log("Decoding base64 encoded body");
                 rawBody = Buffer.from(rawBody, 'base64').toString('utf8');
             }
-            
+
             // Parse JSON body
             try {
                 requestData = JSON.parse(rawBody);
@@ -995,11 +1054,11 @@ export const handler = async (event, context) => {
         } else if (event.httpMethod && event.pathParameters) {
             // API Gateway REST API integration - might have different structure
             console.log("Detected REST API integration pattern");
-            
+
             if (event.body === null && event.requestContext) {
                 // Some API Gateway configurations might put the body elsewhere
                 console.log("Checking alternative body locations");
-                
+
                 if (event.requestContext.body) {
                     try {
                         requestData = JSON.parse(event.requestContext.body);
@@ -1020,18 +1079,18 @@ export const handler = async (event, context) => {
             }
         } else if (typeof event === 'object') {
             // Direct invocation with object or other API Gateway format
-            
+
             // Check for API Gateway v2 format (HTTP API)
             if (event.version === '2.0' && event.rawPath && event.rawQueryString !== undefined) {
                 console.log("Detected API Gateway v2 (HTTP API) format");
-                
+
                 // For HTTP API, the body might be in a different location
                 try {
                     if (event.body) {
-                        const body = event.isBase64Encoded 
+                        const body = event.isBase64Encoded
                             ? Buffer.from(event.body, 'base64').toString('utf8')
                             : event.body;
-                            
+
                         requestData = JSON.parse(body);
                         console.log("Parsed body from HTTP API format");
                     }
@@ -1044,13 +1103,13 @@ export const handler = async (event, context) => {
                 console.log("Using event object directly as request data");
             }
         }
-        
+
         // Final validation that we have request data in some form
         if (!requestData) {
             console.error("Could not extract request data from event");
             return formatErrorResponse("Unable to process request: No valid request data found");
         }
-        
+
         // Log what we found to help with debugging
         console.log("Extracted request data keys:", Object.keys(requestData));
         console.log("Patient ID:", requestData.patientId);
@@ -1059,13 +1118,13 @@ export const handler = async (event, context) => {
         console.log("Mobile number:", requestData.mobile);
         console.log("Patient name:", requestData.name);
         console.log("Action:", requestData.action);
-        
+
         // Check for getInvestigationsHistory action
         if (requestData.action === 'getInvestigationsHistory') {
             console.log(`Processing getInvestigationsHistory action for ID: ${requestData.patientId}`);
             const includeAll = requestData.includeAll === true || requestData.includeAll === 'true';
             const response = await fetchInvestigationsHistory(requestData.patientId, includeAll);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1077,13 +1136,13 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
         // Check for getDiagnosisHistory action
         if (requestData.action === 'getDiagnosisHistory') {
             console.log(`Processing getDiagnosisHistory action for ID: ${requestData.patientId}`);
             const includeAll = requestData.includeAll === true || requestData.includeAll === 'true';
             const response = await fetchDiagnosisHistory(requestData.patientId, includeAll);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1095,12 +1154,12 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
         // Check for getPatientFiles action
         if (requestData.action === 'getPatientFiles') {
             console.log(`Processing getPatientFiles action for ID: ${requestData.patientId}`);
             const response = await handleGetPatientFiles(requestData.patientId);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1111,12 +1170,12 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
         // Check for getPatient action
         if (requestData.action === 'getPatient') {
             console.log(`Processing getPatient action for ID: ${requestData.patientId}`);
             const response = await handleGetPatient(requestData.patientId);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1128,12 +1187,12 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
         // Check for getClinicalHistory action
         if (requestData.action === 'getClinicalHistory') {
             console.log(`Processing getClinicalHistory action for ID: ${requestData.patientId}`);
             const response = await fetchClinicalHistory(requestData.patientId);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1144,12 +1203,12 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
         // Check for getMedicalHistory action
         if (requestData.action === 'getMedicalHistory') {
             console.log(`Processing getMedicalHistory action for ID: ${requestData.patientId}`);
             const response = await fetchMedicalHistory(requestData.patientId);
-            
+
             return {
                 statusCode: 200,
                 headers: {
@@ -1160,23 +1219,83 @@ export const handler = async (event, context) => {
                 body: JSON.stringify(response)
             };
         }
-        
+
+        // Check for getAllPatients action
+        if (requestData.action === 'getAllPatients') {
+            console.log("Processing getAllPatients action");
+            const response = await getAllPatients();
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify(response)
+            };
+        }
+
+        // Check for searchPatients action
+        if (requestData.action === 'searchPatients') {
+            console.log(`Processing searchPatients action for term: ${requestData.searchTerm}`);
+            const response = await searchPatients(requestData);
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify(response)
+            };
+        }
+
+        // Check for deletePatient action
+        if (requestData.action === 'deletePatient') {
+            console.log(`Processing deletePatient action for ID: ${requestData.patientId}`);
+            const response = await deletePatient(requestData);
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify(response)
+            };
+        }
+
+        // Check for deletePatientFile action
+        if (requestData.action === 'deletePatientFile') {
+            console.log(`Processing deletePatientFile action for ID: ${requestData.patientId}`);
+            const response = await deletePatientFile(requestData);
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify(response)
+            };
+        }
+
         // Check if this is a cleanup request for orphaned records
         if (requestData.action === 'cleanupOrphaned') {
             console.log("Processing cleanup request for orphaned records");
             return await cleanupOrphanedRecords();
         }
-        
+
         // Determine operation type based on request parameters with improved type checking
         const isUpdateOperation = requestData.patientId && (
-            requestData.updateMode === true || 
-            requestData.updateMode === 'true' || 
+            requestData.updateMode === true ||
+            requestData.updateMode === 'true' ||
             String(requestData.updateMode).toLowerCase() === 'true' ||
             requestData.isUpdate === 'true' // Additional check for the redundant flag
         );
-        
+
         console.log("Is update operation:", isUpdateOperation);
-        
+
         if (isUpdateOperation) {
             console.log(`Processing update request for patient ID: ${requestData.patientId}`);
             return await updatePatientData(requestData);
@@ -1189,7 +1308,7 @@ export const handler = async (event, context) => {
             if (requestData.patientId && (!requestData.updateMode || requestData.updateMode === false)) {
                 console.log(`Request has patientId but updateMode is not true. PatientId: ${requestData.patientId}`);
             }
-            
+
             console.log("Processing new patient creation request");
             return await processPatientData(requestData);
         }
@@ -1204,12 +1323,12 @@ export const handler = async (event, context) => {
 async function saveMedicalHistoryEntry(patientId, historyText) {
     try {
         console.log(`Saving medical history entry for patient ${patientId}`);
-        
+
         if (!historyText) {
             console.log("No history text provided, skipping history save");
             return false;
         }
-        
+
         // Extract timestamp if this came from "Add History" button
         let extractedTimestamp = null;
         const timestampMatch = historyText.match(/--- (New )?Entry \(([^)]+)\) ---/);
@@ -1221,7 +1340,7 @@ async function saveMedicalHistoryEntry(patientId, historyText) {
                 console.warn(`Failed to parse extracted timestamp: ${timestampMatch[2]}`);
             }
         }
-        
+
         // Create a history record with timestamp
         const historyRecord = {
             patientId: patientId,
@@ -1233,9 +1352,9 @@ async function saveMedicalHistoryEntry(patientId, historyText) {
             // Track if this was from pending history in AsyncStorage
             fromPendingHistory: historyText.includes("--- New Entry") && historyText.includes("pending_history")
         };
-        
+
         console.log(`Created history record with ID: ${historyRecord.entryId}`);
-        
+
         // Check if the history table exists, create if not
         try {
             // Try to add a history record - will fail if table doesn't exist
@@ -1243,33 +1362,33 @@ async function saveMedicalHistoryEntry(patientId, historyText) {
                 TableName: MEDICAL_HISTORY_TABLE,
                 Item: historyRecord
             }));
-            
+
             console.log(`Successfully saved history record to existing table: ${MEDICAL_HISTORY_TABLE}`);
             return true;
         } catch (error) {
             // If table doesn't exist, we'll handle that case
             console.warn(`Error saving to medical history table: ${error.message}`);
             console.warn("This is expected if the table doesn't exist");
-            
+
             // For simplicity, we'll store the history in the patient record itself as a fallback
             console.log("Storing history in patient record as fallback");
-            
+
             try {
                 // Get current patient record
                 const patientRecord = await dynamodb.send(new GetCommand({
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 if (!patientRecord.Item) {
                     console.error(`Patient ${patientId} not found for history fallback`);
                     return false;
                 }
-                
+
                 // Initialize or append to medicalHistoryEntries array
                 const currentHistory = patientRecord.Item.medicalHistoryEntries || [];
                 currentHistory.push(historyRecord);
-                
+
                 // Update the patient record with the history
                 await dynamodb.send(new UpdateCommand({
                     TableName: PATIENTS_TABLE,
@@ -1279,7 +1398,7 @@ async function saveMedicalHistoryEntry(patientId, historyText) {
                         ":history": currentHistory
                     }
                 }));
-                
+
                 console.log(`Saved history to patient record fallback, ${currentHistory.length} total entries`);
                 return true;
             } catch (fallbackError) {
@@ -1298,18 +1417,18 @@ async function saveMedicalHistoryEntry(patientId, historyText) {
 async function saveClinicalParametersHistory(patientId, parameters) {
     try {
         console.log(`Saving clinical parameters history for patient ${patientId}`);
-        
+
         if (!parameters) {
             console.log("No parameters provided, skipping history save");
             return false;
         }
-        
+
         // Ensure parameters have a date
         if (!parameters.date) {
             parameters.date = new Date().toISOString();
             console.log("Added missing date to parameters");
         }
-        
+
         // Create a history record with timestamp
         const historyRecord = {
             patientId: patientId,
@@ -1318,9 +1437,9 @@ async function saveClinicalParametersHistory(patientId, parameters) {
             recordDate: new Date().toISOString(),
             ...parameters
         };
-        
+
         console.log(`Created history record with ID: ${historyRecord.paramId}`);
-        
+
         // Check if the history table exists, create if not
         try {
             // Try to add a history record - will fail if table doesn't exist
@@ -1328,33 +1447,33 @@ async function saveClinicalParametersHistory(patientId, parameters) {
                 TableName: CLINICAL_HISTORY_TABLE,
                 Item: historyRecord
             }));
-            
+
             console.log(`Successfully saved history record to existing table: ${CLINICAL_HISTORY_TABLE}`);
             return true;
         } catch (error) {
             // If table doesn't exist, we'll handle that case
             console.warn(`Error saving to history table: ${error.message}`);
             console.warn("This is expected if the table doesn't exist");
-            
+
             // For simplicity, we'll store the history in the patient record itself as a fallback
             console.log("Storing history in patient record as fallback");
-            
+
             try {
                 // Get current patient record
                 const patientRecord = await dynamodb.send(new GetCommand({
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 if (!patientRecord.Item) {
                     console.error(`Patient ${patientId} not found for history fallback`);
                     return false;
                 }
-                
+
                 // Initialize or append to clinicalHistory array
                 const currentHistory = patientRecord.Item.clinicalHistory || [];
                 currentHistory.push(historyRecord);
-                
+
                 // Update the patient record with the history
                 await dynamodb.send(new UpdateCommand({
                     TableName: PATIENTS_TABLE,
@@ -1364,7 +1483,7 @@ async function saveClinicalParametersHistory(patientId, parameters) {
                         ":history": currentHistory
                     }
                 }));
-                
+
                 console.log(`Saved history to patient record fallback, ${currentHistory.length} total entries`);
                 return true;
             } catch (fallbackError) {
@@ -1383,7 +1502,7 @@ async function saveClinicalParametersHistory(patientId, parameters) {
 async function cleanupOrphanedRecords() {
     try {
         console.log("Starting orphaned records cleanup process");
-        
+
         // Scan for orphaned records
         const scanResult = await dynamodb.send(new ScanCommand({
             TableName: PATIENTS_TABLE,
@@ -1392,7 +1511,7 @@ async function cleanupOrphanedRecords() {
                 ":isOrphaned": true
             }
         }));
-        
+
         if (!scanResult.Items || scanResult.Items.length === 0) {
             console.log("No orphaned records found to clean up");
             return {
@@ -1409,53 +1528,53 @@ async function cleanupOrphanedRecords() {
                 })
             };
         }
-        
+
         console.log(`Found ${scanResult.Items.length} orphaned records to analyze`);
-        
+
         // Identify orphaned records (records missing essential info)
         const orphanedRecords = scanResult.Items.filter(item => {
             // Check for records with no name or empty name
             const missingName = !item.name || item.name.trim() === '';
-            
+
             // Check for records with no medication info
             const hasMedications = item.medications && item.medications.length > 0;
-            
+
             // Get record age in days
             const recordAgeMs = Date.now() - new Date(item.createdAt || 0).getTime();
             const recordAgeDays = recordAgeMs / (1000 * 60 * 60 * 24);
-            
+
             // Records over 30 days old should be considered orphaned
             const isOld = recordAgeDays > 30;
-            
+
             // Records that are missing name but have medications are likely orphaned prescriptions
             const isOrphanedPrescription = missingName && hasMedications;
-            
+
             // Records that are old are also candidates for cleanup
             return isOrphanedPrescription || isOld;
         });
-        
+
         console.log(`Identified ${orphanedRecords.length} orphaned records to clean up`);
-        
+
         // Clean up orphaned records
         let cleanedCount = 0;
         for (const record of orphanedRecords) {
             try {
                 console.log(`Cleaning up orphaned record: ${record.patientId}`);
-                
+
                 await dynamodb.send(new DeleteCommand({
                     TableName: PATIENTS_TABLE,
                     Key: { patientId: record.patientId }
                 }));
-                
+
                 cleanedCount++;
                 console.log(`Successfully deleted orphaned record: ${record.patientId}`);
             } catch (error) {
                 console.error(`Failed to delete orphaned record ${record.patientId}: ${error.message}`);
             }
         }
-        
+
         console.log(`Cleaned up ${cleanedCount} orphaned records`);
-        
+
         return {
             statusCode: 200,
             headers: {
@@ -1480,23 +1599,23 @@ async function cleanupOrphanedRecords() {
 async function processSectionSave(sectionData) {
     try {
         console.log("Starting processSectionSave with direct permanent records");
-        
+
         // Check which section we're saving
         const section = sectionData.saveSection;
         if (!section) {
             return formatErrorResponse("Section must be specified for sectional saves");
         }
-        
+
         console.log(`Processing section save for: ${section}`);
-        
+
         // Use existing patientId if provided, or generate a new one
         let patientId = sectionData.patientId;
         let existingPatient = null;
-        
+
         // Additional logging for incoming patientId
         console.log(`Incoming patientId: ${patientId || 'not provided'}`);
         console.log(`Incoming patientId type: ${typeof patientId}`);
-        
+
         // STEP 1: Try to find existing patient if ID is provided
         if (patientId) {
             console.log(`Looking up patient with ID: ${patientId}`);
@@ -1505,15 +1624,15 @@ async function processSectionSave(sectionData) {
                     TableName: PATIENTS_TABLE,
                     Key: { patientId }
                 }));
-                
+
                 existingPatient = patientResponse.Item;
-                
+
                 if (existingPatient) {
                     // CRITICAL FIX: If name or mobile doesn't match, this is probably the wrong patient record
-                    if ((sectionData.name && existingPatient.name && 
-                         sectionData.name.trim() !== existingPatient.name.trim()) ||
-                         (sectionData.mobile && existingPatient.mobile && 
-                         sectionData.mobile.trim() !== existingPatient.mobile.trim())) {
+                    if ((sectionData.name && existingPatient.name &&
+                        sectionData.name.trim() !== existingPatient.name.trim()) ||
+                        (sectionData.mobile && existingPatient.mobile &&
+                            sectionData.mobile.trim() !== existingPatient.mobile.trim())) {
                         console.warn(`⚠️ Found patient ${patientId} but name/mobile doesn't match! This appears to be a different patient. Creating new record.`);
                         console.log(`Existing patient: ${existingPatient.name} / ${existingPatient.mobile}`);
                         console.log(`Current data: ${sectionData.name} / ${sectionData.mobile}`);
@@ -1522,7 +1641,7 @@ async function processSectionSave(sectionData) {
                     }
                     else {
                         console.log(`Found existing patient by ID: ${existingPatient.name || 'unnamed'}`);
-                        
+
                         // Log savedSections to help with debugging
                         console.log("Existing patient saved sections:", JSON.stringify(existingPatient.savedSections || {}));
                     }
@@ -1536,14 +1655,14 @@ async function processSectionSave(sectionData) {
                 patientId = null; // Reset patientId
             }
         }
-        
+
         // STEP 2: If patientId not provided or not found, generate a new one
         if (!patientId) {
             // Generate a permanent UUID
             patientId = randomUUID();
             console.log(`Generated new permanent patient ID: ${patientId}`);
         }
-        
+
         // Initialize/update saved sections tracking
         const savedSections = existingPatient?.savedSections || {
             basic: false,
@@ -1551,18 +1670,18 @@ async function processSectionSave(sectionData) {
             prescription: false,
             diagnosis: false
         };
-        
+
         // Always set the current section to be saved right at the beginning
         // This ensures the savedSections flag is set properly
         savedSections[section] = true;
         console.log(`Immediately marking section ${section} as saved. Updated saved sections:`, savedSections);
-        
+
         // If we're saving the basic section, make sure it's properly marked
         if (section === 'basic') {
             savedSections.basic = true;
             console.log("Basic section is being saved, explicitly setting savedSections.basic = true");
         }
-        
+
         // If we have the basic info in this request but we're saving prescription,
         // use the data to create a synthetic "basic" save first
         if (section === 'prescription' && !savedSections.basic && sectionData.name && sectionData.mobile) {
@@ -1570,16 +1689,16 @@ async function processSectionSave(sectionData) {
             savedSections.basic = true;
             console.log("Synthetic basic section created from prescription data, setting savedSections.basic = true");
         }
-        
+
         // Validate prescription update
         if (section === 'prescription') {
             console.log("Validating requirements for prescription save...");
-            
+
             // Check if the basic section has been saved or if we have enough info in this request
             if (!savedSections.basic && !(sectionData.name && sectionData.mobile)) {
                 console.warn("⚠️ Attempted to save prescription without basic patient information marked as saved");
                 console.log("Current savedSections state:", savedSections);
-                
+
                 // If we have an existing patient with a name but the basic section flag is false,
                 // this is probably just a flag issue. Let's fix it instead of failing.
                 if (existingPatient && existingPatient.name && existingPatient.name.trim() !== '') {
@@ -1592,32 +1711,38 @@ async function processSectionSave(sectionData) {
                     return formatErrorResponse("Cannot save prescription without first saving basic patient information. Please go to the Basic Info tab, complete it, and then return to Prescription tab.");
                 }
             }
-            
+
             // Additional validation to ensure we have a patient with a name
-            if ((!existingPatient || !existingPatient.name || existingPatient.name.trim() === '') && 
+            if ((!existingPatient || !existingPatient.name || existingPatient.name.trim() === '') &&
                 (!sectionData.name || sectionData.name.trim() === '')) {
                 console.warn("⚠️ Attempted to save prescription but patient has no name");
                 return formatErrorResponse("Cannot save prescription: Patient name is required. Please provide patient name in the Basic Info tab first.");
             }
-            
+
+
             console.log("Prescription validation passed, continuing with save");
         }
-        
+
         // Initialize base patient data - either existing or new
         let patientItem = existingPatient || {
             patientId: patientId,
             createdAt: new Date().toISOString(),
             name: "",
             age: 0,
-            sex: "Male"
+            sex: "Male",
+            // Add searchable fields for dashboard
+            nameSearchable: "",
+            mobileSearchable: ""
         };
-        
-        // Update the timestamp
-        patientItem.updatedAt = new Date().toISOString();
-        
+
+        // Update the timestamp and lastVisitDate
+        const now = new Date().toISOString();
+        patientItem.updatedAt = now;
+        patientItem.lastVisitDate = now;
+
         // Add saved sections tracking
         patientItem.savedSections = savedSections;
-        
+
         // Process section-specific data
         switch (section) {
             case 'basic':
@@ -1625,38 +1750,42 @@ async function processSectionSave(sectionData) {
                 if (!sectionData.name || !sectionData.age || !sectionData.mobile) {
                     return formatErrorResponse("Missing required basic information (name, age, mobile)");
                 }
-                
+
                 patientItem.name = sectionData.name;
                 patientItem.age = parseInt(sectionData.age) || 0;
                 patientItem.sex = sectionData.sex || "Male";
                 patientItem.mobile = sectionData.mobile;
                 patientItem.address = sectionData.address || "";
-                
+
+                // Update searchable fields
+                patientItem.nameSearchable = sectionData.name.toLowerCase();
+                patientItem.mobileSearchable = sectionData.mobile;
+
                 // Explicitly set the basic section as saved again to ensure it's set
                 patientItem.savedSections.basic = true;
                 console.log("Basic section is being saved, double-checking savedSections.basic = true");
                 break;
-                
+
             case 'clinical':
                 // Check if medicalHistory update is from pending history in AsyncStorage
                 if (sectionData.medicalHistory !== undefined) {
                     const currentMedicalHistory = patientItem.medicalHistory || "";
-                    
+
                     // Only save history if the text has actually changed
                     if (sectionData.medicalHistory !== currentMedicalHistory) {
                         console.log("Medical history has changed, checking if history should be saved");
-                        
+
                         // Check if this appears to be an "Add History" update by looking for timestamp pattern
-                        const hasTimestampPattern = sectionData.medicalHistory.includes("--- New Entry (") || 
-                                                   sectionData.medicalHistory.includes("--- Entry (");
-                        
+                        const hasTimestampPattern = sectionData.medicalHistory.includes("--- New Entry (") ||
+                            sectionData.medicalHistory.includes("--- Entry (");
+
                         // Check if this might be from pending history in AsyncStorage
-                        const isPendingHistory = sectionData.pendingHistoryIncluded || 
-                                               sectionData.medicalHistory.includes("pending_history");
-                        
+                        const isPendingHistory = sectionData.pendingHistoryIncluded ||
+                            sectionData.medicalHistory.includes("pending_history");
+
                         // If it has the timestamp pattern from Add History or pending history flags, force history tracking
                         const shouldCreateHistoryEntry = hasTimestampPattern || isPendingHistory;
-                        
+
                         if (shouldCreateHistoryEntry) {
                             try {
                                 console.log("Creating medical history entry due to Add History update or pending history");
@@ -1672,22 +1801,22 @@ async function processSectionSave(sectionData) {
                     } else {
                         console.log("Medical history has not changed, skipping history save");
                     }
-                    
+
                     // Add the medicalHistory field
                     patientItem.medicalHistory = sectionData.medicalHistory;
                 }
-                
+
                 // Keep diagnosis field
                 patientItem.diagnosis = sectionData.diagnosis || "";
-                
+
                 // Handle advisedInvestigations with history tracking
                 if (sectionData.advisedInvestigations !== undefined) {
                     const currentInvestigations = patientItem.advisedInvestigations || "";
-                    
+
                     // Check if advisedInvestigations has changed
                     if (sectionData.advisedInvestigations !== currentInvestigations) {
                         console.log("Advised investigations have changed");
-                        
+
                         // Save investigations history if they're not empty
                         if (sectionData.advisedInvestigations && sectionData.advisedInvestigations.trim() !== '') {
                             try {
@@ -1699,29 +1828,29 @@ async function processSectionSave(sectionData) {
                             }
                         }
                     }
-                    
+
                     // Update advisedInvestigations field
                     patientItem.advisedInvestigations = sectionData.advisedInvestigations;
                 }
-                
+
                 // Update reports text
                 patientItem.reports = sectionData.reports || "";
-                
+
                 // Handle clinical parameters if provided
                 if (sectionData.clinicalParameters) {
-                    console.log("Processing clinical parameters:", 
-                          Object.keys(sectionData.clinicalParameters).join(", "));
-                          
+                    console.log("Processing clinical parameters:",
+                        Object.keys(sectionData.clinicalParameters).join(", "));
+
                     // Log if the createParameterHistory flag is set
                     if (sectionData.createParameterHistory) {
                         console.log("createParameterHistory flag is set, will save parameter history");
                     } else {
                         console.log("createParameterHistory flag is NOT set, history will not be saved");
                     }
-                          
+
                     // Store the current clinical parameters in the patient record
                     patientItem.clinicalParameters = sectionData.clinicalParameters;
-                    
+
                     // If createParameterHistory flag is set, save to history
                     if (sectionData.createParameterHistory) {
                         try {
@@ -1754,14 +1883,14 @@ async function processSectionSave(sectionData) {
                         others: ""
                     };
                 }
-                
+
                 // Process report files if provided in clinical section
                 if (sectionData.reportFiles && Array.isArray(sectionData.reportFiles) && sectionData.reportFiles.length > 0) {
                     console.log(`Processing ${sectionData.reportFiles.length} report files from clinical section`);
-                    
+
                     // Log file details for debugging
                     sectionData.reportFiles.forEach((file, index) => {
-                        console.log(`File ${index+1}/${sectionData.reportFiles.length}: 
+                        console.log(`File ${index + 1}/${sectionData.reportFiles.length}: 
                             Name: ${file.name || 'unnamed'}, 
                             Type: ${file.type || 'unknown'}, 
                             Has base64Data: ${!!file.base64Data},
@@ -1770,17 +1899,17 @@ async function processSectionSave(sectionData) {
                             Category: ${file.category || 'uncategorized'}`
                         );
                     });
-                    
+
                     try {
                         // Make sure existing files are kept
                         const existingFiles = patientItem.reportFiles || [];
-                        
+
                         // Better file deduplication before processing
                         const newFilesToProcess = deduplicateFiles(sectionData.reportFiles, existingFiles);
-                        
+
                         if (newFilesToProcess.length > 0) {
                             console.log(`After deduplication, processing ${newFilesToProcess.length} new files`);
-                            
+
                             // Process the new files
                             const newFiles = await processReportFiles(newFilesToProcess, patientId);
                             console.log(`Processed ${newFiles.length} new files. Details:`, JSON.stringify(newFiles.map(f => ({
@@ -1789,21 +1918,21 @@ async function processSectionSave(sectionData) {
                                 uploadedToS3: f.uploadedToS3 || false,
                                 category: f.category || 'uncategorized'
                             }))));
-                            
+
                             // Add the processed files to the patient record
                             patientItem.reportFiles = [...existingFiles, ...newFiles];
-                            
+
                             // Update reports text field if files were successfully processed and not already mentioned
                             if (newFiles.length > 0) {
                                 const today = new Date().toLocaleDateString();
-                                
+
                                 // Add file references to reports text if not already there
                                 newFiles.forEach(file => {
                                     const categoryInfo = file.category ? ` (Category: ${file.category})` : '';
                                     const fileReference = `- Uploaded: ${file.name}${categoryInfo} (${today})`;
                                     if (!patientItem.reports.includes(fileReference)) {
-                                        patientItem.reports = patientItem.reports 
-                                            ? `${patientItem.reports}\n${fileReference}` 
+                                        patientItem.reports = patientItem.reports
+                                            ? `${patientItem.reports}\n${fileReference}`
                                             : fileReference;
                                     }
                                 });
@@ -1817,35 +1946,35 @@ async function processSectionSave(sectionData) {
                     }
                 }
                 break;
-                
+
             case 'prescription':
                 // If we have basic info in the request, apply it to the patient record
                 if (sectionData.name && sectionData.mobile) {
                     console.log("Applying basic patient info provided with prescription data");
                     patientItem.name = sectionData.name;
                     patientItem.mobile = sectionData.mobile;
-                    
+
                     // If age is provided
                     if (sectionData.age) {
                         patientItem.age = parseInt(sectionData.age) || 0;
                     }
-                    
+
                     // If sex is provided
                     if (sectionData.sex) {
                         patientItem.sex = sectionData.sex;
                     }
-                    
+
                     // Mark basic section as saved
                     patientItem.savedSections.basic = true;
                     console.log("Basic info applied from prescription data, marked basic section as saved");
                 }
-                
+
                 // Process medications if provided
                 if (sectionData.medications && Array.isArray(sectionData.medications)) {
                     console.log(`Processing ${sectionData.medications.length} medications`);
-                    
+
                     patientItem.medications = processMedications(sectionData.medications);
-                    
+
                     // Generate prescription text
                     patientItem.generatedPrescription = generatePrescriptionText(patientItem.medications);
                 } else {
@@ -1853,27 +1982,27 @@ async function processSectionSave(sectionData) {
                     patientItem.medications = patientItem.medications || [];
                 }
                 break;
-                
+
             case 'diagnosis':
                 // Check if diagnosis has changed and save to history if needed
                 if (sectionData.diagnosis !== undefined) {
                     const currentDiagnosis = patientItem.diagnosis || "";
-                    
+
                     // Log the diagnosis values for debugging
                     console.log(`Current diagnosis: "${currentDiagnosis}"`);
                     console.log(`New diagnosis: "${sectionData.diagnosis}"`);
-                    
+
                     // Only save history if the text has actually changed
                     if (sectionData.diagnosis !== currentDiagnosis) {
                         console.log("Diagnosis has changed, checking if history should be saved");
-                        
+
                         // Check if createDiagnosisHistory flag is set
                         if (sectionData.createDiagnosisHistory) {
                             console.log("createDiagnosisHistory flag is set, saving diagnosis history");
                             try {
                                 await saveDiagnosisHistoryEntry(
-                                    patientId, 
-                                    sectionData.diagnosis, 
+                                    patientId,
+                                    sectionData.diagnosis,
                                     sectionData.advisedInvestigations
                                 );
                                 console.log("Successfully saved diagnosis history entry");
@@ -1887,19 +2016,19 @@ async function processSectionSave(sectionData) {
                     } else {
                         console.log("Diagnosis hasn't changed, skipping history save");
                     }
-                    
+
                     // Update the diagnosis
                     patientItem.diagnosis = sectionData.diagnosis;
                 }
-                
+
                 // Handle advisedInvestigations with history tracking
                 if (sectionData.advisedInvestigations !== undefined) {
                     const currentInvestigations = patientItem.advisedInvestigations || "";
-                    
+
                     // Check if advisedInvestigations has changed
                     if (sectionData.advisedInvestigations !== currentInvestigations) {
                         console.log("Advised investigations have changed");
-                        
+
                         // Save investigations history separately if they're not empty
                         if (sectionData.advisedInvestigations && sectionData.advisedInvestigations.trim() !== '') {
                             try {
@@ -1911,30 +2040,30 @@ async function processSectionSave(sectionData) {
                             }
                         }
                     }
-                    
+
                     // Update advisedInvestigations field
                     patientItem.advisedInvestigations = sectionData.advisedInvestigations;
                 }
-                
+
                 // Process report files if provided
                 if (sectionData.reportFiles && sectionData.reportFiles.length > 0) {
                     console.log(`Processing ${sectionData.reportFiles.length} report files for diagnosis section`);
-                    
+
                     // Log file categories
                     sectionData.reportFiles.forEach((file, index) => {
-                        console.log(`Report file ${index+1} category: ${file.category || 'uncategorized'}`);
+                        console.log(`Report file ${index + 1} category: ${file.category || 'uncategorized'}`);
                     });
-                    
+
                     // Make sure existing files are kept
                     const existingFiles = patientItem.reportFiles || [];
-                    
+
                     // Better file deduplication
                     const newFilesToProcess = deduplicateFiles(sectionData.reportFiles, existingFiles);
-                    
+
                     if (newFilesToProcess.length > 0) {
                         console.log(`After deduplication, processing ${newFilesToProcess.length} new files`);
                         const newFiles = await processReportFiles(newFilesToProcess, patientId);
-                        
+
                         // Combine existing and new files
                         patientItem.reportFiles = [...existingFiles, ...newFiles];
                     } else {
@@ -1943,11 +2072,11 @@ async function processSectionSave(sectionData) {
                     }
                 }
                 break;
-                
+
             default:
                 return formatErrorResponse(`Unknown section: ${section}`);
         }
-        
+
         // Add firstVisit data if not already present
         if (!patientItem.firstVisit) {
             patientItem.firstVisit = {
@@ -1957,18 +2086,18 @@ async function processSectionSave(sectionData) {
                 advisedInvestigations: patientItem.advisedInvestigations || ""
             };
         }
-        
+
         // Save the updated patient record
         await dynamodb.send(new PutCommand({
             TableName: PATIENTS_TABLE,
             Item: patientItem
         }));
-        
+
         console.log(`Patient record saved with permanent ID: ${patientId}`);
-        
+
         // Return patientId and completion status - check if all sections are saved
         const allSectionsSaved = Object.values(savedSections).every(saved => saved === true);
-        
+
         return {
             statusCode: 200,
             headers: {
@@ -1978,8 +2107,8 @@ async function processSectionSave(sectionData) {
             },
             body: JSON.stringify({
                 success: true,
-                message: allSectionsSaved 
-                    ? 'All sections saved, patient record complete' 
+                message: allSectionsSaved
+                    ? 'All sections saved, patient record complete'
                     : `Section ${section} saved successfully`,
                 patientId: patientId,
                 isComplete: allSectionsSaved,
@@ -1998,51 +2127,51 @@ function deduplicateFiles(newFiles, existingFiles) {
         console.log("⚠️ No new files to deduplicate");
         return [];
     }
-    
+
     console.log(`🔍 DEDUPLICATION: Starting with ${newFiles.length} new files and ${existingFiles?.length || 0} existing files`);
-    
+
     // Log the first 3 new files for debugging
     newFiles.slice(0, 3).forEach((file, idx) => {
-        console.log(`📄 New file ${idx+1}: Name: ${file.name || 'unnamed'}, Type: ${file.type || 'unknown'}`);
+        console.log(`📄 New file ${idx + 1}: Name: ${file.name || 'unnamed'}, Type: ${file.type || 'unknown'}`);
         console.log(`   Has URI: ${!!file.uri}, Has URL: ${!!file.url}, Has base64Data: ${!!file.base64Data}, Has key: ${!!file.key}`);
         if (file.uri) console.log(`   URI preview: ${file.uri.substring(0, 40)}...`);
         if (file.category) console.log(`   Category: ${file.category}`);
     });
-    
+
     // Also log the first 3 existing files
     if (Array.isArray(existingFiles) && existingFiles.length > 0) {
         existingFiles.slice(0, 3).forEach((file, idx) => {
-            console.log(`📂 Existing file ${idx+1}: Name: ${file.name || 'unnamed'}, Type: ${file.type || 'unknown'}`);
+            console.log(`📂 Existing file ${idx + 1}: Name: ${file.name || 'unnamed'}, Type: ${file.type || 'unknown'}`);
             console.log(`   Has URI: ${!!file.uri}, Has URL: ${!!file.url}, Has base64Data: ${!!file.base64Data}, Has key: ${!!file.key}`);
             if (file.uri) console.log(`   URI preview: ${file.uri.substring(0, 40)}...`);
             if (file.url) console.log(`   URL preview: ${file.url.substring(0, 40)}...`);
             if (file.category) console.log(`   Category: ${file.category}`);
         });
     }
-    
+
     if (!Array.isArray(existingFiles) || existingFiles.length === 0) {
         // No existing files, just deduplicate within the new files
         const uniqueNewFiles = new Map();
-        
+
         newFiles.forEach(file => {
             const fileKey = getFileUniqueKey(file);
             console.log(`📋 New file unique key: ${fileKey}`);
-            
+
             if (!uniqueNewFiles.has(fileKey)) {
                 uniqueNewFiles.set(fileKey, file);
             } else {
                 console.log(`⚠️ Skipping duplicate new file: ${file.name || 'unnamed'} with key ${fileKey}`);
             }
         });
-        
+
         const result = Array.from(uniqueNewFiles.values());
         console.log(`✅ After internal deduplication: ${result.length} files`);
         return result;
     }
-    
+
     // We have both new files and existing files, so check for duplicates across both sets
     const uniqueNewFiles = [];
-    
+
     // Create a more detailed map of existing files for better matching
     const existingFileKeys = new Map();
     existingFiles.forEach(file => {
@@ -2050,14 +2179,14 @@ function deduplicateFiles(newFiles, existingFiles) {
         const primaryKey = getFileUniqueKey(file);
         existingFileKeys.set(primaryKey, true);
         console.log(`🔑 Existing file key: ${primaryKey} for file: ${file.name || 'unnamed'}`);
-        
+
         // Also check by name+category combination
         if (file.name) {
             const nameKey = `name:${file.name}_${file.category || 'uncategorized'}`;
             existingFileKeys.set(nameKey, true);
             console.log(`   Also adding name key: ${nameKey}`);
         }
-        
+
         // Check by URL/URI if available
         if (file.url) {
             existingFileKeys.set(`url:${file.url}`, true);
@@ -2066,20 +2195,20 @@ function deduplicateFiles(newFiles, existingFiles) {
             existingFileKeys.set(`uri:${file.uri}`, true);
         }
     });
-    
+
     // Track unique new files to avoid duplicates within the new batch
     const uniqueNewFileKeys = new Map();
-    
+
     newFiles.forEach(file => {
         // Check primary key
         const primaryKey = getFileUniqueKey(file);
         console.log(`🔍 Checking new file: ${file.name || 'unnamed'} with key ${primaryKey}`);
-        
+
         if (existingFileKeys.has(primaryKey)) {
             console.log(`⚠️ Skipping file already in existing files by primary key: ${file.name || 'unnamed'}`);
             return;
         }
-        
+
         // Check name+category
         if (file.name) {
             const nameKey = `name:${file.name}_${file.category || 'uncategorized'}`;
@@ -2088,7 +2217,7 @@ function deduplicateFiles(newFiles, existingFiles) {
                 return;
             }
         }
-        
+
         // Check URL/URI
         if (file.url && existingFileKeys.has(`url:${file.url}`)) {
             console.log(`⚠️ Skipping file already in existing files by URL: ${file.name || 'unnamed'}`);
@@ -2098,19 +2227,19 @@ function deduplicateFiles(newFiles, existingFiles) {
             console.log(`⚠️ Skipping file already in existing files by URI: ${file.name || 'unnamed'}`);
             return;
         }
-        
+
         // Check if this file duplicates another in the new files batch
         if (uniqueNewFileKeys.has(primaryKey)) {
             console.log(`⚠️ Skipping duplicate in new files: ${file.name || 'unnamed'}`);
             return;
         }
-        
+
         // This is a unique new file
         console.log(`✅ Adding unique new file: ${file.name || 'unnamed'}`);
         uniqueNewFileKeys.set(primaryKey, true);
         uniqueNewFiles.push(file);
     });
-    
+
     console.log(`✅ Final result after deduplication: ${uniqueNewFiles.length} new unique files`);
     return uniqueNewFiles;
 }
@@ -2121,11 +2250,11 @@ function getFileUniqueKey(file) {
     if (file.url) {
         return `url:${file.url}`;
     }
-    
+
     if (file.uri) {
         return `uri:${file.uri}`;
     }
-    
+
     // If it has base64Data, use a hash of the first part as a fingerprint
     if (file.base64Data) {
         // Extract a portion for comparison
@@ -2141,12 +2270,12 @@ function getFileUniqueKey(file) {
         }
         return `data:${file.name || ''}_${dataFingerprint}`;
     }
-    
+
     // If it has a key (S3 object key), use that
     if (file.key) {
         return `key:${file.key}`;
     }
-    
+
     // Fallback to name + category + creation time if available
     const timeStamp = file.processedAt || file.createdAt || file.uploadSuccessTime || '';
     return `name:${file.name || 'unnamed'}_${file.category || 'uncategorized'}_${timeStamp}`;
@@ -2159,17 +2288,17 @@ function processMedications(medications) {
         console.warn("Empty or invalid medications array");
         return [];
     }
-    
+
     return medications.map(med => {
         // Make a copy of the medication to avoid modifying the original
         const processedMed = { ...med };
-        
+
         // Validate medication has a name
         if (!processedMed.name || processedMed.name.trim() === '') {
             console.warn("Medication missing name, adding placeholder");
             processedMed.name = `Medication ${new Date().toISOString()}`;
         }
-        
+
         // Process timingValues if exists - ensure it's proper JSON
         if (processedMed.timingValues) {
             try {
@@ -2190,7 +2319,7 @@ function processMedications(medications) {
             // Initialize if missing
             processedMed.timingValues = "{}";
         }
-        
+
         // Handle migration from old format (dosage & frequency) to new format if needed
         if (processedMed.dosage && !processedMed.timingValues) {
             console.log(`Converting old medication format to new format for ${processedMed.name}`);
@@ -2200,33 +2329,33 @@ function processMedications(medications) {
                     // Create timing values from timing and dosage
                     const timings = processedMed.timing.split(',');
                     const timingValuesObj = {};
-                    
+
                     timings.forEach(timing => {
                         if (timing) {
                             timingValuesObj[timing] = processedMed.dosage;
                         }
                     });
-                    
+
                     processedMed.timingValues = JSON.stringify(timingValuesObj);
                 } catch (e) {
                     console.warn(`Failed to convert old medication format: ${e.message}`);
                 }
             }
         }
-        
+
         // Ensure specialInstructions is a string
         if (processedMed.specialInstructions === undefined) {
             processedMed.specialInstructions = "";
         }
-        
+
         // Ensure duration is set
         if (!processedMed.duration || processedMed.duration.trim() === '') {
             processedMed.duration = "as needed";
         }
-        
+
         // Add timestamp for when medication was processed
         processedMed.processedAt = processedMed.processedAt || new Date().toISOString();
-        
+
         return processedMed;
     });
 }
@@ -2242,35 +2371,35 @@ async function updatePatientData(updateData) {
             hasName: !!updateData.name,
             nameValue: updateData.name
         }));
-        
+
         const { patientId, updateSection } = updateData;
-        
+
         if (!patientId) {
             return formatErrorResponse("Patient ID is required for updates");
         }
-        
+
         console.log(`Update request for patient ${patientId}, section: ${updateSection || 'all'}`);
-        
+
         // First fetch the current patient record
         const patientResponse = await dynamodb.send(new GetCommand({
             TableName: PATIENTS_TABLE,
             Key: { patientId }
         }));
-        
+
         if (!patientResponse.Item) {
             console.error(`Patient with ID ${patientId} not found in database`);
             return formatErrorResponse(`Patient with ID ${patientId} not found`);
         }
-        
+
         const currentPatient = patientResponse.Item;
         console.log(`Retrieved existing patient record: ${currentPatient.name}`);
-        
+
         // Initialize update expression and attribute values
         let updateExpression = "SET updatedAt = :updatedAt";
         const expressionAttributeValues = {
             ":updatedAt": new Date().toISOString()
         };
-        
+
         // Initialize or update savedSections tracking
         const savedSections = currentPatient.savedSections || {
             basic: false,
@@ -2278,7 +2407,7 @@ async function updatePatientData(updateData) {
             prescription: false,
             diagnosis: false
         };
-        
+
         // If the basic section exists, always ensure it's marked as saved
         // if we have a valid name for the patient
         if (currentPatient.name && currentPatient.name.trim() !== '') {
@@ -2287,21 +2416,21 @@ async function updatePatientData(updateData) {
                 savedSections.basic = true;
             }
         }
-        
+
         // Validate prescription update to prevent orphaned prescriptions
         if (updateSection === 'prescription' && (!currentPatient.name || currentPatient.name.trim() === '')) {
             console.warn("⚠️ Attempted to update prescription for patient with no name");
             return formatErrorResponse("Cannot update prescription for a patient with missing basic information");
         }
-        
+
         // Process report files if any are included in the update
         if (updateData.reportFiles && updateData.reportFiles.length > 0) {
             console.log(`📂 REPORT FILES UPDATE: Processing ${updateData.reportFiles.length} report files for patient ${patientId}`);
             console.log(`📂 Update section: ${updateData.updateSection}`);
-            
+
             // Log file categories and more details for debugging
             updateData.reportFiles.forEach((file, index) => {
-                console.log(`📄 Report file ${index+1}/${updateData.reportFiles.length}:`);
+                console.log(`📄 Report file ${index + 1}/${updateData.reportFiles.length}:`);
                 console.log(`   Name: ${file.name || 'unnamed'}`);
                 console.log(`   Type: ${file.type || 'unknown'}`);
                 console.log(`   Category: ${file.category || 'uncategorized'}`);
@@ -2309,34 +2438,34 @@ async function updatePatientData(updateData) {
                 if (file.uri) console.log(`   URI preview: ${file.uri.substring(0, 40)}...`);
                 if (file.base64Data) console.log(`   Base64 length: ${file.base64Data.length}`);
             });
-            
+
             // Better file deduplication
             const existingFiles = currentPatient.reportFiles || [];
             console.log(`📂 Found ${existingFiles.length} existing files for patient ${patientId}`);
-            
+
             const newFilesToProcess = deduplicateFiles(updateData.reportFiles, existingFiles);
-            
+
             if (newFilesToProcess.length > 0) {
                 console.log(`✅ After deduplication, processing ${newFilesToProcess.length} new files`);
-                
+
                 // Upload files to S3
                 try {
                     const processedFiles = await processReportFiles(newFilesToProcess, patientId);
-                    
+
                     // Log each processed file
                     processedFiles.forEach((file, idx) => {
-                        console.log(`📄 Processed file ${idx+1}/${processedFiles.length}:`);
+                        console.log(`📄 Processed file ${idx + 1}/${processedFiles.length}:`);
                         console.log(`   Name: ${file.name || 'unnamed'}`);
                         console.log(`   URL: ${file.url ? file.url.substring(0, 40) + '...' : 'none'}`);
                         console.log(`   Uploaded to S3: ${file.uploadedToS3 || false}`);
                         if (file.uploadedToS3) console.log(`   Upload time: ${file.uploadSuccessTime || 'unknown'}`);
                         if (file.s3UploadFailed) console.log(`   ⚠️ Upload failed: ${file.s3ErrorMessage || 'unknown error'}`);
                     });
-                    
+
                     // Merge with existing files
                     const mergedFiles = [...existingFiles, ...processedFiles];
                     console.log(`📂 Final merged files count: ${mergedFiles.length}`);
-                    
+
                     updateExpression += ", reportFiles = :reportFiles";
                     expressionAttributeValues[":reportFiles"] = mergedFiles;
                 } catch (error) {
@@ -2347,7 +2476,7 @@ async function updatePatientData(updateData) {
                 console.log("⚠️ No new files to process after deduplication");
             }
         }
-        
+
         // Handle updates by section and mark section as saved
         switch (updateSection) {
             case 'basic':
@@ -2356,242 +2485,242 @@ async function updatePatientData(updateData) {
                     updateExpression += ", #name = :name";
                     expressionAttributeValues[":name"] = updateData.name;
                 }
-                
+
                 if (updateData.age !== undefined) {
                     updateExpression += ", age = :age";
                     expressionAttributeValues[":age"] = parseInt(updateData.age) || 0;
                 }
-                
+
                 if (updateData.sex) {
                     updateExpression += ", sex = :sex";
                     expressionAttributeValues[":sex"] = updateData.sex;
                 }
-                
+
                 if (updateData.mobile !== undefined) {
                     updateExpression += ", mobile = :mobile";
                     expressionAttributeValues[":mobile"] = updateData.mobile;
                 }
-                
+
                 if (updateData.address !== undefined) {
                     updateExpression += ", address = :address";
                     expressionAttributeValues[":address"] = updateData.address;
                 }
-                
+
                 // Mark basic section as saved
                 savedSections.basic = true;
                 break;
-                
-                case 'clinical':
-                    console.log("Updating clinical information");
-                    
-                    // CRITICAL FIX: Always update medicalHistory if it's provided
-                    if (updateData.medicalHistory !== undefined) {
-                        // Check if the medical history has changed
-                        const currentMedicalHistory = currentPatient.medicalHistory || "";
-                        
-                        // Log medicalHistory values for debugging
-                        console.log(`Current medicalHistory: "${currentMedicalHistory.substring(0, 50)}..."`);
-                        console.log(`New medicalHistory: "${updateData.medicalHistory.substring(0, 50)}..."`);
-                        
-                        if (updateData.medicalHistory !== currentMedicalHistory) {
-                            console.log("Medical history has changed, checking if history should be saved");
-                            
-                            // Check for timestamp pattern that indicates "Add History" was used
-                            const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") || 
-                                                       updateData.medicalHistory.includes("--- Entry (");
-                            
-                            // Check if this is from pending history in AsyncStorage
-                            const isPendingHistory = updateData.pendingHistoryIncluded || 
-                                                  (updateData.medicalHistory && 
-                                                   updateData.medicalHistory.includes("pending_history")) ||
-                                                  (updateData.medicalHistory && 
-                                                   hasTimestampPattern && 
-                                                   !currentMedicalHistory.includes(updateData.medicalHistory.split("---")[1] || ""));
-                            
-                            // Use explicit flag or detect Add History pattern or pending history
-                            const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry || 
-                                                           hasTimestampPattern || 
-                                                           isPendingHistory;
-                            
-                            if (shouldCreateHistoryEntry) {
-                                try {
-                                    console.log("Creating medical history entry due to Add History update, explicit flag, or pending history");
-                                    await saveMedicalHistoryEntry(patientId, updateData.medicalHistory);
-                                    console.log("Successfully saved medical history entry");
-                                } catch (historyError) {
-                                    console.error(`Error saving medical history entry: ${historyError.message}`);
-                                    // Continue with the update even if history fails
-                                }
-                            } else {
-                                console.log("No Add History pattern detected and no flags set, skipping history save");
-                            }
-                        } else if (updateData.forceHistoryUpdate) {
-                            // Even if the history text appears unchanged, force history update if flag is set
-                            console.log("forceHistoryUpdate flag set - saving medical history even though text appears unchanged");
+
+            case 'clinical':
+                console.log("Updating clinical information");
+
+                // CRITICAL FIX: Always update medicalHistory if it's provided
+                if (updateData.medicalHistory !== undefined) {
+                    // Check if the medical history has changed
+                    const currentMedicalHistory = currentPatient.medicalHistory || "";
+
+                    // Log medicalHistory values for debugging
+                    console.log(`Current medicalHistory: "${currentMedicalHistory.substring(0, 50)}..."`);
+                    console.log(`New medicalHistory: "${updateData.medicalHistory.substring(0, 50)}..."`);
+
+                    if (updateData.medicalHistory !== currentMedicalHistory) {
+                        console.log("Medical history has changed, checking if history should be saved");
+
+                        // Check for timestamp pattern that indicates "Add History" was used
+                        const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") ||
+                            updateData.medicalHistory.includes("--- Entry (");
+
+                        // Check if this is from pending history in AsyncStorage
+                        const isPendingHistory = updateData.pendingHistoryIncluded ||
+                            (updateData.medicalHistory &&
+                                updateData.medicalHistory.includes("pending_history")) ||
+                            (updateData.medicalHistory &&
+                                hasTimestampPattern &&
+                                !currentMedicalHistory.includes(updateData.medicalHistory.split("---")[1] || ""));
+
+                        // Use explicit flag or detect Add History pattern or pending history
+                        const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry ||
+                            hasTimestampPattern ||
+                            isPendingHistory;
+
+                        if (shouldCreateHistoryEntry) {
                             try {
+                                console.log("Creating medical history entry due to Add History update, explicit flag, or pending history");
                                 await saveMedicalHistoryEntry(patientId, updateData.medicalHistory);
-                                console.log("Successfully forced medical history entry save");
+                                console.log("Successfully saved medical history entry");
                             } catch (historyError) {
-                                console.error(`Error forcing medical history entry save: ${historyError.message}`);
-                            }
-                        } else {
-                            console.log("Medical history unchanged, skipping history save");
-                        }
-                        
-                        // CRITICAL FIX: Always update the medicalHistory field in database regardless of other conditions
-                        updateExpression += ", medicalHistory = :medicalHistory";
-                        expressionAttributeValues[":medicalHistory"] = updateData.medicalHistory;
-                        console.log(`Setting medicalHistory in database to: "${updateData.medicalHistory.substring(0, 50)}..."`);
-                    }
-                    
-                    // Check if diagnosis has changed and save to history if needed
-                    if (updateData.diagnosis !== undefined) {
-                        // Log the current and new diagnosis values
-                        const currentDiagnosis = currentPatient.diagnosis || "";
-                        console.log(`Current diagnosis: "${currentDiagnosis}"`);
-                        console.log(`New diagnosis: "${updateData.diagnosis}"`);
-                        
-                        // Only save history if the text has actually changed
-                        if (updateData.diagnosis !== currentDiagnosis) {
-                            console.log("Diagnosis has changed in clinical section, checking if history should be saved");
-                            
-                            // Check if createDiagnosisHistory flag is set
-                            if (updateData.createDiagnosisHistory) {
-                                console.log("createDiagnosisHistory flag is set, saving diagnosis history");
-                                try {
-                                    await saveDiagnosisHistoryEntry(
-                                        patientId, 
-                                        updateData.diagnosis, 
-                                        updateData.advisedInvestigations
-                                    );
-                                    console.log("Successfully saved diagnosis history entry from clinical section");
-                                } catch (historyError) {
-                                    console.error(`Error saving diagnosis history entry: ${historyError.message}`);
-                                    // Continue with the update even if history fails
-                                }
-                            } else {
-                                console.log("createDiagnosisHistory flag not set, skipping history save");
-                            }
-                        } else {
-                            console.log("Diagnosis unchanged, skipping history save");
-                        }
-                        
-                        // Update diagnosis field
-                        updateExpression += ", diagnosis = :diagnosis";
-                        expressionAttributeValues[":diagnosis"] = updateData.diagnosis;
-                    }
-                    
-                    if (updateData.reports !== undefined) {
-                        updateExpression += ", reports = :reports";
-                        expressionAttributeValues[":reports"] = updateData.reports;
-                    }
-                    
-                    // Handle advisedInvestigations with history tracking
-                    if (updateData.advisedInvestigations !== undefined) {
-                        const currentInvestigations = currentPatient.advisedInvestigations || "";
-                        
-                        // Check if advisedInvestigations has changed
-                        if (updateData.advisedInvestigations !== currentInvestigations) {
-                            console.log("Advised investigations have changed in clinical section");
-                            
-                            // Save investigations history if they're not empty
-                            if (updateData.advisedInvestigations && updateData.advisedInvestigations.trim() !== '') {
-                                try {
-                                    await saveInvestigationsHistoryEntry(patientId, updateData.advisedInvestigations);
-                                    console.log("Successfully saved investigations history entry in clinical section");
-                                } catch (invHistoryError) {
-                                    console.error(`Error saving investigations history entry in clinical section: ${invHistoryError.message}`);
-                                    // Continue with update even if history save fails
-                                }
-                            }
-                        }
-                        
-                        // Update advisedInvestigations field
-                        updateExpression += ", advisedInvestigations = :advisedInvestigations";
-                        expressionAttributeValues[":advisedInvestigations"] = updateData.advisedInvestigations;
-                    }
-                    
-                    // Handle clinical parameters with history tracking
-                    if (updateData.clinicalParameters) {
-                        console.log("Updating clinical parameters:", 
-                              Object.keys(updateData.clinicalParameters).join(", "));
-                              
-                        // Update the expression to set the new parameters
-                        updateExpression += ", clinicalParameters = :clinicalParameters";
-                        expressionAttributeValues[":clinicalParameters"] = updateData.clinicalParameters;
-                        
-                        // Check for createParameterHistory flag
-                        if (updateData.createParameterHistory) {
-                            console.log("createParameterHistory flag is set, saving parameter history");
-                            
-                            try {
-                                // Save parameters to history before updating the current value
-                                await saveClinicalParametersHistory(patientId, updateData.clinicalParameters);
-                                console.log("Successfully saved clinical parameters history");
-                            } catch (historyError) {
-                                console.error(`Error saving clinical parameters history: ${historyError.message}`);
+                                console.error(`Error saving medical history entry: ${historyError.message}`);
                                 // Continue with the update even if history fails
                             }
                         } else {
-                            console.log("No createParameterHistory flag, skipping history save");
+                            console.log("No Add History pattern detected and no flags set, skipping history save");
                         }
+                    } else if (updateData.forceHistoryUpdate) {
+                        // Even if the history text appears unchanged, force history update if flag is set
+                        console.log("forceHistoryUpdate flag set - saving medical history even though text appears unchanged");
+                        try {
+                            await saveMedicalHistoryEntry(patientId, updateData.medicalHistory);
+                            console.log("Successfully forced medical history entry save");
+                        } catch (historyError) {
+                            console.error(`Error forcing medical history entry save: ${historyError.message}`);
+                        }
+                    } else {
+                        console.log("Medical history unchanged, skipping history save");
                     }
-                    
-                    // Mark clinical section as saved
-                    savedSections.clinical = true;
-                    break;
-                
-            case 'prescription':
-                console.log("Updating prescription information");
-                
-                // Handle medications update
-                if (updateData.medications) {
-                    // Process medications data with updated structure
-                    const processedMedications = processMedications(updateData.medications);
-                    
-                    updateExpression += ", medications = :medications";
-                    expressionAttributeValues[":medications"] = processedMedications;
-                    
-                    // Generate updated prescription text using per-medication instructions
-                    const generatedPrescription = generatePrescriptionText(processedMedications);
-                    
-                    updateExpression += ", generatedPrescription = :generatedPrescription";
-                    expressionAttributeValues[":generatedPrescription"] = generatedPrescription;
+
+                    // CRITICAL FIX: Always update the medicalHistory field in database regardless of other conditions
+                    updateExpression += ", medicalHistory = :medicalHistory";
+                    expressionAttributeValues[":medicalHistory"] = updateData.medicalHistory;
+                    console.log(`Setting medicalHistory in database to: "${updateData.medicalHistory.substring(0, 50)}..."`);
                 }
-                
-                // Mark prescription section as saved
-                savedSections.prescription = true;
-                break;
-                
-            case 'diagnosis':
-                console.log("Updating diagnosis information");
-                console.log(`Received diagnosis value: "${updateData.diagnosis || 'not provided'}"`);
-                console.log(`Current patient diagnosis value: "${currentPatient.diagnosis || 'not set'}"`);
-                
+
                 // Check if diagnosis has changed and save to history if needed
                 if (updateData.diagnosis !== undefined) {
-                    // Check if the diagnosis has changed
+                    // Log the current and new diagnosis values
                     const currentDiagnosis = currentPatient.diagnosis || "";
-                    
-                    // Log the values for debugging
                     console.log(`Current diagnosis: "${currentDiagnosis}"`);
                     console.log(`New diagnosis: "${updateData.diagnosis}"`);
-                    
+
                     // Only save history if the text has actually changed
                     if (updateData.diagnosis !== currentDiagnosis) {
-                        console.log("Diagnosis has changed, checking if history should be saved");
-                        
+                        console.log("Diagnosis has changed in clinical section, checking if history should be saved");
+
                         // Check if createDiagnosisHistory flag is set
                         if (updateData.createDiagnosisHistory) {
                             console.log("createDiagnosisHistory flag is set, saving diagnosis history");
                             try {
                                 await saveDiagnosisHistoryEntry(
-                                    patientId, 
+                                    patientId,
+                                    updateData.diagnosis,
+                                    updateData.advisedInvestigations
+                                );
+                                console.log("Successfully saved diagnosis history entry from clinical section");
+                            } catch (historyError) {
+                                console.error(`Error saving diagnosis history entry: ${historyError.message}`);
+                                // Continue with the update even if history fails
+                            }
+                        } else {
+                            console.log("createDiagnosisHistory flag not set, skipping history save");
+                        }
+                    } else {
+                        console.log("Diagnosis unchanged, skipping history save");
+                    }
+
+                    // Update diagnosis field
+                    updateExpression += ", diagnosis = :diagnosis";
+                    expressionAttributeValues[":diagnosis"] = updateData.diagnosis;
+                }
+
+                if (updateData.reports !== undefined) {
+                    updateExpression += ", reports = :reports";
+                    expressionAttributeValues[":reports"] = updateData.reports;
+                }
+
+                // Handle advisedInvestigations with history tracking
+                if (updateData.advisedInvestigations !== undefined) {
+                    const currentInvestigations = currentPatient.advisedInvestigations || "";
+
+                    // Check if advisedInvestigations has changed
+                    if (updateData.advisedInvestigations !== currentInvestigations) {
+                        console.log("Advised investigations have changed in clinical section");
+
+                        // Save investigations history if they're not empty
+                        if (updateData.advisedInvestigations && updateData.advisedInvestigations.trim() !== '') {
+                            try {
+                                await saveInvestigationsHistoryEntry(patientId, updateData.advisedInvestigations);
+                                console.log("Successfully saved investigations history entry in clinical section");
+                            } catch (invHistoryError) {
+                                console.error(`Error saving investigations history entry in clinical section: ${invHistoryError.message}`);
+                                // Continue with update even if history save fails
+                            }
+                        }
+                    }
+
+                    // Update advisedInvestigations field
+                    updateExpression += ", advisedInvestigations = :advisedInvestigations";
+                    expressionAttributeValues[":advisedInvestigations"] = updateData.advisedInvestigations;
+                }
+
+                // Handle clinical parameters with history tracking
+                if (updateData.clinicalParameters) {
+                    console.log("Updating clinical parameters:",
+                        Object.keys(updateData.clinicalParameters).join(", "));
+
+                    // Update the expression to set the new parameters
+                    updateExpression += ", clinicalParameters = :clinicalParameters";
+                    expressionAttributeValues[":clinicalParameters"] = updateData.clinicalParameters;
+
+                    // Check for createParameterHistory flag
+                    if (updateData.createParameterHistory) {
+                        console.log("createParameterHistory flag is set, saving parameter history");
+
+                        try {
+                            // Save parameters to history before updating the current value
+                            await saveClinicalParametersHistory(patientId, updateData.clinicalParameters);
+                            console.log("Successfully saved clinical parameters history");
+                        } catch (historyError) {
+                            console.error(`Error saving clinical parameters history: ${historyError.message}`);
+                            // Continue with the update even if history fails
+                        }
+                    } else {
+                        console.log("No createParameterHistory flag, skipping history save");
+                    }
+                }
+
+                // Mark clinical section as saved
+                savedSections.clinical = true;
+                break;
+
+            case 'prescription':
+                console.log("Updating prescription information");
+
+                // Handle medications update
+                if (updateData.medications) {
+                    // Process medications data with updated structure
+                    const processedMedications = processMedications(updateData.medications);
+
+                    updateExpression += ", medications = :medications";
+                    expressionAttributeValues[":medications"] = processedMedications;
+
+                    // Generate updated prescription text using per-medication instructions
+                    const generatedPrescription = generatePrescriptionText(processedMedications);
+
+                    updateExpression += ", generatedPrescription = :generatedPrescription";
+                    expressionAttributeValues[":generatedPrescription"] = generatedPrescription;
+                }
+
+                // Mark prescription section as saved
+                savedSections.prescription = true;
+                break;
+
+            case 'diagnosis':
+                console.log("Updating diagnosis information");
+                console.log(`Received diagnosis value: "${updateData.diagnosis || 'not provided'}"`);
+                console.log(`Current patient diagnosis value: "${currentPatient.diagnosis || 'not set'}"`);
+
+                // Check if diagnosis has changed and save to history if needed
+                if (updateData.diagnosis !== undefined) {
+                    // Check if the diagnosis has changed
+                    const currentDiagnosis = currentPatient.diagnosis || "";
+
+                    // Log the values for debugging
+                    console.log(`Current diagnosis: "${currentDiagnosis}"`);
+                    console.log(`New diagnosis: "${updateData.diagnosis}"`);
+
+                    // Only save history if the text has actually changed
+                    if (updateData.diagnosis !== currentDiagnosis) {
+                        console.log("Diagnosis has changed, checking if history should be saved");
+
+                        // Check if createDiagnosisHistory flag is set
+                        if (updateData.createDiagnosisHistory) {
+                            console.log("createDiagnosisHistory flag is set, saving diagnosis history");
+                            try {
+                                await saveDiagnosisHistoryEntry(
+                                    patientId,
                                     updateData.diagnosis,
                                     updateData.advisedInvestigations || currentPatient.advisedInvestigations || ""
                                 );
                                 console.log("Successfully saved diagnosis history entry");
-                                
+
                                 // If a timestamp was provided, use it instead of the current time
                                 if (updateData.diagnosisTimestamp) {
                                     console.log(`Using provided timestamp for diagnosis history: ${updateData.diagnosisTimestamp}`);
@@ -2606,7 +2735,7 @@ async function updatePatientData(updateData) {
                     } else {
                         console.log("Diagnosis hasn't changed, skipping history save");
                     }
-                    
+
                     // Add diagnosis field update
                     updateExpression += ", diagnosis = :diagnosis";
                     expressionAttributeValues[":diagnosis"] = updateData.diagnosis;
@@ -2614,15 +2743,15 @@ async function updatePatientData(updateData) {
                 } else {
                     console.log("⚠️ updateData.diagnosis is undefined, not updating diagnosis field");
                 }
-                
+
                 // Handle advisedInvestigations with history tracking
                 if (updateData.advisedInvestigations !== undefined) {
                     const currentInvestigations = currentPatient.advisedInvestigations || "";
-                    
+
                     // Check if advisedInvestigations has changed
                     if (updateData.advisedInvestigations !== currentInvestigations) {
                         console.log("Advised investigations have changed in diagnosis section");
-                        
+
                         // Save investigations history if they're not empty
                         if (updateData.advisedInvestigations && updateData.advisedInvestigations.trim() !== '') {
                             try {
@@ -2634,26 +2763,26 @@ async function updatePatientData(updateData) {
                             }
                         }
                     }
-                    
+
                     // Update advisedInvestigations field
                     updateExpression += ", advisedInvestigations = :advisedInvestigations";
                     expressionAttributeValues[":advisedInvestigations"] = updateData.advisedInvestigations;
                 }
-                
+
                 // Mark diagnosis section as saved
                 savedSections.diagnosis = true;
                 break;
-                
+
             default:
                 // If no specific section is provided, this is a full update
                 console.log("Processing full patient update");
-                
+
                 // In a full update, mark all sections as saved
                 savedSections.basic = true;
                 savedSections.clinical = true;
                 savedSections.prescription = true;
                 savedSections.diagnosis = true;
-                
+
                 // Merge all data, preferring the update data over existing data
                 const mergedData = {
                     ...currentPatient,
@@ -2662,28 +2791,28 @@ async function updatePatientData(updateData) {
                     updatedAt: new Date().toISOString(),
                     savedSections: savedSections // Add saved sections tracking
                 };
-                
+
                 // Handle medicalHistory field with history tracking
                 if (updateData.medicalHistory !== undefined) {
                     // Check if the medical history has changed
                     const currentMedicalHistory = currentPatient.medicalHistory || "";
-                    
+
                     if (updateData.medicalHistory !== currentMedicalHistory) {
                         console.log("Medical history has changed in full update, checking if history should be saved");
-                        
+
                         // Check for "Add History" pattern or pending history
-                        const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") || 
-                                                  updateData.medicalHistory.includes("--- Entry (");
-                                                  
-                        const isPendingHistory = updateData.pendingHistoryIncluded || 
-                                              (updateData.medicalHistory && 
-                                               updateData.medicalHistory.includes("pending_history"));
-                                              
+                        const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") ||
+                            updateData.medicalHistory.includes("--- Entry (");
+
+                        const isPendingHistory = updateData.pendingHistoryIncluded ||
+                            (updateData.medicalHistory &&
+                                updateData.medicalHistory.includes("pending_history"));
+
                         // Create history if flag is set or Add History pattern detected or pending history
-                        const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry || 
-                                                       hasTimestampPattern || 
-                                                       isPendingHistory;
-                        
+                        const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry ||
+                            hasTimestampPattern ||
+                            isPendingHistory;
+
                         if (shouldCreateHistoryEntry) {
                             try {
                                 await saveMedicalHistoryEntry(patientId, updateData.medicalHistory);
@@ -2698,24 +2827,24 @@ async function updatePatientData(updateData) {
                     } else {
                         console.log("Medical history unchanged in full update, skipping history save");
                     }
-                    
+
                     mergedData.medicalHistory = updateData.medicalHistory;
                 }
-                
+
                 // Handle diagnosis field with history tracking
                 if (updateData.diagnosis !== undefined) {
                     // Check if the diagnosis has changed
                     const currentDiagnosis = currentPatient.diagnosis || "";
-                    
+
                     if (updateData.diagnosis !== currentDiagnosis) {
                         console.log("Diagnosis has changed in full update, checking if history should be saved");
-                        
+
                         // Check if createDiagnosisHistory flag is set
                         if (updateData.createDiagnosisHistory) {
                             console.log("createDiagnosisHistory flag is set, saving diagnosis history in full update");
                             try {
                                 await saveDiagnosisHistoryEntry(
-                                    patientId, 
+                                    patientId,
                                     updateData.diagnosis,
                                     updateData.advisedInvestigations || currentPatient.advisedInvestigations || ""
                                 );
@@ -2728,17 +2857,17 @@ async function updatePatientData(updateData) {
                             console.log("createDiagnosisHistory flag not set, skipping history save in full update");
                         }
                     }
-                    
+
                     mergedData.diagnosis = updateData.diagnosis;
                 }
-                
+
                 // Handle advisedInvestigations field with history tracking
                 if (updateData.advisedInvestigations !== undefined) {
                     const currentInvestigations = currentPatient.advisedInvestigations || "";
-                    
+
                     if (updateData.advisedInvestigations !== currentInvestigations) {
                         console.log("Advised investigations have changed in full update");
-                        
+
                         // Save investigations history if they're not empty
                         if (updateData.advisedInvestigations && updateData.advisedInvestigations.trim() !== '') {
                             try {
@@ -2750,14 +2879,14 @@ async function updatePatientData(updateData) {
                             }
                         }
                     }
-                    
+
                     mergedData.advisedInvestigations = updateData.advisedInvestigations;
                 }
-                
+
                 // Handle clinical parameters in full update
                 if (updateData.clinicalParameters) {
                     mergedData.clinicalParameters = updateData.clinicalParameters;
-                    
+
                     // Check if we should save history for full update
                     if (updateData.createParameterHistory) {
                         console.log("Saving clinical parameters history in full update");
@@ -2769,18 +2898,18 @@ async function updatePatientData(updateData) {
                         }
                     }
                 }
-                
+
                 // If medications are updated, regenerate the prescription text with per-medication instructions
                 if (updateData.medications) {
                     mergedData.generatedPrescription = generatePrescriptionText(mergedData.medications);
                 }
-                
+
                 // For a full update, replace the entire item
                 await dynamodb.send(new PutCommand({
                     TableName: PATIENTS_TABLE,
                     Item: mergedData
                 }));
-                
+
                 console.log("Full patient update successful");
                 return {
                     statusCode: 200,
@@ -2799,19 +2928,19 @@ async function updatePatientData(updateData) {
                     })
                 };
         }
-        
+
         // Add savedSections to the update
         updateExpression += ", savedSections = :savedSections";
         expressionAttributeValues[":savedSections"] = savedSections;
-        
+
         // We need this for the UpdateCommand since 'name' is a reserved word in DynamoDB
-        const expressionAttributeNames = updateSection === 'basic' && updateData.name ? 
+        const expressionAttributeNames = updateSection === 'basic' && updateData.name ?
             { "#name": "name" } : undefined;
-        
+
         // If we're here, we're doing a partial update
         console.log(`Executing partial update with expression: ${updateExpression}`);
         console.log(`Update values: ${JSON.stringify(expressionAttributeValues)}`);
-        
+
         // Execute the update
         await dynamodb.send(new UpdateCommand({
             TableName: PATIENTS_TABLE,
@@ -2820,13 +2949,13 @@ async function updatePatientData(updateData) {
             ExpressionAttributeValues: expressionAttributeValues,
             ExpressionAttributeNames: expressionAttributeNames
         }));
-        
+
         console.log("Patient update successful");
-        
+
         // If this was a diagnosis update, clear any cached diagnosis history
         if (updateSection === 'diagnosis' && updateData.createDiagnosisHistory) {
             console.log("Clearing cached diagnosis history after update");
-            
+
             // Return special message to client to clear cache
             return {
                 statusCode: 200,
@@ -2846,38 +2975,38 @@ async function updatePatientData(updateData) {
                 })
             };
         }
-        
+
         // For clinical section with pending history, indicate that it was handled
         if (updateSection === 'clinical') {
             console.log("Updating clinical information");
-            
+
             // Handle medical history with enhanced "Add History" detection
             // and support for pending history from AsyncStorage
             if (updateData.medicalHistory !== undefined) {
                 // Check if the medical history has changed
                 const currentMedicalHistory = currentPatient.medicalHistory || "";
-                
+
                 if (updateData.medicalHistory !== currentMedicalHistory) {
                     console.log("Medical history has changed, checking if history should be saved");
-                    
+
                     // Check for timestamp pattern that indicates "Add History" was used
-                    const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") || 
-                                               updateData.medicalHistory.includes("--- Entry (");
-                    
+                    const hasTimestampPattern = updateData.medicalHistory.includes("--- New Entry (") ||
+                        updateData.medicalHistory.includes("--- Entry (");
+
                     // Check if this is from pending history in AsyncStorage
-                    const isPendingHistory = updateData.pendingHistoryIncluded || 
-                                          (updateData.medicalHistory && 
-                                           updateData.medicalHistory.includes("pending_history")) ||
-                                          (updateData.medicalHistory && 
-                                           hasTimestampPattern && 
-                                           !currentMedicalHistory.includes(updateData.medicalHistory.split("---")[1] || ""));
-                    
+                    const isPendingHistory = updateData.pendingHistoryIncluded ||
+                        (updateData.medicalHistory &&
+                            updateData.medicalHistory.includes("pending_history")) ||
+                        (updateData.medicalHistory &&
+                            hasTimestampPattern &&
+                            !currentMedicalHistory.includes(updateData.medicalHistory.split("---")[1] || ""));
+
                     // Use explicit flag or detect Add History pattern or pending history
-                    const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry || 
-                                                   hasTimestampPattern || 
-                                                   isPendingHistory ||
-                                                   updateData.forceHistoryUpdate;
-                    
+                    const shouldCreateHistoryEntry = updateData.createMedicalHistoryEntry ||
+                        hasTimestampPattern ||
+                        isPendingHistory ||
+                        updateData.forceHistoryUpdate;
+
                     if (shouldCreateHistoryEntry) {
                         try {
                             console.log("Creating medical history entry due to Add History update, explicit flag, pending history, or forceHistoryUpdate");
@@ -2902,11 +3031,11 @@ async function updatePatientData(updateData) {
                 } else {
                     console.log("Medical history unchanged, skipping history save");
                 }
-                
+
                 // Update the expression to set the new medical history
                 updateExpression += ", medicalHistory = :medicalHistory";
                 expressionAttributeValues[":medicalHistory"] = updateData.medicalHistory;
-                
+
                 // Add special flag for force updating
                 if (updateData.forceHistoryUpdate) {
                     console.log("Adding forceHistoryUpdate flag to the update expression");
@@ -2915,7 +3044,7 @@ async function updatePatientData(updateData) {
                 }
             }
         }
-        
+
         return {
             statusCode: 200,
             headers: {
@@ -2940,66 +3069,66 @@ async function updatePatientData(updateData) {
 async function processPatientData(patientData) {
     try {
         console.log("Starting processPatientData with permanent records");
-        
+
         // Validate essential patient data
         if (!patientData.name || !patientData.age) {
             return formatErrorResponse("Missing required patient information (name or age)");
         }
-        
+
         // Generate a unique ID for the patient using crypto.randomUUID()
         const patientId = randomUUID();
         console.log(`Generated patient ID: ${patientId}`);
-        
+
         // Check for pending history in AsyncStorage before creating the patient
         if (patientData.pendingHistoryIncluded && patientData.pendingHistoryText) {
             console.log("Processing pending history from AsyncStorage");
-            
+
             // Format the pending history with a timestamp
             const timestamp = new Date().toLocaleString();
             let updatedHistory = "";
-            
+
             if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
                 updatedHistory = `--- New Entry (${timestamp}) ---\n${patientData.pendingHistoryText}\n\n${patientData.medicalHistory}`;
             } else {
                 updatedHistory = `--- Entry (${timestamp}) ---\n${patientData.pendingHistoryText}`;
             }
-            
+
             // Replace the medical history with the formatted version that includes the pending history
             patientData.medicalHistory = updatedHistory;
             console.log("Pending history integrated into medicalHistory field");
-            
+
             // Set flag to create medical history entry
             patientData.createMedicalHistoryEntry = true;
         }
-        
+
         // Process medications data - validate and normalize the updated structure
         if (patientData.medications && Array.isArray(patientData.medications)) {
             console.log(`Processing ${patientData.medications.length} medications with updated structure`);
             patientData.medications = processMedications(patientData.medications);
         }
-        
+
         // Extract report files for S3 upload with enhanced validation
         const reportFiles = patientData.reportFiles || [];
         console.log(`Found ${reportFiles.length} report files to process`);
-        
+
         // Array to store file metadata after processing
         const processedFiles = [];
         let filesUploadedToS3 = 0;
-        
+
         // Enhanced file processing with better validation and logging
         for (let i = 0; i < reportFiles.length; i++) {
             const reportFile = reportFiles[i];
-            console.log(`🔄 Processing file ${i+1}/${reportFiles.length}: ${reportFile.name || 'unnamed'}`);
-            
+            console.log(`🔄 Processing file ${i + 1}/${reportFiles.length}: ${reportFile.name || 'unnamed'}`);
+
             // Log category if available
             if (reportFile.category) {
                 console.log(`File category: ${reportFile.category}`);
             }
-            
+
             // Check if file is already a remote URL
             if (reportFile.uri && (reportFile.uri.startsWith('http://') || reportFile.uri.startsWith('https://'))) {
-                console.log(`📋 File ${i+1} is already a remote URL. Adding as existing file: ${reportFile.uri.substring(0, 30)}...`);
-                
+                console.log(`📋 File ${i + 1} is already a remote URL. Adding as existing file: ${reportFile.uri.substring(0, 30)}...`);
+
                 processedFiles.push({
                     name: reportFile.name || `file_${Date.now()}`,
                     type: reportFile.type || 'application/octet-stream',
@@ -3009,32 +3138,32 @@ async function processPatientData(patientData) {
                     category: reportFile.category || 'uncategorized',
                     processedAt: new Date().toISOString()
                 });
-                
+
                 continue;
             }
-            
+
             // Validate report file data
             if (!reportFile.base64Data) {
-                console.warn(`⚠️ File ${i+1} "${reportFile.name || 'unnamed'}" missing base64Data, skipping`);
+                console.warn(`⚠️ File ${i + 1} "${reportFile.name || 'unnamed'}" missing base64Data, skipping`);
                 continue;
             }
-            
+
             // Ensure file has name and type
             if (!reportFile.name) {
                 reportFile.name = `file_${Date.now()}.${reportFile.type?.split('/')[1] || 'bin'}`;
-                console.log(`📋 File ${i+1} missing name, assigned: ${reportFile.name}`);
+                console.log(`📋 File ${i + 1} missing name, assigned: ${reportFile.name}`);
             }
-            
+
             if (!reportFile.type) {
                 reportFile.type = 'application/octet-stream';
-                console.log(`📋 File ${i+1} missing type, assigned: ${reportFile.type}`);
+                console.log(`📋 File ${i + 1} missing type, assigned: ${reportFile.type}`);
             }
 
             try {
                 // Extract actual base64 data by removing data URI prefix if it exists
                 let cleanBase64 = reportFile.base64Data;
                 let detectedType = null;
-                
+
                 if (cleanBase64.startsWith('data:')) {
                     console.log(`📋 File ${reportFile.name} has data URI prefix`);
                     // Extract the base64 part from format like: data:image/jpeg;base64,/9j/4AAQ...
@@ -3047,7 +3176,7 @@ async function processPatientData(patientData) {
                         } catch (e) {
                             console.warn(`⚠️ Couldn't extract content type from URI: ${e.message}`);
                         }
-                        
+
                         cleanBase64 = base64Parts[1];
                         console.log(`📋 Extracted base64 data without prefix, length: ${cleanBase64.length}`);
                     } else {
@@ -3056,31 +3185,31 @@ async function processPatientData(patientData) {
                 } else {
                     console.log(`📋 File ${reportFile.name} does not have data URI prefix`);
                 }
-                
+
                 // Use detected type from data URI if available and not already set
                 if (detectedType && reportFile.type === 'application/octet-stream') {
                     reportFile.type = detectedType;
                     console.log(`📋 Updated content type to ${reportFile.type} based on data URI`);
                 }
-                
+
                 // Create a unique key for the S3 object with more uniqueness
                 const timestamp = Date.now();
                 const randomSuffix = Math.floor(Math.random() * 10000);
                 const sanitizedName = reportFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
                 const fileKey = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
-                
+
                 // Decode base64 data
                 const fileBuffer = Buffer.from(cleanBase64, 'base64');
                 const fileSizeKB = Math.round(fileBuffer.length / 1024);
                 console.log(`📋 Decoded file size: ${fileBuffer.length} bytes (${fileSizeKB} KB)`);
-                
+
                 if (fileBuffer.length === 0) {
                     throw new Error("Decoded file is empty");
                 }
 
                 // Validate file size
                 if (fileBuffer.length > 10485760) { // 10MB limit
-                    console.warn(`⚠️ Large file detected (${Math.round(fileBuffer.length/1024/1024)}MB), may encounter issues`);
+                    console.warn(`⚠️ Large file detected (${Math.round(fileBuffer.length / 1024 / 1024)}MB), may encounter issues`);
                 }
 
                 // Set up S3 upload parameters with additional metadata including category
@@ -3101,7 +3230,7 @@ async function processPatientData(patientData) {
                 // Generate the S3 URL
                 const s3Url = `${S3_URL_PREFIX}${fileKey}`;
                 console.log(`📋 Generated S3 URL: ${s3Url.substring(0, 60)}...`);
-                
+
                 // Initialize file info object with more metadata including category
                 const fileInfo = {
                     key: fileKey,
@@ -3114,7 +3243,7 @@ async function processPatientData(patientData) {
                     storedLocally: false,
                     patientId: patientId
                 };
-                
+
                 // Try to upload to S3 directly with better error handling
                 console.log(`📤 Attempting S3 upload for: ${fileKey}`);
                 try {
@@ -3123,13 +3252,13 @@ async function processPatientData(patientData) {
                     console.log(`✅ S3 upload successful for: ${fileKey}`);
                     console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
                     console.log(`📋 S3 URL: ${s3Url}`);
-                    
+
                     // Set success flags
                     fileInfo.eTag = uploadResult.ETag;
                     fileInfo.uploadedToS3 = true;
                     fileInfo.uploadSuccessTime = new Date().toISOString();
                     filesUploadedToS3++;
-                    
+
                     // Verify upload by attempting to get object metadata
                     try {
                         await s3.send(new GetObjectCommand({
@@ -3145,18 +3274,18 @@ async function processPatientData(patientData) {
                 } catch (s3Error) {
                     console.error(`❌ S3 upload error for ${fileKey}: ${s3Error.message}`);
                     console.error(`Stack trace: ${s3Error.stack ? s3Error.stack.split('\n')[0] : 'No stack'}`);
-                    
+
                     // Still keep the URL, but mark as stored locally with truncated data
                     fileInfo.storedLocally = true;
                     fileInfo.s3UploadFailed = true;
                     fileInfo.s3ErrorMessage = s3Error.message;
                     fileInfo.s3ErrorTime = new Date().toISOString();
-                    
+
                     // Store a small portion of the base64 data as fallback
                     const maxBase64Length = 1000;
-                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) + 
-                                               (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
-                    
+                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) +
+                        (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
+
                     // Include detailed error information
                     fileInfo.errorDetails = {
                         code: s3Error.code || 'Unknown',
@@ -3164,11 +3293,11 @@ async function processPatientData(patientData) {
                         message: s3Error.message,
                         requestId: s3Error.$metadata?.requestId,
                     };
-                    
+
                     // Try again in the background with no await - "fire and forget"
                     retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64);
                 }
-                
+
                 // Add to processed files array
                 processedFiles.push(fileInfo);
                 console.log(`✅ Added file info to results. Total processed files: ${processedFiles.length}`);
@@ -3179,19 +3308,19 @@ async function processPatientData(patientData) {
                 console.log("Continuing with other files");
             }
         }
-        
+
         console.log(`📋 Completed processing ${reportFiles.length} files. Successfully processed: ${processedFiles.length}, uploaded to S3: ${filesUploadedToS3}`);
-        
+
         // Generate a prescription text string if medications exist
         let generatedPrescription = "";
         if (patientData.medications && patientData.medications.length > 0) {
             console.log("Generating prescription text from medication data with per-medication instructions");
-            
+
             generatedPrescription = generatePrescriptionText(patientData.medications);
-            
+
             console.log("Generated prescription text with per-medication instructions");
         }
-        
+
         // Initialize savedSections
         const savedSections = {
             basic: true,
@@ -3199,7 +3328,7 @@ async function processPatientData(patientData) {
             prescription: true,
             diagnosis: true
         };
-        
+
         // Add clinical parameters if provided, or initialize with defaults
         const clinicalParameters = patientData.clinicalParameters || {
             date: new Date().toISOString().split('T')[0],
@@ -3220,7 +3349,7 @@ async function processPatientData(patientData) {
             ft4: "",
             others: ""
         };
-        
+
         // Prepare the item to store in DynamoDB
         const patientItem = {
             patientId: patientId,
@@ -3252,7 +3381,7 @@ async function processPatientData(patientData) {
             // Add flag if pending history was included
             pendingHistoryIncluded: patientData.pendingHistoryIncluded || false
         };
-        
+
         // Save to DynamoDB
         console.log("Saving patient data to DynamoDB");
         await dynamodb.send(new PutCommand({
@@ -3260,7 +3389,7 @@ async function processPatientData(patientData) {
             Item: patientItem
         }));
         console.log("DynamoDB save successful");
-        
+
         // Save initial clinical parameters history if provided
         if (patientData.clinicalParameters && patientData.createParameterHistory) {
             try {
@@ -3271,9 +3400,9 @@ async function processPatientData(patientData) {
                 // Continue even if history save fails
             }
         }
-        
+
         // Save initial medical history entry if provided
-        if (patientData.medicalHistory && 
+        if (patientData.medicalHistory &&
             (patientData.createMedicalHistoryEntry || patientData.pendingHistoryIncluded)) {
             try {
                 await saveMedicalHistoryEntry(patientId, patientData.medicalHistory);
@@ -3283,13 +3412,13 @@ async function processPatientData(patientData) {
                 // Continue even if history save fails
             }
         }
-        
+
         // Save initial diagnosis history entry if provided
         if (patientData.diagnosis && patientData.createDiagnosisHistory) {
             try {
                 await saveDiagnosisHistoryEntry(
-                    patientId, 
-                    patientData.diagnosis, 
+                    patientId,
+                    patientData.diagnosis,
                     patientData.advisedInvestigations
                 );
                 console.log("Saved initial diagnosis history entry");
@@ -3298,7 +3427,7 @@ async function processPatientData(patientData) {
                 // Continue even if history save fails
             }
         }
-        
+
         // Save initial investigations history entry if provided
         if (patientData.advisedInvestigations && patientData.advisedInvestigations.trim() !== '') {
             try {
@@ -3309,7 +3438,7 @@ async function processPatientData(patientData) {
                 // Continue even if history save fails
             }
         }
-        
+
         // Return success response with detailed file processing information
         return {
             statusCode: 200,
@@ -3350,13 +3479,13 @@ async function processReportFiles(reportFiles, patientId) {
     const processedFiles = [];
     let successCount = 0;
     let failureCount = 0;
-    
+
     // Ensure reportFiles is always an array
     if (!Array.isArray(reportFiles)) {
         console.warn("reportFiles is not an array, converting to empty array");
         reportFiles = [];
     }
-    
+
     // Deduplicate files before processing
     const uniqueFileMap = new Map();
     reportFiles.forEach(file => {
@@ -3367,23 +3496,23 @@ async function processReportFiles(reportFiles, patientId) {
             console.log(`Skipping duplicate file in processReportFiles: ${file.name}`);
         }
     });
-    
+
     const deduplicatedFiles = Array.from(uniqueFileMap.values());
     console.log(`After deduplication in processReportFiles: ${deduplicatedFiles.length} files (from ${reportFiles.length})`);
-    
+
     for (let i = 0; i < deduplicatedFiles.length; i++) {
         const reportFile = deduplicatedFiles[i];
-        console.log(`🔄 Processing file ${i+1}/${deduplicatedFiles.length}: ${reportFile.name || 'unnamed'}`);
-        
+        console.log(`🔄 Processing file ${i + 1}/${deduplicatedFiles.length}: ${reportFile.name || 'unnamed'}`);
+
         // Log category if available
         if (reportFile.category) {
             console.log(`File category: ${reportFile.category}`);
         }
-        
+
         // Skip remote URLs (already processed)
         if (reportFile.uri && (reportFile.uri.startsWith('http://') || reportFile.uri.startsWith('https://'))) {
             console.log(`📋 File ${reportFile.name} is already a remote URL, skipping upload: ${reportFile.uri.substring(0, 30)}...`);
-            
+
             processedFiles.push({
                 name: reportFile.name || `file_${Date.now()}`,
                 type: reportFile.type || 'application/octet-stream',
@@ -3393,15 +3522,15 @@ async function processReportFiles(reportFiles, patientId) {
                 category: reportFile.category || 'uncategorized',
                 processedAt: new Date().toISOString()
             });
-            
+
             successCount++;
             continue;
         }
-        
+
         // Validate file data with better error reporting
         if (!reportFile.base64Data) {
-            console.warn(`⚠️ File ${i+1} missing base64Data, attempting to use URI directly: ${reportFile.name || 'unnamed'}`);
-            
+            console.warn(`⚠️ File ${i + 1} missing base64Data, attempting to use URI directly: ${reportFile.name || 'unnamed'}`);
+
             // If no base64Data but we have a URI, add a placeholder and skip processing
             if (reportFile.uri) {
                 processedFiles.push({
@@ -3414,29 +3543,29 @@ async function processReportFiles(reportFiles, patientId) {
                     processedAt: new Date().toISOString()
                 });
             }
-            
+
             failureCount++;
             continue;
         }
-        
+
         // Ensure the file has a name and type
         if (!reportFile.name) {
             reportFile.name = `file_${Date.now()}.${reportFile.type?.split('/')[1] || 'bin'}`;
-            console.log(`📋 File ${i+1} missing name, assigned: ${reportFile.name}`);
+            console.log(`📋 File ${i + 1} missing name, assigned: ${reportFile.name}`);
         }
-        
+
         if (!reportFile.type) {
             // Try to detect type from base64 data
             const mimeMatch = reportFile.base64Data.match(/^data:([^;]+);/);
             reportFile.type = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-            console.log(`📋 File ${i+1} missing type, detected/assigned: ${reportFile.type}`);
+            console.log(`📋 File ${i + 1} missing type, detected/assigned: ${reportFile.type}`);
         }
-        
+
         try {
             // Extract base64 data with improved handling
             let cleanBase64 = reportFile.base64Data;
             let fileType = reportFile.type || 'application/octet-stream';
-            
+
             // Handle data URI format
             if (cleanBase64.startsWith('data:')) {
                 console.log(`📋 File ${reportFile.name} has data URI prefix`);
@@ -3452,7 +3581,7 @@ async function processReportFiles(reportFiles, patientId) {
                     } catch (e) {
                         console.warn(`⚠️ Could not extract content type from URI: ${e.message}`);
                     }
-                    
+
                     cleanBase64 = base64Parts[1];
                     console.log(`📋 Extracted base64 data without prefix, length: ${cleanBase64.length}`);
                 } else {
@@ -3461,35 +3590,35 @@ async function processReportFiles(reportFiles, patientId) {
             } else {
                 console.log(`📋 File ${reportFile.name} does not have data URI prefix, treating as raw base64`);
             }
-            
+
             // Create a unique key for the S3 object
             const timestamp = Date.now();
             const randomSuffix = Math.floor(Math.random() * 10000);
             const sanitizedName = reportFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
             const fileKey = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
-            
+
             // Validate base64 data
             if (!cleanBase64 || cleanBase64.trim() === '') {
                 throw new Error("Base64 data is empty or invalid");
             }
-            
+
             // Decode base64 data
             try {
                 const fileBuffer = Buffer.from(cleanBase64, 'base64');
                 const fileSizeKB = Math.round(fileBuffer.length / 1024);
                 console.log(`📋 Decoded file size: ${fileBuffer.length} bytes (${fileSizeKB} KB)`);
-                
+
                 if (fileBuffer.length === 0) {
                     throw new Error("Decoded file is empty");
                 }
-                
+
                 // Set up S3 upload parameters with category metadata
                 const uploadParams = {
                     Bucket: REPORTS_BUCKET,
                     Key: fileKey,
                     Body: fileBuffer,
                     ContentType: fileType,
-                    ACL: 'public-read',
+                    // ACL: 'public-read', // Removed to prevent AccessDenied if Block Public Access is on
                     Metadata: {
                         'patient-id': patientId,
                         'original-name': sanitizedName,
@@ -3497,11 +3626,11 @@ async function processReportFiles(reportFiles, patientId) {
                         'category': reportFile.category || 'uncategorized'
                     }
                 };
-                
+
                 // Generate the S3 URL
                 const s3Url = `${S3_URL_PREFIX}${fileKey}`;
                 console.log(`📋 Generated S3 URL: ${s3Url.substring(0, 60)}...`);
-                
+
                 // Initialize file info object with category
                 const fileInfo = {
                     key: fileKey,
@@ -3514,19 +3643,19 @@ async function processReportFiles(reportFiles, patientId) {
                     storedLocally: false,
                     patientId: patientId
                 };
-                
+
                 // Try to upload to S3
                 try {
                     console.log(`📤 Attempting S3 upload for: ${fileKey}`);
                     const uploadResult = await s3.send(new PutObjectCommand(uploadParams));
                     console.log(`✅ S3 upload successful for: ${fileKey}`);
                     console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
-                    
+
                     fileInfo.eTag = uploadResult.ETag;
                     fileInfo.uploadedToS3 = true;
                     fileInfo.uploadSuccessTime = new Date().toISOString();
                     successCount++;
-                    
+
                     // Add the successfully processed file
                     processedFiles.push(fileInfo);
                     console.log(`✅ Added file info to results. Total processed: ${processedFiles.length}`);
@@ -3537,12 +3666,12 @@ async function processReportFiles(reportFiles, patientId) {
                     fileInfo.s3ErrorMessage = s3Error.message;
                     fileInfo.s3ErrorTime = new Date().toISOString();
                     failureCount++;
-                    
+
                     // Store truncated data as fallback
                     const maxBase64Length = 1000;
-                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) + 
-                                            (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
-                    
+                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) +
+                        (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
+
                     // Include error information
                     fileInfo.errorDetails = {
                         code: s3Error.code || 'Unknown',
@@ -3551,17 +3680,17 @@ async function processReportFiles(reportFiles, patientId) {
                         requestId: s3Error.$metadata?.requestId,
                         httpStatus: s3Error.$metadata?.httpStatusCode
                     };
-                    
+
                     // Add the file info even with error so we can retry later
                     processedFiles.push(fileInfo);
-                    
+
                     // Try again in background
                     retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64);
                 }
             } catch (bufferError) {
                 console.error(`❌ Error decoding base64 data for ${reportFile.name}: ${bufferError.message}`);
                 failureCount++;
-                
+
                 // Add file with error status
                 processedFiles.push({
                     name: reportFile.name,
@@ -3576,10 +3705,10 @@ async function processReportFiles(reportFiles, patientId) {
             console.error(`❌ Error processing file ${reportFile.name}:`, fileError.message);
             console.error(`Stack trace: ${fileError.stack ? fileError.stack.split('\n')[0] : 'No stack'}`);
             failureCount++;
-            
+
             // Add file with error status
             processedFiles.push({
-                name: reportFile.name || `file_${i+1}`,
+                name: reportFile.name || `file_${i + 1}`,
                 type: reportFile.type || 'unknown',
                 category: reportFile.category || 'uncategorized',
                 error: fileError.message,
@@ -3588,7 +3717,7 @@ async function processReportFiles(reportFiles, patientId) {
             });
         }
     }
-    
+
     console.log(`📋 Report files processing complete. Total: ${reportFiles.length}, Success: ${successCount}, Failures: ${failureCount}`);
     return processedFiles;
 }
@@ -3599,69 +3728,69 @@ function retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64 = nu
     (async () => {
         try {
             console.log(`🔄 Starting background S3 upload retry for ${fileKey}`);
-            
+
             // Try multiple times with exponential backoff
             const maxRetries = 5;
             let success = false;
-            
+
             for (let i = 0; i < maxRetries; i++) {
                 try {
                     // Create a new S3 client for each retry to avoid stale connections
-                    const retryS3 = new S3Client({ 
-                        region: "us-east-1", 
+                    const retryS3 = new S3Client({
+                        region: "ap-southeast-2", // FIXED: Correct region
                         forcePathStyle: true,
                         maxAttempts: 3 // Built-in retry for the SDK
                     });
-                    
-                    console.log(`🔄 Background upload attempt ${i+1}/${maxRetries} for ${fileKey}`);
-                    
+
+                    console.log(`🔄 Background upload attempt ${i + 1}/${maxRetries} for ${fileKey}`);
+
                     // If the original request used a file buffer that we don't have anymore,
                     // and we have the base64 data, recreate the buffer
                     if (!uploadParams.Body && cleanBase64) {
                         console.log(`🔄 Recreating file buffer from saved base64 data`);
                         uploadParams.Body = Buffer.from(cleanBase64, 'base64');
                     }
-                    
+
                     // Add a retry timestamp to help debug
                     if (uploadParams.Metadata) {
                         uploadParams.Metadata.retryTimestamp = new Date().toISOString();
-                        uploadParams.Metadata.retryCount = `${i+1}`;
+                        uploadParams.Metadata.retryCount = `${i + 1}`;
                     }
-                    
+
                     const uploadResult = await retryS3.send(new PutObjectCommand(uploadParams));
-                    
+
                     console.log(`✅ Background S3 upload succeeded for ${fileKey}`);
                     console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
-                    
+
                     // Update DynamoDB to reflect successful upload
                     await updateFileStatusInDB(patientId, fileKey, s3Url, uploadResult.ETag);
-                    
+
                     // Success - exit retry loop
                     success = true;
                     break;
                 } catch (error) {
                     const waitMs = Math.pow(2, i) * 1000; // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-                    
-                    console.error(`❌ Background upload attempt ${i+1} failed: ${error.message}`);
+
+                    console.error(`❌ Background upload attempt ${i + 1} failed: ${error.message}`);
                     console.error(`📋 Error code: ${error.code}, Error name: ${error.name}`);
-                    
+
                     if (error.$metadata) {
                         console.log(`📋 Request ID: ${error.$metadata.requestId}`);
                         console.log(`📋 HTTP Status: ${error.$metadata.httpStatusCode}`);
                     }
-                    
+
                     if (i < maxRetries - 1) {
-                        console.log(`⏳ Waiting ${waitMs}ms before retry ${i+2}`);
+                        console.log(`⏳ Waiting ${waitMs}ms before retry ${i + 2}`);
                         await new Promise(resolve => setTimeout(resolve, waitMs));
                     } else {
                         console.log(`❌ All ${maxRetries} background upload attempts failed for ${fileKey}`);
-                        
+
                         // Update DynamoDB with permanent failure status
                         await updateFileFailureStatus(patientId, fileKey, error.message);
                     }
                 }
             }
-            
+
             if (success) {
                 console.log(`✅ Background upload process completed successfully for ${fileKey}`);
             } else {
@@ -3678,25 +3807,25 @@ function retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64 = nu
 async function updateFileStatusInDB(patientId, fileKey, s3Url, eTag) {
     try {
         console.log(`🔄 Updating file status in DynamoDB for ${fileKey}`);
-        
+
         // Get the current patient record
         const patientData = await dynamodb.send(new GetCommand({
             TableName: PATIENTS_TABLE,
             Key: { patientId }
         }));
-        
+
         if (!patientData.Item) {
             console.error(`❌ Patient ${patientId} not found in DynamoDB`);
             return;
         }
-        
+
         // Find and update the file info
         const reportFiles = patientData.Item.reportFiles || [];
         const fileIndex = reportFiles.findIndex(file => file.key === fileKey);
-        
+
         if (fileIndex >= 0) {
             console.log(`📋 Found file at index ${fileIndex}`);
-            
+
             // Update the file status to reflect successful upload
             reportFiles[fileIndex].url = s3Url;
             reportFiles[fileIndex].eTag = eTag;
@@ -3704,15 +3833,15 @@ async function updateFileStatusInDB(patientId, fileKey, s3Url, eTag) {
             reportFiles[fileIndex].uploadedToS3 = true;
             reportFiles[fileIndex].s3UploadFailed = false;
             reportFiles[fileIndex].uploadSuccessTime = new Date().toISOString();
-            
+
             // Remove any stored base64 data to save space
             delete reportFiles[fileIndex].truncatedBase64;
             delete reportFiles[fileIndex].base64Data;
-            
+
             // Add retry success flags
             reportFiles[fileIndex].retrySuccess = true;
             reportFiles[fileIndex].retryTimestamp = new Date().toISOString();
-            
+
             // Update the patient record
             await dynamodb.send(new UpdateCommand({
                 TableName: PATIENTS_TABLE,
@@ -3723,7 +3852,7 @@ async function updateFileStatusInDB(patientId, fileKey, s3Url, eTag) {
                     ":updatedAt": new Date().toISOString()
                 }
             }));
-            
+
             console.log(`✅ Successfully updated file status in DynamoDB for ${fileKey}`);
         } else {
             console.warn(`⚠️ File ${fileKey} not found in patient record`);
@@ -3738,25 +3867,25 @@ async function updateFileStatusInDB(patientId, fileKey, s3Url, eTag) {
 async function updateFileFailureStatus(patientId, fileKey, errorMessage) {
     try {
         console.log(`🔄 Updating file failure status in DynamoDB for ${fileKey}`);
-        
+
         // Get the current patient record
         const patientData = await dynamodb.send(new GetCommand({
             TableName: PATIENTS_TABLE,
             Key: { patientId }
         }));
-        
+
         if (!patientData.Item) {
             console.error(`❌ Patient ${patientId} not found in DynamoDB`);
             return;
         }
-        
+
         // Find and update the file info
         const reportFiles = patientData.Item.reportFiles || [];
         const fileIndex = reportFiles.findIndex(file => file.key === fileKey);
-        
+
         if (fileIndex >= 0) {
             console.log(`📋 Found file at index ${fileIndex}`);
-            
+
             // Update the file status to reflect permanent failure
             reportFiles[fileIndex].storedLocally = true;
             reportFiles[fileIndex].uploadedToS3 = false;
@@ -3765,7 +3894,7 @@ async function updateFileFailureStatus(patientId, fileKey, errorMessage) {
             reportFiles[fileIndex].finalErrorMessage = errorMessage;
             reportFiles[fileIndex].finalErrorTime = new Date().toISOString();
             reportFiles[fileIndex].retryAttempts = 5; // We tried the maximum number of retries
-            
+
             // Update the patient record
             await dynamodb.send(new UpdateCommand({
                 TableName: PATIENTS_TABLE,
@@ -3776,7 +3905,7 @@ async function updateFileFailureStatus(patientId, fileKey, errorMessage) {
                     ":updatedAt": new Date().toISOString()
                 }
             }));
-            
+
             console.log(`✅ Successfully updated file failure status in DynamoDB for ${fileKey}`);
         } else {
             console.warn(`⚠️ File ${fileKey} not found in patient record`);
@@ -3793,26 +3922,26 @@ function generatePrescriptionText(medications) {
     if (!medications || medications.length === 0) {
         return "";
     }
-    
+
     console.log("Generating prescription text from medication data with per-medication instructions");
-    
+
     const prescriptionText = medications.map((med, index) => {
-        let prescriptionLine = `${index + 1}. ${med.name || "Medication"}`; 
-        
+        let prescriptionLine = `${index + 1}. ${med.name || "Medication"}`;
+
         // Process timing values
         if (med.timingValues) {
             try {
-                const timingValuesObj = typeof med.timingValues === 'string' 
-                    ? JSON.parse(med.timingValues) 
+                const timingValuesObj = typeof med.timingValues === 'string'
+                    ? JSON.parse(med.timingValues)
                     : med.timingValues;
-                
+
                 const timingInstructions = Object.entries(timingValuesObj)
                     .map(([time, value]) => {
                         const timingLabel = time.charAt(0).toUpperCase() + time.slice(1);
                         return `${timingLabel}: ${value}`;
                     })
                     .join(", ");
-                
+
                 if (timingInstructions) {
                     prescriptionLine += ` - ${timingInstructions}`;
                 }
@@ -3820,20 +3949,20 @@ function generatePrescriptionText(medications) {
                 console.warn(`Error parsing timing values for med ${index + 1}: ${e.message}`);
             }
         }
-        
+
         // Add duration if available
         if (med.duration) {
             prescriptionLine += ` for ${med.duration}`;
         }
-        
+
         // Add medication-specific special instructions if present
         if (med.specialInstructions && med.specialInstructions.trim() !== "") {
             prescriptionLine += `\n   Special Instructions: ${med.specialInstructions}`;
         }
-        
+
         return prescriptionLine;
     }).join("\n\n"); // Add extra newline between medications for better readability
-    
+
     return prescriptionText;
 }
 
@@ -3852,4 +3981,127 @@ function formatErrorResponse(errorMessage) {
             error: errorMessage
         })
     };
+}
+
+// ============================================
+// MISSING ACTION HANDLERS RESTORED
+// ============================================
+
+async function getAllPatients() {
+    try {
+        const result = await dynamodb.send(new ScanCommand({
+            TableName: PATIENTS_TABLE
+        }));
+
+        // Sort by lastVisitDate (most recent first)
+        const patients = (result.Items || []).sort((a, b) => {
+            return new Date(b.lastVisitDate || b.createdAt || 0) - new Date(a.lastVisitDate || a.createdAt || 0);
+        });
+
+        // Use standard response format expected by handler
+        return {
+            success: true,
+            patients: patients,
+            count: patients.length
+        };
+    } catch (error) {
+        console.error("getAllPatients error:", error);
+        return formatErrorResponse(`Failed to get patients: ${error.message}`);
+    }
+}
+
+async function searchPatients(requestData) {
+    const { searchTerm } = requestData;
+
+    if (!searchTerm || searchTerm.trim() === "") {
+        return getAllPatients();
+    }
+
+    try {
+        const searchLower = searchTerm.toLowerCase().trim();
+
+        // Scan with filter
+        const result = await dynamodb.send(new ScanCommand({
+            TableName: PATIENTS_TABLE,
+            FilterExpression: "contains(nameSearchable, :search) OR contains(mobileSearchable, :search)",
+            ExpressionAttributeValues: {
+                ":search": searchLower
+            }
+        }));
+
+        return {
+            success: true,
+            patients: result.Items || [],
+            count: result.Items?.length || 0
+        };
+    } catch (error) {
+        console.error("searchPatients error:", error);
+        return formatErrorResponse(`Failed to search patients: ${error.message}`);
+    }
+}
+
+async function deletePatient(requestData) {
+    const { patientId } = requestData;
+
+    if (!patientId) {
+        return formatErrorResponse("Missing patientId");
+    }
+
+    try {
+        await dynamodb.send(new DeleteCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        return { success: true, message: "Patient deleted successfully", patientId };
+    } catch (error) {
+        console.error("deletePatient error:", error);
+        return formatErrorResponse(`Failed to delete patient: ${error.message}`);
+    }
+}
+
+async function deletePatientFile(requestData) {
+    const { patientId, fileUrl, fileName } = requestData;
+
+    if (!patientId || (!fileUrl && !fileName)) {
+        return formatErrorResponse("Missing patientId or file identifier");
+    }
+
+    try {
+        // Get current patient data
+        const getResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!getResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        // Remove file from reportFiles array
+        let reportFiles = getResult.Item.reportFiles || [];
+        reportFiles = reportFiles.filter(file =>
+            file.url !== fileUrl && file.uri !== fileUrl && file.name !== fileName
+        );
+
+        // Update patient record
+        await dynamodb.send(new UpdateCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: "SET reportFiles = :reportFiles, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":reportFiles": reportFiles,
+                ":updatedAt": new Date().toISOString()
+            }
+        }));
+
+        return {
+            success: true,
+            message: "File deleted successfully",
+            remainingFiles: reportFiles.length
+        };
+    } catch (error) {
+        console.error("deletePatientFile error:", error);
+        return formatErrorResponse(`Failed to delete file: ${error.message}`);
+    }
 }
