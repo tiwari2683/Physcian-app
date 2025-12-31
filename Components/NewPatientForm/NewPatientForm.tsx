@@ -143,7 +143,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
   }, [initialTab, prefillMode, medications.length]);
 
   // Function to verify field values before submission
-  const verifyFieldsBeforeSubmit = (section) => {
+  const verifyFieldsBeforeSubmit = (section: string) => {
     switch (section) {
       case "basic":
         break;
@@ -458,9 +458,16 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
         console.log("✅ Patient saved successfully!");
 
-        // 5. Cleanup Draft
-        console.log(`🧹 Deleting draft for ${patientId}`);
-        await DraftService.deleteDraft(patientId);
+        // 5. Cleanup Draft - use the most current draft ID
+        const draftIdToDelete = permanentPatientId || patientId;
+        console.log(`🧹 Deleting draft with ID: ${draftIdToDelete}`);
+
+        if (draftIdToDelete) {
+          await DraftService.deleteDraft(draftIdToDelete);
+          console.log(`✅ Draft deleted successfully`);
+        } else {
+          console.warn("⚠️ No draft ID available for deletion");
+        }
 
         // 6. Navigate
         Alert.alert("Success", "Patient record saved successfully!", [

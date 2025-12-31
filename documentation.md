@@ -111,3 +111,148 @@ export const AWS_CONFIG = {
   S3_URL_PREFIX: "https://dr-gawli-patient-files.s3.ap-southeast-2.amazonaws.com/",
 };
 ```
+
+---
+
+## Patient Data Flow - Draft System & Storage
+
+### Overview
+This section explains the complete flow of patient data from creation to storage, including what is stored in **AsyncStorage (local)** vs **DynamoDB (cloud)**.
+
+### Storage Locations
+
+#### 📱 AsyncStorage (Local - Device Only)
+**Purpose:** Temporary draft storage to prevent data loss during form filling
+
+**What's Stored:**
+- Incomplete patient forms (drafts)
+- Auto-saved form data (every 1 second)
+- Patient data fields (name, age, diagnosis, etc.)
+- Clinical parameters (INR, HB, WBC, etc.)
+- Medications list (unsaved prescriptions)
+- Report file metadata (file URIs, names)
+- Section completion status
+
+**Storage Format:**
+```javascript
+Key: "DRAFT_PATIENT_<patientId>"
+Value: {
+  patientId: "P00123" or "draft_1234567890_abc",
+  lastUpdatedAt: 1735654800000,
+  status: "DRAFT",
+  patientData: { name, age, sex, diagnosis, ... },
+  clinicalParameters: { inr, hb, wbc, ... },
+  medications: [...],
+  reportFiles: [...],
+  savedSections: { basic: true, clinical: false, ... }
+}
+```
+
+**Lifecycle:**
+- **Created:** When user starts filling form
+- **Updated:** Auto-save every 1 second on changes
+- **Deleted:** On successful submission, manual deletion, or auto-cleanup after 30 days
+
+#### ☁️ DynamoDB (Cloud - Permanent Storage)
+**Purpose:** Permanent patient records
+
+**What's Stored:**
+- Complete patient records (finalized only)
+- Patient demographics (name, age, sex, mobile, address)
+- Medical history (with timestamps)
+- Diagnosis entries (current and historical)
+- Advised investigations
+- Clinical parameters (with dates)
+- Medications (prescribed drugs with timing)
+- Report files (S3 URLs after upload)
+- Metadata (createdAt, updatedAt, status)
+
+### Complete Patient Flow
+
+#### New Patient Creation
+1. **Form Initialization:**
+   - User opens NewPatientForm
+   - Generate temp draft ID: `draft_1735654800_abc123`
+   - Initialize usePatientForm hook
+
+2. **User Fills Basic Info:**
+   - User types: Name, Age, Sex, Mobile, Address
+   - onChange triggers updateField()
+   - Auto-save effect saves to AsyncStorage (1s debounce)
+   - Draft stored: `DRAFT_PATIENT_draft_1735654800_abc123`
+
+3. **Navigate Between Tabs:**
+   - User switches tabs: Basic → Clinical → Diagnosis → Prescription
+   - Each tab auto-saves to AsyncStorage
+   - Data restored when returning to tabs
+
+4. **Final Submission:**
+   - User clicks "Save Patient"
+   - Collect all form data into single payload
+   - Process medications and report files
+   - Send to API endpoint (PATIENT_PROCESSOR)
+
+5. **API Processing:**
+   - Lambda receives payload
+   - Create patient record in DynamoDB
+   - Generate permanent ID: `P00123`
+   - Upload files to S3
+   - Update DynamoDB with S3 URLs
+   - Return success with patientId
+
+6. **Post-Save Cleanup:**
+   - Delete draft from AsyncStorage
+   - Navigate to DoctorDashboard
+   - Patient now appears in patient list
+
+#### Editing Existing Patient
+1. User clicks "Prescribe" on existing patient
+2. Load patient data from DynamoDB
+3. Use patient ID (`P00123`) as draft ID
+4. User edits data → Auto-save to AsyncStorage
+5. Click "Update Patient" → Submit to API
+6. Update DynamoDB record
+7. Delete draft from AsyncStorage
+
+### Auto-Save Behavior
+
+**Triggers:**
+- Any change to: patientData, clinicalParameters, medications, reportFiles, savedSections
+- Debounced by 1 second to avoid excessive saves
+
+**What Gets Saved:**
+- Every keystroke (after 1s delay)
+- Every dropdown change
+- Every medication added/removed
+- Every file uploaded
+- Every tab completion
+
+### Draft Cleanup
+
+**Automatic Cleanup:**
+- Runs when DoctorDashboard loads
+- Deletes drafts older than 30 days
+- Based on `lastUpdatedAt` timestamp
+- Runs in background (non-blocking)
+
+**Manual Cleanup:**
+- User can delete drafts from dashboard
+- Confirmation alert before deletion
+
+### Summary Table
+
+| Data Type | AsyncStorage | DynamoDB | When |
+|-----------|-------------|----------|------|
+| Draft patient data | ✅ Yes | ❌ No | During form filling |
+| Completed patient | ❌ No | ✅ Yes | After save |
+| Temp file URIs | ✅ Yes | ❌ No | Before upload |
+| S3 file URLs | ❌ No | ✅ Yes | After upload |
+| Auto-save (1s) | ✅ Yes | ❌ No | Continuous |
+| Final save | ❌ No | ✅ Yes | On submit |
+| Old drafts (30+ days) | 🗑️ Deleted | ❌ N/A | Auto-cleanup |
+
+### Key Files
+- **DraftService.ts:** Core draft management (save, load, delete, cleanup)
+- **usePatientForm.ts:** Auto-save logic, draft lifecycle management
+- **NewPatientForm.tsx:** Form submission, API integration
+- **DoctorDashboard.tsx:** Draft listing, cleanup trigger

@@ -115,6 +115,17 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   const loadDrafts = async () => {
     try {
       setIsLoadingDrafts(true);
+
+      // Cleanup old drafts (30+ days) in background
+      DraftService.cleanupOldDrafts(30)
+        .then(count => {
+          if (count > 0) {
+            console.log(`Cleaned up ${count} old drafts`);
+          }
+        })
+        .catch(err => console.error("Draft cleanup failed:", err));
+
+      // Load current drafts
       const loadedDrafts = await DraftService.getAllDrafts();
       setDrafts(loadedDrafts);
     } catch (error) {

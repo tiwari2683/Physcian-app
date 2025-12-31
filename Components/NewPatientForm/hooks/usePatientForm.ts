@@ -37,6 +37,8 @@ export const usePatientForm = ({
     const currentDraftId = useRef<string | null>(null);
     // Ref to track if initial load is complete to prevent overwriting draft with empty state
     const isLoaded = useRef(false);
+    // Ref to track if component is still mounted (prevents async operations after unmount)
+    const isMounted = useRef(true);
 
     // Extract patientId from patient object or use permanentPatientId
     const patientId = patient?.patientId || permanentPatientId || null;
@@ -114,6 +116,14 @@ export const usePatientForm = ({
 
     // --- DRAFT SYSTEM LOGIC START ---
 
+    // Cleanup on unmount
+    useEffect(() => {
+        return () => {
+            isMounted.current = false;
+            console.log("[usePatientForm] Component unmounting, stopping async operations");
+        };
+    }, []);
+
     // Initialize Draft ID and Load Draft
     useEffect(() => {
         const initializeDraft = async () => {
@@ -132,13 +142,22 @@ export const usePatientForm = ({
                     // Merge draft data into state
                     if (draft.patientData) setPatientData(prev => ({ ...prev, ...draft.patientData }));
                     if (draft.clinicalParameters) {
-                        // Restore Date object
+                        // Restore Date object with improved error handling
                         try {
                             const params = { ...draft.clinicalParameters };
-                            if (typeof params.date === 'string') params.date = new Date(params.date);
+                            if (typeof params.date === 'string') {
+                                params.date = new Date(params.date);
+                            }
+                            // Fallback to current date if invalid
+                            if (!params.date || isNaN(params.date.getTime())) {
+                                console.warn("Invalid date in draft, using current date");
+                                params.date = new Date();
+                            }
                             setClinicalParameters(params);
                         } catch (e) {
                             console.error("Error restoring clinicalParameters date from draft", e);
+                            // Set default parameters with current date on error
+                            setClinicalParameters({ ...draft.clinicalParameters, date: new Date() });
                         }
                     }
                     if (draft.medications) setMedications(draft.medications);
@@ -172,16 +191,35 @@ export const usePatientForm = ({
         if (!currentDraftId.current) return;
 
         const saveData = async () => {
-            const draftPayload: Partial<DraftPatient> = {
-                patientData,
-                clinicalParameters,
-                medications,
-                reportData,
-                reportFiles,
-                savedSections,
-            };
+            // Don't execute if component is unmounted
+            if (!isMounted.current) {
+                console.log("[AutoSave] Skipping save - component unmounted");
+                return;
+            }
 
-            await DraftService.saveDraft(currentDraftId.current!, draftPayload);
+            try {
+                const draftPayload: Partial<DraftPatient> = {
+                    patientData,
+                    clinicalParameters,
+                    medications,
+                    reportData,
+                    reportFiles,
+                    savedSections,
+                };
+
+                const success = await DraftService.saveDraft(currentDraftId.current!, draftPayload);
+
+                if (!success) {
+                    console.error("[AutoSave] Failed to save draft - DraftService returned false");
+                    // Silent failure - logged but doesn't interrupt user
+                } else {
+                    // Successful save
+                    console.log(`[AutoSave] ✓ Draft saved at ${new Date().toLocaleTimeString()}`);
+                }
+            } catch (error) {
+                console.error("[AutoSave] Error saving draft:", error);
+                // Log but don't alert user to avoid spamming with every auto-save failure
+            }
         };
 
         const timeoutId = setTimeout(saveData, 1000); // 1s debounce
@@ -202,17 +240,23 @@ export const usePatientForm = ({
     // Effects
     useEffect(() => {
         console.log(`🔑 permanentPatientId changed to: ${permanentPatientId || "not set"}`);
+
         // If we get a real ID, switch our draft tracking to it
         if (permanentPatientId && currentDraftId.current && currentDraftId.current !== permanentPatientId) {
-            console.log(`[usePatientForm] ID switched from ${currentDraftId.current} to ${permanentPatientId}`);
+            const oldDraftId = currentDraftId.current;
+
+            console.log(`[Draft Cleanup] ID transition: ${oldDraftId} → ${permanentPatientId}`);
+
+            // Delete old temporary draft before switching to prevent orphaned drafts
+            DraftService.deleteDraft(oldDraftId)
+                .then(() => console.log(`✅ Deleted old draft: ${oldDraftId}`))
+                .catch(err => console.error(`❌ Failed to delete old draft:`, err));
+
+            // Switch to new permanent ID
             currentDraftId.current = permanentPatientId;
-            // We trigger a save immediately with the new ID to ensure persistence? 
-            // The auto-save effect will pick up state changes, but if state didn't change, we might not save to new ID.
-            // But usually permanentId change comes from a SAVE operation which usually involves state checks?
-            // Actually, when we save Basic info, we get an ID. We should probably save the draft to the new ID.
-            // Let's force a save here?
-            // No, the dependency array includes permanentPatientId, so the auto-save effect WILL run when it changes!
-            // So it will save the current state to the new ID. Perfect.
+
+            // The auto-save effect will automatically save to the new ID
+            // because permanentPatientId is in its dependency array
         }
     }, [permanentPatientId]);
 
