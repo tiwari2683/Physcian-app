@@ -19,7 +19,9 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 
 // Import file system and media library with error handling
-let FileSystem, MediaLibrary, captureRef;
+let FileSystem: any = null;
+let MediaLibrary: any = null;
+let captureRef: any = null;
 try {
   FileSystem = require("expo-file-system");
   MediaLibrary = require("expo-media-library");
@@ -558,9 +560,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
             if (timingInstructions) {
               prescriptionLine += ` - ${timingInstructions}`;
             }
-          } catch (e) {
+          } catch (e: any) {
             console.warn(
-              `Error parsing timing values for med ${index + 1}: ${e.message}`
+              `Error parsing timing values for med ${index + 1}: ${e?.message || String(e)}`
             );
           }
         }
@@ -704,11 +706,12 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               )
             );
 
-            const granted = await Promise.race([
+            const grantedResult = await Promise.race([
               permissionPromise,
               timeoutPromise,
             ]);
 
+            const granted = grantedResult as any;
             console.log("📱 Android permissions result:", granted);
 
             const writeGranted =
@@ -772,9 +775,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
 
       console.log("✅ Permission process completed");
       return true;
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Permission request error:", error);
-      Alert.alert("Error", "Failed to request permissions: " + error.message);
+      Alert.alert("Error", "Failed to request permissions: " + (error?.message || String(error)));
       return false;
     }
   };
@@ -905,9 +908,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       }
 
       return savedSuccessfully;
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Save certificate error:", error);
-      console.error("❌ Error stack:", error.stack);
+      console.error("❌ Error stack:", error?.stack);
       throw error;
     }
   };
@@ -957,7 +960,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       // Save certificate
       console.log("4️⃣ Saving certificate...");
       let saveSuccessful = false;
-      let saveError = null;
+      let saveError: any = null;
 
       try {
         saveSuccessful = await saveCertificateToDownloads();
@@ -1039,17 +1042,18 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
           ]
         );
       }
-    } catch (error) {
+      return saveSuccessful;
+    } catch (error: any) {
       console.error("❌ Certificate generation error:", error);
       console.error("❌ Error details:", {
-        message: error.message,
-        stack: error.stack,
-        name: error.name,
+        message: error?.message,
+        stack: error?.stack,
+        name: error?.name,
       });
 
       Alert.alert(
         "❌ Error",
-        `Failed to generate certificate. Please try again.\n\n🔍 Error Details:\n${error.message}\n\n💡 Troubleshooting:\n• Check app permissions in settings\n• Ensure device has sufficient storage\n• Try restarting the app`,
+        `Failed to generate certificate. Please try again.\n\n🔍 Error Details:\n${error?.message || String(error)}\n\n💡 Troubleshooting:\n• Check app permissions in settings\n• Ensure device has sufficient storage\n• Try restarting the app`,
         [
           {
             text: "📤 Try Share Instead",
@@ -1065,6 +1069,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
           },
         ]
       );
+      return false;
     } finally {
       console.log("🏁 Setting isGenerating to false");
       setIsGenerating(false);
@@ -1127,9 +1132,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       }
 
       console.log("✅ Certificate shared successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error sharing certificate:", error);
-      Alert.alert("Error", "Failed to share certificate: " + error.message);
+      Alert.alert("Error", "Failed to share certificate: " + (error?.message || String(error)));
     }
   };
 
@@ -1153,14 +1158,14 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
   };
 
   const handleGenerate = async () => {
-    let success;
-    if (typeof window !== 'undefined') window.isCriticalOperation = true;
+    let success: boolean;
+    if (typeof window !== 'undefined') (window as any).isCriticalOperation = true;
     setIsGenerating(true);
     console.log('generating');
 
     success = await generateCertificate();
     setIsGenerating(false);
-    if (typeof window !== 'undefined') window.isCriticalOperation = false;
+    if (typeof window !== 'undefined') (window as any).isCriticalOperation = false;
     if (success) {
       navigation.goBack(); // Only navigate after save is done
     }
@@ -1194,9 +1199,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
         "Test Result",
         `Capture test successful!\nURI: ${uri.substring(0, 50)}...`
       );
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Test capture failed:", error);
-      Alert.alert("Test Failed", `Capture test failed: ${error.message}`);
+      Alert.alert("Test Failed", `Capture test failed: ${error?.message || String(error)}`);
     }
   };
 
@@ -1581,7 +1586,6 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                           handleDropdownSelect("surgeryFitnessOption", option)
                         }
                         activeOpacity={0.7}
-                        underlayColor="#F7FAFC"
                       >
                         <Text
                           style={styles.dropdownOptionText}

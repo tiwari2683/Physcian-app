@@ -24,7 +24,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 const { width: screenWidth } = Dimensions.get("window");
 
 // Enhanced logging function that formats logs as JSON
-const logJson = (category, message, details = {}) => {
+const logJson = (category: string, message: string, details: any = {}) => {
   const timestamp = new Date().toISOString();
   console.log(
     JSON.stringify(
@@ -41,7 +41,7 @@ const logJson = (category, message, details = {}) => {
 };
 
 // Format date for display - includes time for better differentiation
-const formatDate = (dateString) => {
+const formatDate = (dateString: string | Date | null | undefined): string => {
   if (!dateString) return "N/A";
 
   try {
@@ -56,17 +56,17 @@ const formatDate = (dateString) => {
       " " +
       date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     );
-  } catch (error) {
+  } catch (error: any) {
     logJson("DATE_ERROR", "Error formatting date", {
       dateString,
-      error: error.message,
+      error: error?.message || String(error),
     });
     return "Date Error";
   }
 };
 
 // Helper to compare parameter values
-const areParametersEqual = (record1, record2) => {
+const areParametersEqual = (record1: any, record2: any): boolean => {
   if (!record1 || !record2) return false;
 
   // Compare key clinical parameters
@@ -90,7 +90,7 @@ const areParametersEqual = (record1, record2) => {
 };
 
 // Create a hash of parameter values for comparison
-const getParameterHash = (record) => {
+const getParameterHash = (record: any): string => {
   if (!record) return "";
 
   return `${record.inr || ""}_${record.hb || ""}_${record.wbc || ""}_${record.platelet || ""
@@ -98,7 +98,7 @@ const getParameterHash = (record) => {
 };
 
 // Helper function to check if two dates are the same day (ignoring time)
-const isSameDay = (date1, date2) => {
+const isSameDay = (date1: string | Date, date2: string | Date): boolean => {
   if (!date1 || !date2) return false;
 
   const d1 = new Date(date1);
@@ -112,7 +112,7 @@ const isSameDay = (date1, date2) => {
 };
 
 // Helper function to check if a record is the specific dummy record
-const isDummyRecord = (date) => {
+const isDummyRecord = (date: string | Date): boolean => {
   if (!date) return false;
 
   const recordDate = new Date(date);
@@ -130,8 +130,13 @@ const isDummyRecord = (date) => {
 // PARAMETER CONFIGURATION
 // ====================================================================
 
+interface ParameterConfig {
+  key: string;
+  label: string;
+}
+
 // Define parameter names and their display labels
-const PARAMETER_CONFIG = [
+const PARAMETER_CONFIG: ParameterConfig[] = [
   { key: "inr", label: "INR" },
   { key: "hb", label: "HB" },
   { key: "wbc", label: "WBC" },
@@ -155,7 +160,7 @@ const PARAMETER_CONFIG = [
 // ====================================================================
 
 // Helper function to ensure only the most recent record is marked as current
-const ensureOnlyOneCurrentRecord = (records) => {
+const ensureOnlyOneCurrentRecord = (records: any[]): any[] => {
   if (!records || records.length === 0) return [];
 
   // Sort by date (newest first)
@@ -176,13 +181,22 @@ const ensureOnlyOneCurrentRecord = (records) => {
 // MAIN COMPONENT
 // ====================================================================
 
-const ViewParametersModal = ({
+interface ViewParametersModalProps {
+  isVisible: boolean;
+  onClose: () => void;
+  clinicalParameters: any;
+  patientId: string;
+  unmarshallDynamoDBObject: (obj: any) => any;
+  initialHistoricalData?: any[] | null;
+}
+
+const ViewParametersModal: React.FC<ViewParametersModalProps> = ({
   isVisible,
   onClose,
   clinicalParameters,
   patientId,
   unmarshallDynamoDBObject,
-  initialHistoricalData = null as any[] | null, // Accept array or null
+  initialHistoricalData = null,
 }) => {
   // Debug initial conditions - only when visible to avoid console spam
   if (isVisible) {
@@ -223,25 +237,25 @@ const ViewParametersModal = ({
   }
 
   // State to store historical clinical parameters data
-  const [historicalData, setHistoricalData] = useState(
+  const [historicalData, setHistoricalData] = useState<any[]>(
     processedInitialData || []
   );
   // State to track if data is loading
-  const [isLoading, setIsLoading] = useState(
+  const [isLoading, setIsLoading] = useState<boolean>(
     processedInitialData.length > 0 ? false : true
   );
   // State to track if error occurred
-  const [error, setError] = useState(null);
+  const [error, setError] = useState<string | null>(null);
   // Add state to track if initial load is complete
-  const [initialLoadComplete, setInitialLoadComplete] = useState(
+  const [initialLoadComplete, setInitialLoadComplete] = useState<boolean>(
     processedInitialData.length > 0 ? true : false
   );
   // Reference to track if component is mounted
   const isMounted = useRef(true);
 
   // Ref for synced scrolling
-  const paramNamesScrollViewRef = useRef(null);
-  const valuesScrollViewRef = useRef(null);
+  const paramNamesScrollViewRef = useRef<ScrollView>(null);
+  const valuesScrollViewRef = useRef<ScrollView>(null);
   // Add these new refs to track programmatic scrolling
   const isParamScrolling = useRef(false);
   const isValuesScrolling = useRef(false);
@@ -264,14 +278,14 @@ const ViewParametersModal = ({
 
   // Function to ensure demonstration data is available
   const ensureDemonstrationData = useCallback(
-    (currentData) => {
+    (currentData: any[]) => {
       logJson("DATA_PROCESSING", "Ensuring demonstration data", {
         recordCount: currentData?.length || 0,
       });
 
       // First, filter out the dummy record (4/2/2025 2:44 PM)
       const filteredData =
-        currentData?.filter((record) => !isDummyRecord(record.date)) || [];
+        currentData?.filter((record: any) => !isDummyRecord(record.date)) || [];
 
       logJson("DATA_PROCESSING", "After filtering dummy records", {
         remainingCount: filteredData.length,
@@ -477,7 +491,7 @@ const ViewParametersModal = ({
             });
 
             // Add extra validation to ensure we have proper date objects
-            parsedData = parsedData.filter((item) => {
+            parsedData = parsedData.filter((item: any) => {
               if (!item || !item.date) {
                 logJson("STORAGE", "Filtering out record with no date");
                 return false;
@@ -493,7 +507,7 @@ const ViewParametersModal = ({
             });
 
             // Ensure dates are converted to Date objects if they're strings
-            parsedData = parsedData.map((item) => ({
+            parsedData = parsedData.map((item: any) => ({
               ...item,
               date:
                 typeof item.date === "string" ? new Date(item.date) : item.date,
@@ -504,9 +518,9 @@ const ViewParametersModal = ({
             logJson("STORAGE", "Processed stored data", {
               recordCount: parsedData.length,
             });
-          } catch (parseError) {
+          } catch (parseError: any) {
             logJson("STORAGE", "Error parsing stored data", {
-              error: parseError.message,
+              error: parseError?.message || String(parseError),
               storedData: storedData.substring(0, 200) + "...", // Truncate for logging
             });
             // Continue with just the current record
@@ -514,7 +528,7 @@ const ViewParametersModal = ({
 
           if (parsedData && Array.isArray(parsedData)) {
             // Improved filtering logic to keep records with unique dates
-            const filteredStoredData = parsedData.filter((item) => {
+            const filteredStoredData = parsedData.filter((item: any) => {
               if (!item.date) return false;
 
               // Skip the dummy record
@@ -560,9 +574,9 @@ const ViewParametersModal = ({
         } else {
           logJson("STORAGE", "No stored data found");
         }
-      } catch (storageError) {
+      } catch (storageError: any) {
         logJson("STORAGE", "Storage error", {
-          error: storageError.message,
+          error: storageError?.message || String(storageError),
         });
         // Continue to API fetch even if storage fails
       }
@@ -599,9 +613,9 @@ const ViewParametersModal = ({
         try {
           result = JSON.parse(responseText);
           logJson("API", "Successfully parsed API response");
-        } catch (parseError) {
+        } catch (parseError: any) {
           logJson("API", "Error parsing API response", {
-            error: parseError.message,
+            error: parseError?.message || String(parseError),
             responsePreview: responseText.substring(0, 200) + "...", // Truncate for logging
           });
           throw new Error("Failed to parse API response");
@@ -634,9 +648,9 @@ const ViewParametersModal = ({
             try {
               apiParams = unmarshallDynamoDBObject(apiParams);
               logJson("API", "Successfully converted from DynamoDB format");
-            } catch (conversionError) {
+            } catch (conversionError: any) {
               logJson("API", "Error converting from DynamoDB format", {
-                error: conversionError.message,
+                error: conversionError?.message || String(conversionError),
               });
               // Continue with the unprocessed data
             }
@@ -669,13 +683,13 @@ const ViewParametersModal = ({
               );
               // Update current record with API data if it's for the same day
               // This will make sure we keep only one entry per day
-              currentRecord = {
+              const updatedCurrentRecord = {
                 ...apiParams,
                 date: currentRecord.date, // Keep the current timestamp
                 isCurrent: true,
               };
               // Replace the first entry with the updated one
-              updatedHistoricalData[0] = currentRecord;
+              updatedHistoricalData[0] = updatedCurrentRecord;
             }
           }
         }
@@ -696,15 +710,15 @@ const ViewParametersModal = ({
 
           // Process each history record
           const historyRecords = data.clinicalHistory
-            .map((record) => {
+            .map((record: any) => {
               // Convert from DynamoDB format if needed
               let processedRecord = record;
               if (record.M) {
                 try {
                   processedRecord = unmarshallDynamoDBObject(record);
-                } catch (error) {
+                } catch (error: any) {
                   logJson("API", "Error converting history record", {
-                    error: error.message,
+                    error: error?.message || String(error),
                   });
                 }
               }
@@ -722,16 +736,16 @@ const ViewParametersModal = ({
               };
             })
             // Filter out dummy records
-            .filter((record) => !isDummyRecord(record.date));
+            .filter((record: any) => !isDummyRecord(record.date));
 
           logJson("API", "Processed history records", {
             recordCount: historyRecords.length,
           });
 
           // Filter history records to avoid duplicates by date
-          const uniqueHistoryRecords = historyRecords.filter((record) => {
+          const uniqueHistoryRecords = historyRecords.filter((record: any) => {
             // For each history record, check if there's already a record for the same day
-            return !updatedHistoricalData.some((existingRecord) =>
+            return !updatedHistoricalData.some((existingRecord: any) =>
               isSameDay(existingRecord.date, record.date)
             );
           });
@@ -758,7 +772,7 @@ const ViewParametersModal = ({
 
         // Final filter to ensure no dummy records
         updatedHistoricalData = updatedHistoricalData.filter(
-          (record) => !isDummyRecord(record.date)
+          (record: any) => !isDummyRecord(record.date)
         );
         logJson("DATA_PROCESSING", "Final filtered data", {
           recordCount: updatedHistoricalData.length,
@@ -778,9 +792,9 @@ const ViewParametersModal = ({
           logJson("STORAGE", "Saved historical data to AsyncStorage", {
             recordCount: processedDataForStorage.length,
           });
-        } catch (saveError) {
+        } catch (saveError: any) {
           logJson("STORAGE", "Error saving to AsyncStorage", {
-            error: saveError.message,
+            error: saveError?.message || String(saveError),
           });
         }
 
@@ -795,9 +809,9 @@ const ViewParametersModal = ({
           setHistoricalData(finalData);
           logJson("UI_UPDATE", "Updated UI with final data");
         }
-      } catch (apiError) {
+      } catch (apiError: any) {
         logJson("API", "API error occurred", {
-          error: apiError.message,
+          error: apiError?.message || String(apiError),
         });
 
         // If API call failed, ensure we still have some data to show
@@ -818,9 +832,9 @@ const ViewParametersModal = ({
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       logJson("ERROR", "Error in fetchHistoricalData", {
-        error: error.message,
+        error: error?.message || String(error),
       });
 
       // Only set error if we don't already have data
@@ -860,7 +874,7 @@ const ViewParametersModal = ({
   const renderTransposedTable = () => {
     // Filter out the dummy record from historicalData before rendering
     const displayData = historicalData.filter(
-      (record) => !isDummyRecord(record.date)
+      (record: any) => !isDummyRecord(record.date)
     );
 
     logJson("RENDER", "Rendering transposed table", {
@@ -869,14 +883,14 @@ const ViewParametersModal = ({
     });
 
     // Sort dates from newest to oldest - making sure we show ALL historical dates
-    const sortedData = [...displayData].sort((a, b) => {
+    const sortedData = [...displayData].sort((a: any, b: any) => {
       const dateA = a.date instanceof Date ? a.date : new Date(a.date);
       const dateB = b.date instanceof Date ? b.date : new Date(b.date);
       return dateB.getTime() - dateA.getTime();
     });
 
     // Handle synced scrolling
-    const handleParamScrollSync = (event) => {
+    const handleParamScrollSync = (event: any) => {
       // Skip if this is a programmatic scroll
       if (isParamScrolling.current) return;
 
@@ -894,7 +908,7 @@ const ViewParametersModal = ({
       }
     };
 
-    const handleValuesScrollSync = (event) => {
+    const handleValuesScrollSync = (event: any) => {
       // Skip if this is a programmatic scroll
       if (isValuesScrolling.current) return;
 
@@ -968,7 +982,7 @@ const ViewParametersModal = ({
               <View>
                 {/* Date headers */}
                 <View style={styles.tableHeaderRow}>
-                  {sortedData.map((record, index) => (
+                  {sortedData.map((record: any, index: number) => (
                     <View
                       key={`date-${index}`}
                       style={[
@@ -1004,7 +1018,7 @@ const ViewParametersModal = ({
                           : styles.tableRowOdd,
                       ]}
                     >
-                      {sortedData.map((record, colIndex) => (
+                      {sortedData.map((record: any, colIndex: number) => (
                         <Text
                           key={`value-${rowIndex}-${colIndex}`}
                           style={[

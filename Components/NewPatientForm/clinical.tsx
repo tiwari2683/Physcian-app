@@ -61,12 +61,12 @@ import { normalizeUri, validateImageFile } from "../../Utils/FileUtils";
 
 
 // Helper function for regex escaping (new)
-const escapeRegExp = (string) => {
+const escapeRegExp = (string: string) => {
   return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 };
 
 // Format history for display with proper date sorting
-const formatHistoryForDisplay = (historyText) => {
+const formatHistoryForDisplay = (historyText: string | null | undefined) => {
   if (!historyText) return null;
 
   // Split by entry markers
@@ -92,7 +92,7 @@ const formatHistoryForDisplay = (historyText) => {
   }
 
   // Extract entries with their timestamps
-  const entriesWithDates = [];
+  const entriesWithDates: Array<{ text: string; timestamp: string; date: Date }> = [];
 
   for (let i = 0; i < markers.length; i++) {
     const startPos = markers[i].position + markers[i].text.length;
@@ -138,8 +138,8 @@ const formatHistoryForDisplay = (historyText) => {
   // Sort entries by date (newest first)
   entriesWithDates.sort((a, b) => {
     // First try to compare by the parsed date
-    if (a.date && b.date && !isNaN(a.date) && !isNaN(b.date)) {
-      return b.date - a.date;
+    if (a.date && b.date && !isNaN(a.date.getTime()) && !isNaN(b.date.getTime())) {
+      return b.date.getTime() - a.date.getTime();
     }
 
     // If we can't compare by date, use the original order (this is a fallback)
@@ -149,7 +149,7 @@ const formatHistoryForDisplay = (historyText) => {
   // Create a formatted view with entries in date order (newest first)
   return (
     <View>
-      {entriesWithDates.map((entry, index) => (
+      {entriesWithDates.map((entry: any, index: number) => (
         <View key={index} style={styles.entryContainer}>
           {entry.timestamp && (
             <Text style={styles.entryTimestamp}>{entry.timestamp}</Text>
@@ -772,10 +772,10 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         let fileInfo;
         try {
           fileInfo = await FileSystem.getInfoAsync(normalizedUri);
-          console.log("ðŸ“„ File info:", {
+          console.log("📄 File info:", {
             exists: fileInfo.exists,
-            size: fileInfo.size
-              ? `${Math.round(fileInfo.size / 1024)}KB`
+            size: ('size' in fileInfo)
+              ? `${Math.round((fileInfo as any).size / 1024)}KB`
               : "unknown",
             isDirectory: fileInfo.isDirectory,
           });
@@ -871,7 +871,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
             "Failed to add image to reports. Please try again."
           );
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("âŒ Error selecting image:", error);
         console.error("âŒ Error stack:", error.stack);
 
@@ -1009,7 +1009,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         } else {
           console.log("ðŸ“‘ Document selection cancelled or failed");
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("âŒ Error selecting document:", error);
         console.error("âŒ Error stack:", error.stack);
 
@@ -1062,7 +1062,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
               // For NEW patients: Show editable text area directly
               <AutoBulletTextArea
                 value={patientData.medicalHistory}
-                onChangeText={(text) => updateField("medicalHistory", text)}
+                onChangeText={(text: string) => updateField("medicalHistory", text)}
                 placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (â€¢) at the beginning of a line for auto-bulleting."
                 style={[styles.textArea, { minHeight: 200 }]}
                 numberOfLines={12}
@@ -1074,7 +1074,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                   <Text style={styles.inputLabel}>History/Complaints/Symptoms:</Text>
                   <AutoBulletTextArea
                     value={directHistoryText}
-                    onChangeText={(text) => {
+                    onChangeText={(text: string) => {
                       console.log(
                         `🔄 Updating directHistoryText to: ${text.substring(
                           0,

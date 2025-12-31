@@ -22,6 +22,91 @@ import {
 } from "./generateprescription";
 import KeyboardAwareScrollView from "./KeyboardAwareScrollView";
 
+// Type definitions
+interface Medication {
+  name: string;
+  duration: string;
+  timing: string;
+  timingValues: string;
+  unit: string;
+  specialInstructions: string;
+  datePrescribed: string;
+}
+
+interface MedicationCardProps {
+  med: Medication;
+  index: number;
+  updateMedication: (index: number, field: string, value: any) => void;
+  removeMedication: (index: number) => void;
+  medications: Medication[];
+  isCompressed?: boolean;
+  toggleExpand?: (index: number) => void;
+  prescriptionDate?: string | Date | null;
+  isNewPrescription?: boolean;
+}
+
+interface MedicationGroupProps {
+  date: string | Date;
+  medications: Medication[];
+  updateMedication: (index: number, field: string, value: any) => void;
+  removeMedication: (index: number) => void;
+  allMedications: Medication[];
+  expandedGroups: string[];
+  toggleExpandGroup: (date: string) => void;
+  isNewPrescription?: boolean;
+  newPrescriptionIndices: number[];
+  setMedications: (meds: Medication[]) => void;
+  onEditMedication: (medication: Medication, index: number) => void;
+  onAddMedicationToGroup: (date: string | Date) => void;
+  patient: any;
+}
+
+interface PrescriptionTabProps {
+  patientData: any;
+  patient: any;
+  medications: Medication[];
+  setMedications: React.Dispatch<React.SetStateAction<Medication[]>>;
+  expandedMedications: number[];
+  setExpandedMedications: React.Dispatch<React.SetStateAction<number[]>>;
+  expandedGroups: string[];
+  setExpandedGroups: React.Dispatch<React.SetStateAction<string[]>>;
+  newPrescriptionIndices: number[];
+  setNewPrescriptionIndices: React.Dispatch<React.SetStateAction<number[]>>;
+  reportFiles: any[];
+  handleSubmit: (selectedMedications?: Medication[]) => void;
+  isSubmitting: boolean;
+  getSubmitButtonText: () => string;
+  prefillMode: boolean;
+  initialTab?: string;
+  permanentPatientId?: string;
+  tempPatientId?: string;
+}
+
+interface ReportsModalProps {
+  visible: boolean;
+  setVisible: (visible: boolean) => void;
+  patientData: any;
+  reportFiles: any[];
+}
+
+interface HistoryModalProps {
+  visible: boolean;
+  setVisible: (visible: boolean) => void;
+  patientData: any;
+}
+
+interface EnhancedDiagnosisModalProps {
+  visible: boolean;
+  setVisible: (visible: boolean) => void;
+  diagnosisData: {
+    currentDiagnosis: string;
+    diagnosisHistory: any[];
+    advisedInvestigations: string;
+  };
+  isLoading: boolean;
+}
+
+
 // Common medications list with integrated units
 const commonMedications = [
   "Amlodipine 5mg (BP)",
@@ -55,7 +140,7 @@ const timingOptions = [
 ];
 
 // Helper function to check if a date is today
-const isDateToday = (dateString) => {
+const isDateToday = (dateString: string | Date | null | undefined): boolean => {
   if (!dateString) return false;
 
   const date = new Date(dateString);
@@ -207,14 +292,14 @@ const TimingSelector = ({
   );
 };
 
-const MedicationCard = ({
+const MedicationCard: React.FC<MedicationCardProps> = ({
   med,
   index,
   updateMedication,
   removeMedication,
   medications,
   isCompressed = false,
-  toggleExpand = () => { },
+  toggleExpand = (index: number) => { },
   prescriptionDate = null, // Add prescription date parameter with fallback
   isNewPrescription = false, // Prop to indicate if this is a new prescription
 }) => {
@@ -235,7 +320,7 @@ const MedicationCard = ({
   const isPrescriptionFilled = Boolean(hasName && hasTiming);
 
   // Format the prescription date to display in a readable format
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string | Date): string => {
     if (!dateString) return "Not specified";
 
     try {
@@ -252,10 +337,10 @@ const MedicationCard = ({
 
   // Get the date to display - use medication's date if available, otherwise use prescription date
   const displayDate = med.datePrescribed || prescriptionDate;
-  const formattedDate = formatDate(displayDate);
+  const formattedDate = displayDate ? formatDate(displayDate as string | Date) : "Not specified";
 
   // Calculate remaining days function
-  const calculateRemainingDays = (prescriptionDate, duration) => {
+  const calculateRemainingDays = (prescriptionDate: string | Date, duration: string): { expirationDate: Date; remainingDays: number } | null => {
     // Check if we have valid inputs
     if (!prescriptionDate || !duration) return null;
 
@@ -291,7 +376,7 @@ const MedicationCard = ({
 
     // Calculate days between now and expiration date
     const currentDate = new Date();
-    const diffTime = expirationDate - currentDate;
+    const diffTime = expirationDate.getTime() - currentDate.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     return {
@@ -344,7 +429,9 @@ const MedicationCard = ({
   // Expiration Status Component
   const ExpirationStatus = () => {
     // Calculate remaining days
-    const expiration = calculateRemainingDays(displayDate, med.duration);
+    const expiration = displayDate && med.duration
+      ? calculateRemainingDays(displayDate as string | Date, med.duration)
+      : null;
 
     if (!expiration) return null;
 
@@ -559,7 +646,7 @@ const MedicationCard = ({
 };
 
 // Updated MedicationGroupCard component with individual medication expiration status
-const MedicationGroupCard = ({
+const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
   date,
   medications,
   updateMedication,
@@ -575,7 +662,7 @@ const MedicationGroupCard = ({
   patient, // Added patient data for prescription generation
 }) => {
   // Format the date to display in a readable format
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string | Date): string => {
     if (!dateString) return "Not specified";
 
     try {
@@ -591,7 +678,7 @@ const MedicationGroupCard = ({
   };
 
   const formattedDate = formatDate(date);
-  const isExpanded = expandedGroups.includes(date);
+  const isExpanded = expandedGroups.includes(typeof date === 'string' ? date : date.toISOString().split('T')[0]);
 
   // Add this check to determine if this prescription group is from today
   const isPrescriptionFromToday = isDateToday(date);
@@ -602,7 +689,13 @@ const MedicationGroupCard = ({
   );
 
   // Calculate expiration status for a single medication
-  const calculateMedicationExpiration = (prescriptionDate, duration) => {
+  const calculateMedicationExpiration = (prescriptionDate: string | Date, duration: string): {
+    expirationDate: Date;
+    remainingDays: number;
+    statusColor: string;
+    statusText: string;
+    formattedExpirationDate: string;
+  } | null => {
     // Check if we have valid inputs
     if (!prescriptionDate || !duration) return null;
 
@@ -638,7 +731,7 @@ const MedicationGroupCard = ({
 
     // Calculate days between now and expiration date
     const currentDate = new Date();
-    const diffTime = expirationDate - currentDate;
+    const diffTime = expirationDate.getTime() - currentDate.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     // Determine status
@@ -799,11 +892,11 @@ const MedicationGroupCard = ({
 
   // Function to generate group prescription with selected options
   const generateGroupPrescriptionWithOptions = async (
-    meds,
-    prescriptionDate,
-    includeDiagnosis,
-    includeInvestigations,
-    fileName
+    meds: Medication[],
+    prescriptionDate: string | Date,
+    includeDiagnosis: boolean,
+    includeInvestigations: boolean,
+    fileName: string
   ) => {
     try {
       // Create a copy of the patient data
@@ -825,7 +918,7 @@ const MedicationGroupCard = ({
       const result = await generatePrescriptionDirectly(
         prescriptionPatient,
         meds,
-        prescriptionDate,
+        typeof prescriptionDate === 'string' ? prescriptionDate : prescriptionDate.toISOString(),
         undefined, // Use default doctor info
         patient.prescription, // Use prescription text as additional notes
         fileName
@@ -1007,17 +1100,17 @@ const MedicationGroupCard = ({
                 {med.name || `Medication ${idx + 1}`}
               </Text>
               {/* Only show delete button if prescription is from today */}
-              {medications.length > 1 && isPrescriptionFromToday && (
+              {medications.length > 1 && isPrescriptionFromToday ? (
                 <TouchableOpacity
                   onPress={() => removeMedication(originalIndex)}
                 >
                   <Ionicons name="trash-outline" size={20} color="#E53935" />
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
 
             {/* Show individual expiration status directly below the header */}
-            {expirationStatus && (
+            {expirationStatus ? (
               <View style={styles.statusBelowNameContainer}>
                 <View
                   style={[
@@ -1039,7 +1132,7 @@ const MedicationGroupCard = ({
                     } ago (${expirationStatus.formattedExpirationDate})`}
                 </Text>
               </View>
-            )}
+            ) : null}
 
             <View style={styles.medicationDetails}>
               <View style={styles.detailRow}>
@@ -1051,15 +1144,15 @@ const MedicationGroupCard = ({
                 </Text>
               </View>
 
-              {med.duration && (
+              {med.duration ? (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Duration:</Text>
                   <Text style={styles.detailValue}>{med.duration}</Text>
                 </View>
-              )}
+              ) : null}
 
               {/* Specific timing doses */}
-              {med.timingValues && med.timingValues !== "{}" && (
+              {med.timingValues && med.timingValues !== "{}" ? (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Doses:</Text>
                   <View style={styles.detailValue}>
@@ -1077,21 +1170,21 @@ const MedicationGroupCard = ({
                     )}
                   </View>
                 </View>
-              )}
+              ) : null}
 
               {/* Add per-medication special instructions */}
-              {med.specialInstructions && (
+              {med.specialInstructions ? (
                 <View style={styles.detailRow}>
                   <Text style={styles.detailLabel}>Instructions:</Text>
                   <Text style={styles.detailValue}>
                     {med.specialInstructions}
                   </Text>
                 </View>
-              )}
+              ) : null}
             </View>
 
             {/* Edit button for medications - only show for today's prescriptions */}
-            {isPrescriptionFromToday && (
+            {isPrescriptionFromToday ? (
               <TouchableOpacity
                 style={styles.editMedicationButton}
                 onPress={() => {
@@ -1102,7 +1195,7 @@ const MedicationGroupCard = ({
                 <Ionicons name="pencil" size={16} color="#0070D6" />
                 <Text style={styles.editMedicationText}>Edit</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
           </View>
         );
       })}
@@ -1148,7 +1241,7 @@ const MedicationGroupCard = ({
 };
 
 // Quick Access Modal Components
-const ReportsModal = ({ visible, setVisible, patientData, reportFiles }) => {
+const ReportsModal: React.FC<ReportsModalProps> = ({ visible, setVisible, patientData, reportFiles }) => {
   return (
     <Modal
       visible={visible}
@@ -1217,7 +1310,7 @@ const ReportsModal = ({ visible, setVisible, patientData, reportFiles }) => {
   );
 };
 
-const HistoryModal = ({ visible, setVisible, patientData }) => {
+const HistoryModal: React.FC<HistoryModalProps> = ({ visible, setVisible, patientData }) => {
   return (
     <Modal
       visible={visible}
@@ -1251,7 +1344,7 @@ const HistoryModal = ({ visible, setVisible, patientData }) => {
 };
 
 // Enhanced DiagnosisModal component with direct database data
-const EnhancedDiagnosisModal = ({
+const EnhancedDiagnosisModal: React.FC<EnhancedDiagnosisModalProps> = ({
   visible,
   setVisible,
   diagnosisData,
@@ -1271,8 +1364,8 @@ const EnhancedDiagnosisModal = ({
   });
 
   // Group diagnoses by date
-  const groupDiagnosesByDate = (diagnosisHistory) => {
-    const groupedDiagnoses = {};
+  const groupDiagnosesByDate = (diagnosisHistory: any[]) => {
+    const groupedDiagnoses: Record<string, { displayDate: string; items: any[] }> = {};
 
     if (!diagnosisHistory || diagnosisHistory.length === 0) {
       return [];
@@ -1280,13 +1373,15 @@ const EnhancedDiagnosisModal = ({
 
     // Sort history by date (newest first)
     const sortedHistory = [...diagnosisHistory].sort((a, b) => {
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
+      const dateA = new Date(a.date as string | number | Date).getTime();
+      const dateB = new Date(b.date as string | number | Date).getTime();
+      return dateB - dateA;
     });
 
     // Group by month and year
     sortedHistory.forEach((item) => {
       try {
-        const date = new Date(item.date);
+        const date = new Date(item.date as string | number | Date);
         const yearMonth = `${date.getFullYear()}-${String(
           date.getMonth() + 1
         ).padStart(2, "0")}`;
@@ -1404,7 +1499,7 @@ const EnhancedDiagnosisModal = ({
                           </View>
 
                           {/* Diagnoses in this group */}
-                          {group.items.map((item, itemIndex) => (
+                          {group.items.map((item: any, itemIndex: number) => (
                             <View
                               key={`diagnosis-${groupIndex}-${itemIndex}`}
                               style={styles.historyItem}
@@ -1436,27 +1531,7 @@ const EnhancedDiagnosisModal = ({
   );
 };
 
-interface PrescriptionTabProps {
-  patientData: any;
-  patient: any;
-  medications: any[];
-  setMedications: (medications: any[]) => void;
-  expandedMedications: number[];
-  setExpandedMedications: (indices: number[]) => void;
-  expandedGroups: string[];
-  setExpandedGroups: (groups: string[]) => void;
-  newPrescriptionIndices: number[];
-  setNewPrescriptionIndices: (indices: number[]) => void;
-  reportFiles: any[];
-  handleSubmit: () => void;
-  isSubmitting: boolean;
-  getSubmitButtonText: () => string;
-  prefillMode: boolean;
-  initialTab: string;
-  permanentPatientId?: string; // Add this line
-  tempPatientId?: string; // Add this line
-}
-const parseDate = (dateString) => {
+const parseDate = (dateString: string | Date | undefined): Date => {
   if (!dateString) return new Date(0);
 
   try {
@@ -1491,7 +1566,7 @@ const parseDate = (dateString) => {
   }
 };
 
-const formatTextWithBullets = (text) => {
+const formatTextWithBullets = (text: string | null | undefined) => {
   if (!text) return null;
   // Split text into lines
   const lines = text.split("\n");
@@ -1518,7 +1593,7 @@ const formatTextWithBullets = (text) => {
     }
   });
 };
-const formatHistoryDisplay = (text) => {
+const formatHistoryDisplay = (text: string | null | undefined) => {
   if (!text) return null;
 
   // Check if text contains entry markers
@@ -1561,8 +1636,8 @@ const formatHistoryDisplay = (text) => {
 
   // Sort entries by timestamp (newest first)
   entriesWithDates.sort((a, b) => {
-    const dateA = parseDate(a.timestamp);
-    const dateB = parseDate(b.timestamp);
+    const dateA = parseDate(a.timestamp).getTime();
+    const dateB = parseDate(b.timestamp).getTime();
     return dateB - dateA;
   });
 
@@ -1613,7 +1688,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   // State for prescription modal
   const [prescriptionModalVisible, setPrescriptionModalVisible] =
     useState(false);
-  const [previewMedications, setPreviewMedications] = useState([]);
+  const [previewMedications, setPreviewMedications] = useState<Medication[]>([]);
   const [prescriptionModalMode, setPrescriptionModalMode] = useState<
     "new" | "copy" | "edit" | "add"
   >("new");
@@ -1622,12 +1697,13 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   const [editingMedicationIndex, setEditingMedicationIndex] = useState<
     number | null
   >(null);
-  const [newPrescriptionData, setNewPrescriptionData] = useState({
+  const [newPrescriptionData, setNewPrescriptionData] = useState<Medication>({
     name: "",
     duration: "",
     timing: "",
     timingValues: "{}",
     specialInstructions: "",
+    unit: "",
     datePrescribed: new Date().toISOString(),
   });
 
@@ -1718,7 +1794,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       ) {
         // Find patient by ID if multiple patients returned
         currentPatient = patientResponseData.patients.find(
-          (p) => p.patientId === effectivePatientId
+          (p: any) => p.patientId === effectivePatientId
         );
       }
 
@@ -1791,7 +1867,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       }
 
       // Format diagnosis history dates
-      const formattedHistory = diagnosisHistory.map((item) => ({
+      const formattedHistory = diagnosisHistory.map((item: any) => ({
         ...item,
         formattedDate: formatDiagnosisDate(item.date),
         formattedTime: formatDiagnosisTime(item.date),
@@ -1809,7 +1885,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       });
 
       console.log("✅ Diagnosis data updated successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("❌ Error fetching diagnosis data:", error);
       Alert.alert("Error", `Failed to fetch diagnosis data: ${error.message}`);
     } finally {
@@ -1818,7 +1894,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   };
 
   // NEW: Helper functions for date formatting
-  const formatDiagnosisDate = (dateString) => {
+  const formatDiagnosisDate = (dateString: string | number | Date) => {
     try {
       const date = new Date(dateString);
       return date.toLocaleDateString("en-GB", {
@@ -1832,7 +1908,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
     }
   };
 
-  const formatDiagnosisTime = (dateString) => {
+  const formatDiagnosisTime = (dateString: string | number | Date) => {
     try {
       const date = new Date(dateString);
       return date.toLocaleTimeString("en-US", {
@@ -1882,11 +1958,12 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
   // Function to group medications by date
   const groupMedicationsByDate = () => {
-    const groups = {};
+    const groups: Record<string, Medication[]> = {};
 
     medications.forEach((med) => {
+      if (!med.datePrescribed) return;
       // Extract just the date part (ignore time)
-      const dateObj = new Date(med.datePrescribed);
+      const dateObj = new Date(med.datePrescribed as string | number | Date);
       const dateString = dateObj.toISOString().split("T")[0]; // Format: YYYY-MM-DD
 
       if (!groups[dateString]) {
@@ -1898,14 +1975,14 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
     // Sort dates in descending order (newest first)
     return Object.entries(groups)
-      .sort(([dateA], [dateB]) => new Date(dateB) - new Date(dateA))
+      .sort(([dateA], [dateB]) => new Date(dateB).getTime() - new Date(dateA).getTime())
       .map(([date, meds]) => ({ date, medications: meds }));
   };
 
   // Medication functions
   const updateMedication = (index: number, field: string, value: string) => {
     const updated = [...medications];
-    updated[index][field as keyof (typeof updated)[0]] = value;
+    (updated[index] as any)[field] = value; // Use any cast for dynamic field update
     setMedications(updated);
   };
 
@@ -1939,14 +2016,14 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
     if (copyExisting) {
       // Get only the most recent prescription's medications using proper date comparison
-      let mostRecentDate = null;
+      let mostRecentDate: Date | null = null;
       let mostRecentDateString = "";
       let mostRecentMeds = [];
 
       // First find the most recent prescription date by converting string dates to Date objects
       medications.forEach((med) => {
         if (med.datePrescribed) {
-          const medDate = new Date(med.datePrescribed);
+          const medDate = new Date(med.datePrescribed as string | number | Date);
           if (!mostRecentDate || medDate > mostRecentDate) {
             mostRecentDate = medDate;
             mostRecentDateString = med.datePrescribed;
@@ -1961,11 +2038,11 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       // Get ALL medications from that date - match only the date part, not time
       if (mostRecentDateString) {
         // Extract just the date part (YYYY-MM-DD) for comparison
-        const mostRecentDateOnly = mostRecentDateString.split("T")[0];
+        const mostRecentDateOnly = (mostRecentDateString as string).split("T")[0];
 
         mostRecentMeds = medications.filter((med) => {
           if (!med.datePrescribed) return false;
-          const medDateOnly = med.datePrescribed.split("T")[0];
+          const medDateOnly = (med.datePrescribed as string).split("T")[0];
           return medDateOnly === mostRecentDateOnly;
         });
 
@@ -2000,6 +2077,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
         timing: "",
         timingValues: "{}",
         specialInstructions: "",
+        unit: "",
         datePrescribed: todayDate,
       });
 
@@ -2010,7 +2088,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   };
 
   // Function to handle editing a medication
-  const handleEditMedication = (medication, index) => {
+  const handleEditMedication = (medication: Medication, index: number) => {
     console.log(`Editing medication: ${medication.name}, index: ${index}`);
 
     // Set the editing index
@@ -2023,6 +2101,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       timing: medication.timing || "",
       timingValues: medication.timingValues || "{}",
       specialInstructions: medication.specialInstructions || "",
+      unit: medication.unit || "",
       datePrescribed: medication.datePrescribed || new Date().toISOString(),
     });
 
@@ -2034,7 +2113,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   };
 
   // Function to handle adding medication to a specific date group
-  const handleAddMedicationToGroup = (date) => {
+  const handleAddMedicationToGroup = (date: any) => {
     console.log(`Adding medication to group with date: ${date}`);
 
     // Initialize empty form for new prescription with specific date
@@ -2044,7 +2123,8 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       timing: "",
       timingValues: "{}",
       specialInstructions: "",
-      datePrescribed: date, // Use the date from the group
+      unit: "",
+      datePrescribed: (date as any) instanceof Date ? (date as any).toISOString() : String(date),
     });
 
     // Set modal mode to "add"
@@ -2253,7 +2333,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
     });
 
     // Add cancel option
-    options.push({ text: "Cancel", style: "cancel" });
+    options.push({ text: "Cancel", style: "cancel" as const });
 
     // Show the alert with options
     Alert.alert(
@@ -2265,9 +2345,9 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
   // Function to generate prescription with selected options
   const generatePrescriptionWithOptions = async (
-    includeDiagnosis,
-    includeInvestigations,
-    fileName
+    includeDiagnosis: boolean,
+    includeInvestigations: boolean,
+    fileName: string | undefined
   ) => {
     try {
       // Create a copy of the patient data
@@ -2429,7 +2509,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
         {/* Submit Button */}
         <TouchableOpacity
           style={[styles.submitButton, isSubmitting && styles.disabledButton]}
-          onPress={handleSubmit}
+          onPress={() => handleSubmit()}
           disabled={isSubmitting}
           activeOpacity={0.8}
         >
@@ -2572,7 +2652,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                           index={index}
                           updateMedication={(idx, field, value) => {
                             const updated = [...previewMedications];
-                            updated[idx][field] = value;
+                            (updated[idx] as any)[field] = value;
                             setPreviewMedications(updated);
                           }}
                           removeMedication={(idx) => {
@@ -3519,6 +3599,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     color: "#2D3748",
+  },
+  historyBulletItem: {
+    fontSize: 14,
+    color: "#2D3748",
+    paddingLeft: 10,
+    marginBottom: 4,
+  },
+  historyText: {
+    fontSize: 14,
+    color: "#2D3748",
+    marginBottom: 4,
+  },
+  entryContainer: {
+    backgroundColor: "#F8FAFC",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  entryTimestamp: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#718096",
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  entrySeparator: {
+    height: 1,
+    backgroundColor: "#E2E8F0",
+    marginTop: 12,
   },
 });
 

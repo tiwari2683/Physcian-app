@@ -168,9 +168,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
             !value ||
             (typeof value === "string" && value.trim().length < 2)
           ) {
-            return `${
-              field === "firstName" ? "First" : "Last"
-            } name must be at least 2 characters`;
+            return `${field === "firstName" ? "First" : "Last"
+              } name must be at least 2 characters`;
           }
           return null;
 
@@ -414,7 +413,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
   }, []);
 
   const handleSubmitEditing = useCallback(
-    (nextRef?: React.RefObject<TextInput>) => {
+    (nextRef?: React.RefObject<TextInput | null>) => {
       if (nextRef?.current) {
         console.log(`⏭️ Moving to next input`);
         nextRef.current.focus();
@@ -512,8 +511,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
       onChangeText: (text: string) => void;
       placeholder: string;
       error?: string;
-      inputRef?: React.RefObject<TextInput>;
-      nextRef?: React.RefObject<TextInput>;
+      inputRef?: React.RefObject<TextInput | null>;
+      nextRef?: React.RefObject<TextInput | null>;
       keyboardType?: any;
       autoCapitalize?: any;
       returnKeyType?: any;
@@ -586,8 +585,8 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
       onChangeText: (text: string) => void;
       placeholder: string;
       error?: string;
-      inputRef?: React.RefObject<TextInput>;
-      nextRef?: React.RefObject<TextInput>;
+      inputRef?: React.RefObject<TextInput | null>;
+      nextRef?: React.RefObject<TextInput | null>;
       showPassword: boolean;
       setShowPassword: (show: boolean) => void;
       showStrength?: boolean;
@@ -991,7 +990,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.15)",
     justifyContent: "center",
     alignItems: "center",
-    backdropFilter: "blur(10px)",
   },
   headerContent: {
     flex: 1,
@@ -1177,7 +1175,6 @@ const styles = StyleSheet.create({
     borderColor: "#E2E8F0",
     borderRadius: 12,
     backgroundColor: "#FFFFFF",
-    transition: "all 0.2s ease",
   },
   inputWrapperFocused: {
     borderColor: "#0070D6",
@@ -1360,7 +1357,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   footerLinkContainer: {
-    display: "inline",
   },
   footerLink: {
     color: "#0070D6",

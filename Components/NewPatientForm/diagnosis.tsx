@@ -34,7 +34,7 @@ const getLogTimestamp = () => {
 };
 
 // Enhanced console log function
-const log = (message, data = null) => {
+const log = (message: string, data: any = null) => {
   const timestamp = getLogTimestamp();
   if (data) {
     console.log(`[${timestamp}] 🔍 ${message}`, data);
@@ -44,7 +44,7 @@ const log = (message, data = null) => {
 };
 
 // Different log types for better visual identification
-const logInfo = (message, data = null) => {
+const logInfo = (message: string, data: any = null) => {
   const timestamp = getLogTimestamp();
   if (data) {
     console.log(`[${timestamp}] ℹ️ ${message}`, data);
@@ -53,7 +53,7 @@ const logInfo = (message, data = null) => {
   }
 };
 
-const logSuccess = (message, data = null) => {
+const logSuccess = (message: string, data: any = null) => {
   const timestamp = getLogTimestamp();
   if (data) {
     console.log(`[${timestamp}] ✅ ${message}`, data);
@@ -62,7 +62,7 @@ const logSuccess = (message, data = null) => {
   }
 };
 
-const logWarning = (message, data = null) => {
+const logWarning = (message: string, data: any = null) => {
   const timestamp = getLogTimestamp();
   if (data) {
     console.log(`[${timestamp}] ⚠️ ${message}`, data);
@@ -71,7 +71,7 @@ const logWarning = (message, data = null) => {
   }
 };
 
-const logError = (message, data = null) => {
+const logError = (message: string, data: any = null) => {
   const timestamp = getLogTimestamp();
   if (data) {
     console.error(`[${timestamp}] ❌ ${message}`, data);
@@ -80,8 +80,16 @@ const logError = (message, data = null) => {
   }
 };
 
+interface CollapsibleSectionProps {
+  title: string;
+  children: React.ReactNode;
+  isExpanded: boolean;
+  onToggle: () => void;
+  icon?: any; // Ionicons name
+}
+
 // New Collapsible Section Component
-const CollapsibleSection = ({
+const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   title,
   children,
   isExpanded,
@@ -186,10 +194,15 @@ interface InvestigationHistoryItem {
   timestamp?: number; // Add timestamp field
 }
 
+interface GroupedDiagnosis {
+  displayDate: string;
+  items: DiagnosisHistoryItem[];
+}
+
 // Helper function to group diagnoses by date
-const groupDiagnosesByDate = (diagnosisHistory) => {
+const groupDiagnosesByDate = (diagnosisHistory: DiagnosisHistoryItem[]): GroupedDiagnosis[] => {
   // Create a map to store diagnoses by date (YYYY-MM)
-  const groupedDiagnoses = {};
+  const groupedDiagnoses: Record<string, GroupedDiagnosis> = {};
 
   if (!diagnosisHistory || diagnosisHistory.length === 0) {
     // Silent return to avoid log noise
@@ -323,9 +336,15 @@ const AutoBulletTextArea = React.memo(
   }
 );
 
+interface InvestigationsSelectorProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  disabled?: boolean;
+}
+
 // Investigations Selector Component for checkboxes
-const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
-  const [selectedInvestigations, setSelectedInvestigations] = useState([]);
+const InvestigationsSelector: React.FC<InvestigationsSelectorProps> = ({ value, onChangeText, disabled = false }) => {
+  const [selectedInvestigations, setSelectedInvestigations] = useState<string[]>([]);
   const [customInvestigationText, setCustomInvestigationText] = useState("");
 
   // Common medical investigations
@@ -396,7 +415,7 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
   }, [value]);
 
   // Function to toggle investigation selection
-  const toggleInvestigation = (investigation) => {
+  const toggleInvestigation = (investigation: string) => {
     if (disabled) return;
 
     setSelectedInvestigations((prev) => {
@@ -416,7 +435,7 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
   };
 
   // Function to handle custom investigation text changes
-  const handleCustomTextChange = (text) => {
+  const handleCustomTextChange = (text: string) => {
     if (disabled) return;
 
     setCustomInvestigationText(text);
@@ -424,10 +443,10 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
   };
 
   // Helper to update the combined field value
-  const updateCombinedValue = (selected, customText) => {
+  const updateCombinedValue = (selected: string[], customText: string) => {
     // Format the selected investigations as a bulleted list
     const formattedInvestigations = selected
-      .map((investigation) => `- ${investigation}`)
+      .map((investigation: string) => `- ${investigation}`)
       .join("\n");
 
     // Format custom text with bullets
@@ -509,8 +528,16 @@ const InvestigationsSelector = ({ value, onChangeText, disabled = false }) => {
   );
 };
 
+interface DiagnosisHistoryModalProps {
+  visible: boolean;
+  onClose: () => void;
+  currentDiagnosis: string;
+  diagnosisHistory: DiagnosisHistoryItem[];
+  isLoading: boolean;
+}
+
 // New component for displaying diagnosis history in a modal with grouping by timestamp
-const DiagnosisHistoryModal = ({
+const DiagnosisHistoryModal: React.FC<DiagnosisHistoryModalProps> = ({
   visible,
   onClose,
   currentDiagnosis,
@@ -739,6 +766,22 @@ const DiagnosisHistoryModal = ({
   );
 };
 
+interface DiagnosisTabProps {
+  patientData: {
+    [key: string]: any;
+    diagnosis: string;
+    advisedInvestigations: string;
+    name?: string;
+  };
+  updateField: (field: string, value: string) => void;
+  patientId?: string;
+  tempPatientId?: string;
+  prefillMode?: boolean;
+  navigation?: any;
+  route?: any;
+}
+
+// Diagnosis Tab Component
 const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   patientData,
   updateField,
@@ -827,7 +870,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   const [currentWorkingPatientId, setCurrentWorkingPatientId] = useState(null);
 
   // Toggle function for collapsible sections
-  const toggleSection = (section) => {
+  const toggleSection = (section: keyof typeof expandedSections) => {
     setExpandedSections((prev) => ({
       ...prev,
       [section]: !prev[section],
@@ -835,7 +878,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   };
 
   // Enhanced saveToAPI function with better error handling and retries
-  const saveToAPI = async (patientId, historyItem, retryCount = 0) => {
+  const saveToAPI = async (patientId: string, historyItem: DiagnosisHistoryItem, retryCount = 0) => {
     const maxRetries = 3;
 
     try {
@@ -924,7 +967,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       await updateDiagnosisHistoryCache(patientId, historyItem);
 
       return result;
-    } catch (error) {
+    } catch (error: any) {
       logError(
         `Error saving diagnosis to API (attempt ${retryCount + 1}):`,
         error
@@ -955,7 +998,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   };
 
   // Enhanced updateDiagnosisHistoryCache function
-  const updateDiagnosisHistoryCache = async (patientId, newItem) => {
+  const updateDiagnosisHistoryCache = async (patientId: string, newItem: DiagnosisHistoryItem) => {
     try {
       logInfo(`Updating diagnosis history cache for patient: ${patientId}`);
 
@@ -965,7 +1008,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         `diagnosis_last_saved_${patientId}`,
       ];
 
-      let existingCache = [];
+      let existingCache: DiagnosisHistoryItem[] = [];
 
       // Try to get existing cache
       for (const cacheKey of cacheKeys) {
@@ -994,7 +1037,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       // Add new item to the beginning (most recent first)
       // But check for duplicates first
       const isDuplicate = existingCache.some(
-        (item) =>
+        (item: DiagnosisHistoryItem) =>
           item.diagnosis === newItem.diagnosis &&
           Math.abs(
             new Date(item.date).getTime() - new Date(newItem.date).getTime()
@@ -1421,7 +1464,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   // Enhanced updateField with debouncing and local state to prevent flickering
   const [localDiagnosis, setLocalDiagnosis] = useState("");
   const [blockChecked, setBlockChecked] = useState(false);
-  const blockCheckTimeoutRef = useRef(null);
+  const blockCheckTimeoutRef = useRef<any>(null);
 
   // Only check AsyncStorage once on component mount
   useEffect(() => {
@@ -1439,7 +1482,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   }, []);
 
   // Optimized diagnosis change handler that doesn't check AsyncStorage on every keystroke
-  const handleDiagnosisChange = (text) => {
+  const handleDiagnosisChange = (text: string) => {
     // Update local state immediately for smooth typing
     setLocalDiagnosis(text);
 
@@ -1742,7 +1785,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
           const parsedData = JSON.parse(cachedData);
 
           // Format dates for display
-          const formattedData = parsedData.map((item) => ({
+          const formattedData = parsedData.map((item: any) => ({
             ...item,
             formattedDate: formatDate(item.date),
             formattedTime: formatTime(item.date),
@@ -1917,7 +1960,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
               ) {
                 // Find the patient by ID
                 patientData = bodyObject.patients.find(
-                  (p) => p.patientId === effectivePatientId
+                  (p: any) => p.patientId === effectivePatientId
                 );
               }
             } catch (parseError) {
@@ -2146,7 +2189,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
           );
 
           // Format dates for display
-          const formattedData = parsedData.map((item) => ({
+          const formattedData = parsedData.map((item: InvestigationHistoryItem) => ({
             ...item,
             formattedDate: formatDate(item.date),
             formattedTime: formatTime(item.date),
@@ -2178,7 +2221,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         };
 
         // Add a timestamp to prevent caching
-        requestBody["timestamp"] = new Date().getTime();
+        (requestBody as any)["timestamp"] = new Date().getTime();
 
         log(
           JSON.stringify({
@@ -2243,7 +2286,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         // Process history data if found
         if (investigationsHistoryData.length > 0) {
           // Format dates for display
-          const formattedData = investigationsHistoryData.map((item) => ({
+          const formattedData = investigationsHistoryData.map((item: InvestigationHistoryItem) => ({
             ...item,
             formattedDate: formatDate(item.date),
             formattedTime: formatTime(item.date),
@@ -2255,7 +2298,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
             JSON.stringify({
               source: "api",
               totalItems: formattedData.length,
-              sampleItems: formattedData.slice(0, 2).map((item) => ({
+              sampleItems: formattedData.slice(0, 2).map((item: InvestigationHistoryItem) => ({
                 date: item.date,
                 formatted: item.formattedDate,
                 time: item.formattedTime,
@@ -2301,7 +2344,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   };
 
   // Helper function to format dates
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: string | number | Date): string => {
     try {
       const date = new Date(dateString);
       return date.toLocaleDateString("en-GB", {
@@ -2311,12 +2354,12 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       });
     } catch (error) {
       logError("Error formatting date:", error);
-      return dateString;
+      return String(dateString);
     }
   };
 
   // Helper function to format time
-  const formatTime = (dateString) => {
+  const formatTime = (dateString: string | number | Date): string => {
     try {
       const date = new Date(dateString);
       return date.toLocaleTimeString("en-US", {
@@ -2502,7 +2545,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   // Listen for saving events from parent component
   useEffect(() => {
     // Create a listener to handle save events
-    const handleAppStateChange = async (nextAppState) => {
+    const handleAppStateChange = async (nextAppState: any) => {
       // This is a placeholder for real event handling - in a real app,
       // you would listen for a specific event from the parent component
       if (nextAppState === "active" && patientData.advisedInvestigations) {
@@ -2822,7 +2865,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         <View style={styles.inputWrapper}>
           <AutoBulletTextArea
             value={localDiagnosis || patientData.diagnosis} // Use local state for rendering
-            onChangeText={(text) => handleDiagnosisChange(text)}
+            onChangeText={(text: string) => handleDiagnosisChange(text)}
             placeholder="Enter diagnosis details. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
             numberOfLines={15}
             style={[styles.textArea, { minHeight: 200 }]} // Reduced height slightly
@@ -2884,7 +2927,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
           {/* Always keep investigations selectable */}
           <InvestigationsSelector
             value={patientData.advisedInvestigations}
-            onChangeText={(text) => updateField("advisedInvestigations", text)}
+            onChangeText={(text: string) => updateField("advisedInvestigations", text)}
             disabled={false} // Always keep enabled so user can select again after clearing
           />
 

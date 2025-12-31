@@ -1,3 +1,16 @@
+interface HistoryEntry {
+  text: string;
+  timestamp: string;
+  isCurrent?: boolean;
+}
+
+interface ViewHistoryModalProps {
+  isVisible: boolean;
+  onClose: () => void;
+  historyText: string | null | undefined;
+  patientId: string;
+}
+
 import React, { useState, useEffect } from "react";
 import { API_ENDPOINTS } from "../../Config";
 import {
@@ -13,13 +26,15 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
-const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
+const ViewHistoryModal: React.FC<ViewHistoryModalProps> = ({ isVisible, onClose, historyText, patientId }) => {
   // PERFORMANCE FIX: Early return if modal is not visible
   // This prevents unnecessary state initialization, logging, and effects
-  const [historyEntries, setHistoryEntries] = useState([]);
+  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("current");
-  const [lastSavedText, setLastSavedText] = useState("");
+  const [activeTab, setActiveTab] = useState<string>("current");
+  const [lastSavedText, setLastSavedText] = useState<string | null | undefined>(
+    ""
+  );
 
   // Log when component mounts - only in development
   useEffect(() => {
@@ -41,7 +56,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   }, [isVisible]);
 
   // Helper function to parse dates robustly
-  const parseDate = (dateString) => {
+  const parseDate = (dateString: any) => {
     if (!dateString) return new Date(0);
 
     try {
@@ -77,7 +92,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   };
 
   // Improved compare function for sorting by date
-  const compareDates = (a, b) => {
+  const compareDates = (a: any, b: any) => {
     const dateA = parseDate(a.timestamp);
     const dateB = parseDate(b.timestamp);
 
@@ -94,11 +109,11 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   };
 
   // Function to format text with bullet points
-  const formatTextWithBullets = (text) => {
+  const formatTextWithBullets = (text: string | null | undefined) => {
     if (!text) return null;
     // Split text into lines
     const lines = text.split("\n");
-    return lines.map((line, index) => {
+    return lines.map((line: string, index: number) => {
       // Check if line starts with bullet or dash
       const hasBullet = line.match(/^\s*[-•*]\s/);
       if (hasBullet) {
@@ -209,7 +224,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
           console.log(
             `✅ Fetched ${result.medicalHistory.length} history entries from API`
           );
-          apiData = result.medicalHistory.map((entry) => ({
+          apiData = result.medicalHistory.map((entry: any) => ({
             text: entry.text,
             timestamp: entry.recordDate || entry.timestamp,
           }));
@@ -252,7 +267,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
 
       // Combine API and storage data, removing duplicates
       console.log("🔄 Combining data sources...");
-      let combinedEntries = [];
+      let combinedEntries: HistoryEntry[] = [];
 
       if (apiData && apiData.length > 0) {
         combinedEntries = [...apiData];
@@ -261,10 +276,10 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
         // Add any storage entries that aren't in the API data
         if (storageEntries.length > 0) {
           let addedCount = 0;
-          storageEntries.forEach((storageEntry) => {
+          storageEntries.forEach((storageEntry: any) => {
             // Check if this entry already exists in the combined list
             const isDuplicate = combinedEntries.some(
-              (entry) => entry.text === storageEntry.text
+              (entry: any) => entry.text === storageEntry.text
             );
 
             if (!isDuplicate) {
@@ -288,7 +303,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
       if (historyText && historyText.trim() !== "") {
         console.log("🔍 Checking if current text is already in history...");
         const currentExists = combinedEntries.some(
-          (entry) => entry.text === historyText
+          (entry: any) => entry.text === historyText
         );
 
         if (!currentExists) {
@@ -335,7 +350,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   };
 
   // Function to save current text to history
-  const saveCurrentToHistory = async (textToSave) => {
+  const saveCurrentToHistory = async (textToSave: string) => {
     if (!patientId || !textToSave) {
       console.log("❌ Cannot save history: Missing patient ID or text");
       return;
@@ -362,7 +377,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
       // Check if this exact text already exists in history
       console.log("🔍 Checking if text already exists in history...");
       const textExists = historyArray.some(
-        (entry) => entry.text === textToSave
+        (entry: any) => entry.text === textToSave
       );
 
       if (!textExists) {
@@ -448,7 +463,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   };
 
   // Format date for display - showing only the date without "New Entry" text
-  const formatDate = (dateString) => {
+  const formatDate = (dateString: any) => {
     try {
       // If the date string contains "New Entry" pattern, extract just the date part
       if (typeof dateString === "string" && dateString.includes("New Entry")) {
@@ -477,7 +492,7 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
   };
 
   // Format history display to remove "New Entry" text and show newest on top
-  const formatHistoryDisplay = (text) => {
+  const formatHistoryDisplay = (text: string | null | undefined) => {
     if (!text) return null;
 
     // Check if text contains entry markers
@@ -522,10 +537,10 @@ const ViewHistoryModal = ({ isVisible, onClose, historyText, patientId }) => {
     entriesWithDates.sort((a, b) => {
       const dateA = parseDate(a.timestamp);
       const dateB = parseDate(b.timestamp);
-      return dateB - dateA;
+      return dateB.getTime() - dateA.getTime();
     });
 
-    return entriesWithDates.map((entry, index) => (
+    return entriesWithDates.map((entry: any, index: number) => (
       <View key={index} style={styles.entryContainer}>
         <Text style={styles.entryTimestamp}>{entry.timestamp}</Text>
         {formatTextWithBullets(entry.text)}
