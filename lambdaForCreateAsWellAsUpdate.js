@@ -3075,6 +3075,15 @@ async function processPatientData(patientData) {
             return formatErrorResponse("Missing required patient information (name or age)");
         }
 
+        // Validate mobile number if provided strictly 
+        if (patientData.mobile) {
+            // Remove any non-numeric characters just in case
+            const cleanMobile = patientData.mobile.replace(/[^0-9]/g, '');
+            if (cleanMobile.length !== 10) {
+                return formatErrorResponse("Invalid mobile number. Must be exactly 10 digits.");
+            }
+        }
+
         // Generate a unique ID for the patient using crypto.randomUUID()
         const patientId = randomUUID();
         console.log(`Generated patient ID: ${patientId}`);

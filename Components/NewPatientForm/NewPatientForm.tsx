@@ -150,14 +150,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     }
   }, [initialTab, prefillMode, medications.length]);
 
-  // useFocusEffect to set active tab when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      if (initialTab && activeSection !== initialTab) {
-        setActiveSection(initialTab);
-      }
-    }, [initialTab])
-  );
+
 
 
 
@@ -260,9 +253,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
 
       console.log(`✅ Navigation to ${nextSection} section complete`);
     } else {
-      // If on the last section, go back
-      console.log("🏁 On last section, navigating back");
-      navigation.goBack();
+      // If on the last section, go to Doctor Dashboard
+      console.log("🏁 On last section, navigating to Doctor Dashboard");
+      navigation.navigate("DoctorDashboard");
     }
 
     console.log("-----------------------------------------------------------");
@@ -1162,6 +1155,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             console.log("🔒 Marking clinical section as saved");
             return { ...prev, clinical: true };
           });
+
+          // NEW: Clear the local draft explicitly now that we've saved to server
+          if (clinicalTabRef.current && clinicalTabRef.current.clearClinicalDraft) {
+            console.log("🧹 Clearing clinical draft after successful save");
+            clinicalTabRef.current.clearClinicalDraft();
+          }
 
           // Show success alert and navigate to next section on confirmation
           Alert.alert("Success", "Clinical information saved successfully!", [
@@ -2600,7 +2599,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
             break;
           case "prescription":
             successMessage = "Prescription updated successfully!";
-            nextAction = () => switchSection("diagnosis");
+            nextAction = () => navigation.navigate("DoctorDashboard");
             break;
           case "diagnosis":
             successMessage = "Diagnosis information updated successfully!";
@@ -2685,9 +2684,15 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           );
         } else {
           // Show success message
-          Alert.alert("Success", successMessage, [
-            { text: "OK", onPress: nextAction },
-          ]);
+          if (activeSection === "prescription") {
+            // For prescription, navigate automatically without blocking
+            // Alert.alert("Success", successMessage); // Optional: could flash if needed
+            nextAction();
+          } else {
+            Alert.alert("Success", successMessage, [
+              { text: "OK", onPress: nextAction },
+            ]);
+          }
         }
       } catch (error: any) {
         console.error("❌ Error updating patient data:", error);

@@ -235,6 +235,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       handleParameterUpdate,
       fetchCurrentPatientData,
       fetchHistoricalData,
+      clearClinicalDraft,
     } = useClinicalForm({
       patientId,
       reportFiles,
@@ -252,7 +253,8 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
     useImperativeHandle(ref, () => ({
       saveDirectHistoryToMedicalHistory,
       getLatestMedicalHistory,
-      transferHistoryText, // Add this new function
+      transferHistoryText,
+      clearClinicalDraft, // Exposed for parent to clear draft after save
     }));
 
     // Function to show upload options (Gallery, Camera, Document)

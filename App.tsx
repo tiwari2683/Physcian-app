@@ -41,6 +41,7 @@ import Appointments from "./Components/Appointments/Appointments";
 import AppointmentDetails from "./Components/Appointments/AppointmentDetails";
 import NewAppointmentModal from "./Components/Appointments/NewAppointmentModal";
 import PatientsData from "./Components/PatientsData/PatientsData";
+import PatientDetails from "./Components/PatientsData/PatientDetails";
 import FitnessCertificate from "./Components/FitnessCertificate/FitnessCertificate";
 import Profile from "./Components/Profile/Profile";
 
@@ -678,12 +679,16 @@ export default function App(): React.JSX.Element {
                 // Removed contentStyle
                 gestureEnabled: true,
               }}
-              listeners={{
-                focus: () =>
-                  console.log("📍 FitnessCertificate screen focused"),
-                blur: () => console.log("📍 FitnessCertificate screen blurred"),
+            />
+            <Stack.Screen
+              name="PatientDetails"
+              component={PatientDetails}
+              options={{
+                gestureEnabled: true,
+                headerShown: false
               }}
             />
+
 
             <Stack.Screen
               name="Profile"

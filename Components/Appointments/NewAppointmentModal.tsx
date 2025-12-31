@@ -135,6 +135,18 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
       return;
     }
 
+    // Validate Mobile Number (Only for new patients as existing ones are pre-filled/read-only or if we allow editing later)
+    // We check if we are in create mode or if it's a new patient entry
+    if (!selectedPatient && patientMobile) {
+      // Remove any non-numeric characters just in case, though phone-pad helps
+      const cleanMobile = patientMobile.replace(/[^0-9]/g, '');
+
+      if (cleanMobile.length !== 10) {
+        Alert.alert("Invalid Mobile Number", "Mobile number must be exactly 10 digits.");
+        return;
+      }
+    }
+
     setIsSaving(true);
     try {
       let finalPatientId = selectedPatient?.patientId;
@@ -368,6 +380,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
                           onChangeText={setPatientMobile}
                           keyboardType="phone-pad"
                           editable={!selectedPatient}
+                          maxLength={10}
                         />
                       </View>
                     </View>

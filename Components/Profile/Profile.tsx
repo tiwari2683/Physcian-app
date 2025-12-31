@@ -8,10 +8,13 @@ import {
     Platform,
     Alert,
     Dimensions,
+    StatusBar,
+    Image,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { getCurrentUser, signOut } from "@aws-amplify/auth";
+import { LinearGradient } from "expo-linear-gradient";
 
 const { width } = Dimensions.get("window");
 
@@ -56,10 +59,17 @@ const Profile: React.FC<ProfileProps> = ({ navigation }) => {
                         try {
                             await signOut();
                             console.log("✅ User signed out successfully");
-                            navigation.navigate("Login");
+                            navigation.reset({
+                                index: 0,
+                                routes: [{ name: "Login" }],
+                            });
                         } catch (error) {
                             console.error("❌ Sign out error:", error);
-                            Alert.alert("Error", "Failed to sign out. Please try again.");
+                            // Fallback navigation even on error
+                            navigation.reset({
+                                index: 0,
+                                routes: [{ name: "Login" }],
+                            });
                         }
                     },
                 },
@@ -82,7 +92,7 @@ const Profile: React.FC<ProfileProps> = ({ navigation }) => {
 
     const menuItems = [
         {
-            icon: "person-outline",
+            icon: "settings-outline",
             title: "Account Settings",
             subtitle: "Manage your account details",
             onPress: () => Alert.alert("Account Settings", "Coming soon!"),
@@ -107,51 +117,90 @@ const Profile: React.FC<ProfileProps> = ({ navigation }) => {
         },
         {
             icon: "information-circle-outline",
-            title: "About",
-            subtitle: "App version and information",
-            onPress: () => Alert.alert("About", "Dr. Gawli App v1.0.0"),
+            title: "About App",
+            subtitle: "Version 1.0.0",
+            onPress: () => Alert.alert("About", "Dr. Gawli App v1.0.0\nBuilt with ❤️ for Doctors"),
         },
     ];
 
     return (
-        <SafeAreaView style={styles.container}>
-            <View style={styles.header}>
-                <Text style={styles.headerTitle}>Profile</Text>
-            </View>
+        <View style={styles.container}>
+            <StatusBar barStyle="light-content" backgroundColor="#0070D6" />
 
-            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-                {/* User Info Card */}
-                <View style={styles.userCard}>
-                    <View style={styles.avatarContainer}>
-                        <Ionicons name="person" size={40} color="#FFFFFF" />
+            {/* Premium Gradient Header */}
+            <LinearGradient
+                colors={["#0070D6", "#0056A4"]}
+                style={styles.headerGradient}
+            >
+                <SafeAreaView edges={['top', 'left', 'right']} style={styles.headerSafeArea}>
+                    <View style={styles.headerTitleContainer}>
+                        <Text style={styles.headerTitle}>My Profile</Text>
                     </View>
-                    <View style={styles.userInfo}>
-                        <Text style={styles.userName}>
-                            {userInfo?.username || "Doctor"}
-                        </Text>
-                        <Text style={styles.userEmail}>
-                            {userInfo?.signInDetails?.loginId || "doctor@example.com"}
-                        </Text>
+                </SafeAreaView>
+            </LinearGradient>
+
+            <ScrollView
+                style={styles.scrollView}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Floating User Card */}
+                <View style={styles.userCard}>
+                    <View style={styles.avatarRow}>
+                        <View style={styles.avatarContainer}>
+                            <Text style={styles.avatarText}>
+                                {userInfo?.username ? userInfo.username.substring(0, 1).toUpperCase() : "D"}
+                            </Text>
+                            <View style={styles.onlineBadge} />
+                        </View>
+                        <View style={styles.userInfo}>
+                            <Text style={styles.userName}>
+                                {userInfo?.username || "Doctor"}
+                            </Text>
+                            <Text style={styles.userRole}>General Physician</Text>
+                            <Text style={styles.userEmail}>
+                                {userInfo?.signInDetails?.loginId || "doctor@example.com"}
+                            </Text>
+                        </View>
+                    </View>
+
+                    <View style={styles.statsRow}>
+                        <View style={styles.statItem}>
+                            <Text style={styles.statValue}>--</Text>
+                            <Text style={styles.statLabel}>Patients</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statItem}>
+                            <Text style={styles.statValue}>--</Text>
+                            <Text style={styles.statLabel}>Exp. Yrs</Text>
+                        </View>
+                        <View style={styles.statDivider} />
+                        <View style={styles.statItem}>
+                            <Text style={styles.statValue}>4.9</Text>
+                            <Text style={styles.statLabel}>Rating</Text>
+                        </View>
                     </View>
                 </View>
 
-                {/* Menu Items */}
-                <View style={styles.menuSection}>
+                {/* Menu Section */}
+                <View style={styles.sectionTitleContainer}>
+                    <Text style={styles.sectionTitle}>Settings & Preferences</Text>
+                </View>
+
+                <View style={styles.menuContainer}>
                     {menuItems.map((item, index) => (
                         <TouchableOpacity
                             key={index}
-                            style={styles.menuItem}
+                            style={[styles.menuItem, index === menuItems.length - 1 && styles.menuItemLast]}
                             onPress={item.onPress}
                             activeOpacity={0.7}
                         >
-                            <View style={styles.menuItemLeft}>
-                                <View style={styles.iconContainer}>
-                                    <Ionicons name={item.icon as any} size={22} color="#0070D6" />
-                                </View>
-                                <View style={styles.menuItemText}>
-                                    <Text style={styles.menuItemTitle}>{item.title}</Text>
-                                    <Text style={styles.menuItemSubtitle}>{item.subtitle}</Text>
-                                </View>
+                            <View style={styles.menuIconBox}>
+                                <Ionicons name={item.icon as any} size={22} color="#0070D6" />
+                            </View>
+                            <View style={styles.menuContent}>
+                                <Text style={styles.menuTitle}>{item.title}</Text>
+                                <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
                             </View>
                             <Ionicons name="chevron-forward" size={20} color="#CBD5E0" />
                         </TouchableOpacity>
@@ -162,14 +211,14 @@ const Profile: React.FC<ProfileProps> = ({ navigation }) => {
                 <TouchableOpacity
                     style={styles.signOutButton}
                     onPress={handleSignOut}
-                    activeOpacity={0.7}
+                    activeOpacity={0.8}
                 >
-                    <Ionicons name="log-out-outline" size={20} color="#E53935" />
-                    <Text style={styles.signOutText}>Sign Out</Text>
+                    <Ionicons name="log-out-outline" size={22} color="#E53935" />
+                    <Text style={styles.signOutText}>Sign Out from App</Text>
                 </TouchableOpacity>
 
-                {/* Version Info */}
-                <Text style={styles.versionText}>Version 1.0.0</Text>
+                <Text style={styles.versionText}>App Version 1.0.0 (Build 102)</Text>
+                <View style={{ height: 80 }} />
             </ScrollView>
 
             {/* Bottom Navigation */}
@@ -178,32 +227,34 @@ const Profile: React.FC<ProfileProps> = ({ navigation }) => {
                     style={styles.navItem}
                     onPress={() => handleTabNavigation("Home")}
                 >
-                    <Ionicons name="home-outline" size={24} color="#718096" />
-                    <Text style={styles.navText}>Home</Text>
+                    <Ionicons name="home-outline" size={24} color="#A0AEC0" />
+                    <Text style={[styles.navText, { color: "#A0AEC0" }]}>Home</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={styles.navItem}
                     onPress={() => handleTabNavigation("Patients")}
                 >
-                    <Ionicons name="people-outline" size={24} color="#718096" />
-                    <Text style={styles.navText}>Patients</Text>
+                    <Ionicons name="people-outline" size={24} color="#A0AEC0" />
+                    <Text style={[styles.navText, { color: "#A0AEC0" }]}>Patients</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={styles.navItem}
                     onPress={() => handleTabNavigation("Schedule")}
                 >
-                    <Ionicons name="calendar-outline" size={24} color="#718096" />
-                    <Text style={styles.navText}>Schedule</Text>
+                    <Ionicons name="calendar-outline" size={24} color="#A0AEC0" />
+                    <Text style={[styles.navText, { color: "#A0AEC0" }]}>Schedule</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                     style={styles.navItem}
                     onPress={() => handleTabNavigation("Profile")}
                 >
-                    <Ionicons name="person" size={24} color="#0070D6" />
-                    <Text style={[styles.navText, { color: "#0070D6" }]}>Profile</Text>
+                    <View style={styles.activeNavIcon}>
+                        <Ionicons name="person" size={24} color="#0070D6" />
+                    </View>
+                    <Text style={[styles.navText, { color: "#0070D6", fontWeight: "600" }]}>Profile</Text>
                 </TouchableOpacity>
             </View>
-        </SafeAreaView>
+        </View>
     );
 };
 
@@ -212,186 +263,243 @@ const styles = StyleSheet.create({
         flex: 1,
         backgroundColor: "#F5F7FA",
     },
-    header: {
-        flexDirection: "row",
-        justifyContent: "space-between",
+    headerGradient: {
+        paddingBottom: 60, // Space for the floating card overlap
+        borderBottomLeftRadius: 30,
+        borderBottomRightRadius: 30,
+        paddingTop: Platform.OS === "android" ? StatusBar.currentHeight : 0,
+    },
+    headerSafeArea: {
+        paddingHorizontal: 20,
+        paddingBottom: 20,
+    },
+    headerTitleContainer: {
         alignItems: "center",
-        padding: 16,
-        backgroundColor: "#FFFFFF",
-        ...Platform.select({
-            ios: {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 4,
-            },
-            android: {
-                elevation: 3,
-            },
-        }),
+        paddingVertical: 10,
     },
     headerTitle: {
         fontSize: 20,
-        fontWeight: "bold",
-        color: "#2D3748",
+        fontWeight: "700",
+        color: "#FFFFFF",
+        letterSpacing: 0.5,
     },
-    content: {
+    scrollView: {
         flex: 1,
-        padding: 16,
+        marginTop: -50,
+    },
+    scrollContent: {
+        paddingHorizontal: 20,
+        paddingTop: 10,
     },
     userCard: {
+        backgroundColor: "#FFFFFF",
+        borderRadius: 20,
+        padding: 24,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 10 },
+        shadowOpacity: 0.08,
+        shadowRadius: 20,
+        elevation: 10,
+        marginBottom: 24,
+    },
+    avatarRow: {
         flexDirection: "row",
         alignItems: "center",
-        backgroundColor: "#FFFFFF",
-        padding: 20,
-        borderRadius: 12,
-        marginBottom: 24,
-        ...Platform.select({
-            ios: {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.1,
-                shadowRadius: 3,
-            },
-            android: {
-                elevation: 2,
-            },
-        }),
+        marginBottom: 20,
     },
     avatarContainer: {
-        width: 64,
-        height: 64,
-        borderRadius: 32,
-        backgroundColor: "#0070D6",
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        backgroundColor: "#EBF8FF",
         justifyContent: "center",
         alignItems: "center",
-        marginRight: 16,
+        borderWidth: 4,
+        borderColor: "#FFFFFF",
+        shadowColor: "#0070D6",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+    },
+    avatarText: {
+        fontSize: 32,
+        fontWeight: "700",
+        color: "#0070D6",
+    },
+    onlineBadge: {
+        position: "absolute",
+        bottom: 2,
+        right: 2,
+        width: 16,
+        height: 16,
+        borderRadius: 8,
+        backgroundColor: "#4CAF50",
+        borderWidth: 2,
+        borderColor: "#FFFFFF",
     },
     userInfo: {
+        marginLeft: 16,
         flex: 1,
     },
     userName: {
-        fontSize: 18,
+        fontSize: 22,
+        fontWeight: "700",
+        color: "#1A202C",
+        marginBottom: 2,
+    },
+    userRole: {
+        fontSize: 14,
+        color: "#0070D6",
         fontWeight: "600",
-        color: "#2D3748",
         marginBottom: 4,
     },
     userEmail: {
-        fontSize: 14,
+        fontSize: 13,
         color: "#718096",
     },
-    menuSection: {
-        backgroundColor: "#FFFFFF",
+    statsRow: {
+        flexDirection: "row",
+        justifyContent: "space-between",
+        alignItems: "center",
+        backgroundColor: "#F8FAFC",
         borderRadius: 12,
-        marginBottom: 24,
+        paddingVertical: 16,
+        paddingHorizontal: 16,
+    },
+    statItem: {
+        alignItems: "center",
+        flex: 1,
+    },
+    statValue: {
+        fontSize: 18,
+        fontWeight: "700",
+        color: "#2D3748",
+        marginBottom: 2,
+    },
+    statLabel: {
+        fontSize: 12,
+        color: "#718096",
+        fontWeight: "500",
+    },
+    statDivider: {
+        width: 1,
+        height: 30,
+        backgroundColor: "#E2E8F0",
+    },
+    sectionTitleContainer: {
+        marginBottom: 12,
+        marginLeft: 4,
+    },
+    sectionTitle: {
+        fontSize: 16,
+        fontWeight: "700",
+        color: "#4A5568",
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
+    },
+    menuContainer: {
+        backgroundColor: "#FFFFFF",
+        borderRadius: 16,
         overflow: "hidden",
-        ...Platform.select({
-            ios: {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.1,
-                shadowRadius: 3,
-            },
-            android: {
-                elevation: 2,
-            },
-        }),
+        marginBottom: 24,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 3,
     },
     menuItem: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "space-between",
         padding: 16,
         borderBottomWidth: 1,
         borderBottomColor: "#F1F5F9",
     },
-    menuItemLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        flex: 1,
+    menuItemLast: {
+        borderBottomWidth: 0,
     },
-    iconContainer: {
+    menuIconBox: {
         width: 40,
         height: 40,
-        borderRadius: 20,
-        backgroundColor: "#E3F2FD",
+        borderRadius: 12,
+        backgroundColor: "#EBF8FF",
         justifyContent: "center",
         alignItems: "center",
-        marginRight: 12,
+        marginRight: 16,
     },
-    menuItemText: {
+    menuContent: {
         flex: 1,
     },
-    menuItemTitle: {
+    menuTitle: {
         fontSize: 16,
-        fontWeight: "500",
+        fontWeight: "600",
         color: "#2D3748",
         marginBottom: 2,
     },
-    menuItemSubtitle: {
-        fontSize: 13,
-        color: "#718096",
+    menuSubtitle: {
+        fontSize: 12,
+        color: "#A0AEC0",
     },
     signOutButton: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
         backgroundColor: "#FFFFFF",
-        padding: 16,
-        borderRadius: 12,
-        marginBottom: 16,
+        padding: 18,
+        borderRadius: 16,
+        marginBottom: 24,
         borderWidth: 1,
-        borderColor: "#FEE2E2",
-        ...Platform.select({
-            ios: {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: 1 },
-                shadowOpacity: 0.1,
-                shadowRadius: 3,
-            },
-            android: {
-                elevation: 2,
-            },
-        }),
+        borderColor: "#FED7D7",
+        shadowColor: "#E53935",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+        elevation: 2,
     },
     signOutText: {
         fontSize: 16,
-        fontWeight: "600",
+        fontWeight: "700",
         color: "#E53935",
-        marginLeft: 8,
+        marginLeft: 10,
     },
     versionText: {
         textAlign: "center",
         fontSize: 12,
-        color: "#A0AEC0",
-        marginBottom: 20,
+        color: "#CBD5E0",
     },
     bottomNav: {
         flexDirection: "row",
         justifyContent: "space-around",
         backgroundColor: "#FFFFFF",
-        paddingVertical: 10,
+        paddingVertical: 12,
+        paddingBottom: Platform.OS === 'ios' ? 24 : 12,
         borderTopWidth: 1,
-        borderTopColor: "#E2E8F0",
-        ...Platform.select({
-            ios: {
-                shadowColor: "#000",
-                shadowOffset: { width: 0, height: -2 },
-                shadowOpacity: 0.1,
-                shadowRadius: 3,
-            },
-            android: {
-                elevation: 4,
-            },
-        }),
+        borderTopColor: "#F1F5F9",
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        elevation: 20,
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: -4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 10,
     },
     navItem: {
         alignItems: "center",
+        justifyContent: "center",
+        flex: 1,
+    },
+    activeNavIcon: {
+        // backgroundColor: "#EBF8FF",
+        // padding: 6,
+        // borderRadius: 20,
+        marginBottom: 2,
     },
     navText: {
-        fontSize: 12,
-        color: "#718096",
-        marginTop: 2,
+        fontSize: 11,
+        marginTop: 4,
+        fontWeight: "500",
     },
 });
 

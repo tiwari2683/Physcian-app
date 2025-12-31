@@ -173,6 +173,24 @@ export const useClinicalForm = (props: any) => {
         const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
 
         try {
+            // First check for a local draft - PREFER DRAFT OVER SERVER DATA
+            // This prevents "vanishing" data if the user has unsaved changes that are newer than the server
+            const storageKey = `clinical_params_${patientId}`;
+            const storedData = await AsyncStorage.getItem(storageKey);
+
+            if (storedData) {
+                console.log(`📝 Found local clinical draft for ${patientId}, using it instead of server data`);
+                const parsedDraft = JSON.parse(storedData);
+                // Basic validation to ensure we don't restore an empty draft over valid server data
+                const hasData = Object.values(parsedDraft).some(val => val && val.toString().trim() !== "");
+
+                if (hasData) {
+                    updateInputFieldsFromRecord(parsedDraft);
+                    return; // Stop here, don't fetch from server if we have a valid draft
+                }
+            }
+
+            // If no valid draft, proceed to fetch from API
             const response = await fetch(apiUrl, {
                 method: "POST",
                 headers: {
@@ -225,7 +243,7 @@ export const useClinicalForm = (props: any) => {
 
         } catch (error: any) {
             setApiError("Error: " + error.message);
-            // Fallback to local storage
+            // Fallback to local storage (redundant if we checked first, but good for safety)
             try {
                 const storageKey = `clinical_params_${patientId}`;
                 const storedData = await AsyncStorage.getItem(storageKey);
@@ -235,6 +253,18 @@ export const useClinicalForm = (props: any) => {
             } catch (e) { }
         }
     }, [patientId, updateInputFieldsFromRecord]);
+
+    // NEW: Function to clear the clinical draft after successful save
+    const clearClinicalDraft = async () => {
+        if (patientId) {
+            try {
+                console.log(`🧹 Clearing clinical draft for ${patientId}`);
+                await AsyncStorage.removeItem(`clinical_params_${patientId}`);
+            } catch (error) {
+                console.error("❌ Error clearing clinical draft:", error);
+            }
+        }
+    };
 
     // Enhanced function to remove report file from both frontend and backend
     const removeReportFileWithBackend = async (index: number) => {
@@ -634,5 +664,6 @@ export const useClinicalForm = (props: any) => {
         handleParameterUpdate,
         fetchCurrentPatientData,
         fetchHistoricalData,
+        clearClinicalDraft,
     }
 };

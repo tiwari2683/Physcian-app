@@ -835,11 +835,8 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                 key={index}
                 style={styles.patientCard}
                 onPress={() =>
-                  navigation.navigate("NewPatientForm", {
+                  navigation.navigate("PatientDetails", {
                     patient,
-                    initialTab: "clinical", // Changed from "basic" to "clinical"
-                    prefillMode: true,
-                    hideBasicTab: true, // Add this new parameter
                   })
                 }
               >
