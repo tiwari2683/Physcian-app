@@ -59,6 +59,7 @@ interface Patient {
   createdAt: string;
   updatedAt: string;
   reports: string;
+  status?: string;
 }
 
 interface APIResponse {
@@ -458,7 +459,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   };
 
   // Get last prescribed medication function
-  const getLastPrescribedMedication = (medications) => {
+  const getLastPrescribedMedication = (medications: Patient['medications']) => {
     // Return early if no medications
     if (!medications || medications.length === 0) return null;
 

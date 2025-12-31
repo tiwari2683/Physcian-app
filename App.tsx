@@ -522,7 +522,6 @@ export default function App(): React.JSX.Element {
         <NavigationContainer
           ref={navigationRef}
           theme={{
-            // @ts-ignore - Explicit ignore for incomplete theme object for now, or spread default theme if imported
             dark: false,
             colors: {
               background: "transparent",
@@ -531,6 +530,24 @@ export default function App(): React.JSX.Element {
               text: COLORS.text,
               border: COLORS.background,
               notification: COLORS.error,
+            },
+            fonts: {
+              regular: {
+                fontFamily: 'System',
+                fontWeight: '400',
+              },
+              medium: {
+                fontFamily: 'System',
+                fontWeight: '500',
+              },
+              bold: {
+                fontFamily: 'System',
+                fontWeight: '700',
+              },
+              heavy: {
+                fontFamily: 'System',
+                fontWeight: '900',
+              },
             },
           }}
           onReady={handleNavigationReady}

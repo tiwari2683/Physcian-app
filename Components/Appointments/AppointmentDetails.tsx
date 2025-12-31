@@ -73,7 +73,7 @@ const AppointmentDetails = () => {
 
             if (responseData.success && responseData.patient) {
                 // Navigate to NewPatientForm in 'read-only/edit' mode
-                navigation.navigate("NewPatientForm", {
+                (navigation as any).navigate("NewPatientForm", {
                     patient: responseData.patient,
                     prefillMode: true,
                     initialTab: "basic"

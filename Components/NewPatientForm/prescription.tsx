@@ -944,7 +944,7 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
           styles.medicationGroupCard,
           isAnyMedicationNew && styles.newPrescriptionCard,
         ]}
-        onPress={() => toggleExpandGroup(date)}
+        onPress={() => toggleExpandGroup(typeof date === 'string' ? date : date.toISOString().split('T')[0])}
       >
         {/* Badge for new prescription */}
         {isAnyMedicationNew && (
@@ -1159,7 +1159,7 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
                     {Object.entries(JSON.parse(med.timingValues)).map(
                       ([time, dose], i) => (
                         <Text key={i} style={styles.doseText}>
-                          {time}: {dose}
+                          {time}: {String(dose)}
                           {i <
                             Object.entries(JSON.parse(med.timingValues)).length -
                             1
@@ -1231,7 +1231,7 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
       {/* Compress button */}
       <TouchableOpacity
         style={styles.compressButtonContainer}
-        onPress={() => toggleExpandGroup(date)}
+        onPress={() => toggleExpandGroup(typeof date === 'string' ? date : date.toISOString().split('T')[0])}
       >
         <Text style={styles.compressButtonText}>Show less</Text>
         <Ionicons name="chevron-up" size={16} color="#718096" />

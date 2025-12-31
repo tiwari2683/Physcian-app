@@ -54,7 +54,7 @@ const awsConfig = {
       userPoolId: "us-east-1_nxn7JWpsM",
       userPoolClientId: "1p6homv71i3l5mdog70c5t41jk",
       region: "us-east-1",
-      signUpVerificationMethod: "code",
+      signUpVerificationMethod: "code" as const,
       loginWith: {
         oauth: {
           domain: "us-east-12donwwm43.auth.us-east-1.amazoncognito.com",
@@ -66,7 +66,7 @@ const awsConfig = {
           ],
           redirectSignIn: ["https://localhost:3000/"],
           redirectSignOut: ["https://localhost:3000/"],
-          responseType: "code",
+          responseType: "code" as const,
         },
       },
     },
@@ -449,7 +449,7 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
           [{ text: "OK", style: "default" }]
         );
         // Here you would typically navigate to a change password screen
-      } else if (nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_SMS_MFA_CODE") {
+      } else if (nextStep?.signInStep === "CONFIRM_SIGN_IN_WITH_SMS_CODE") {
         console.log("⚠️ === SMS MFA REQUIRED ===");
 
         Alert.alert(
@@ -750,7 +750,7 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
   }, []);
 
   const handleSubmitEditing = useCallback(
-    (nextRef?: React.RefObject<TextInput>) => {
+    (nextRef?: React.RefObject<TextInput | null>) => {
       if (nextRef?.current) {
         console.log(`⏭️ Moving to next input`);
         nextRef.current.focus();
@@ -789,8 +789,8 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
       onChangeText: (text: string) => void;
       placeholder: string;
       error?: string;
-      inputRef?: React.RefObject<TextInput>;
-      nextRef?: React.RefObject<TextInput>;
+      inputRef?: React.RefObject<TextInput | null>;
+      nextRef?: React.RefObject<TextInput | null>;
       keyboardType?: any;
       autoCapitalize?: any;
       returnKeyType?: any;
@@ -811,7 +811,7 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
             {icon && <View style={styles.inputIcon}>{icon}</View>}
             <TextInput
               ref={inputRef}
-              style={[styles.textInput, icon && styles.textInputWithIcon]}
+              style={[styles.textInput, icon ? styles.textInputWithIcon : undefined]}
               defaultValue={value}
               onChangeText={onChangeText}
               placeholder={placeholder}
@@ -855,8 +855,8 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
       onChangeText: (text: string) => void;
       placeholder: string;
       error?: string;
-      inputRef?: React.RefObject<TextInput>;
-      nextRef?: React.RefObject<TextInput>;
+      inputRef?: React.RefObject<TextInput | null>;
+      nextRef?: React.RefObject<TextInput | null>;
       showPassword: boolean;
       setShowPassword: (show: boolean) => void;
       icon?: React.ReactNode;
@@ -875,7 +875,7 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
             {icon && <View style={styles.inputIcon}>{icon}</View>}
             <TextInput
               ref={inputRef}
-              style={[styles.passwordInput, icon && styles.textInputWithIcon]}
+              style={[styles.passwordInput, icon ? styles.textInputWithIcon : undefined]}
               defaultValue={value}
               onChangeText={onChangeText}
               placeholder={placeholder}

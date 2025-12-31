@@ -239,6 +239,7 @@ interface Patient {
   advisedInvestigations?: string;
   treatment: string;
   patientId?: string;
+  prescription?: string;
 }
 
 interface DoctorInfo {
@@ -392,7 +393,7 @@ const generateHtml = (
   };
 
   // Process diagnosis text to ensure proper formatting with bullets
-  const formatBulletedText = (text) => {
+  const formatBulletedText = (text: string) => {
     if (!text) return "NOT SPECIFIED";
 
     // If text doesn't start with a bullet or dash, add one
@@ -407,7 +408,7 @@ const generateHtml = (
     // Replace new lines without bullets with bulleted new lines
     return text
       .split("\n")
-      .map((line) => {
+      .map((line: string) => {
         const trimmedLine = line.trim();
         if (trimmedLine.length === 0) return "";
         if (
@@ -474,27 +475,23 @@ const generateHtml = (
               </div>
               <div class="doctor-info">
                 <div class="doctor-name">${doctorInfo.name}</div>
-                <div class="doctor-credentials">${
-                  doctorInfo.credentials
-                } | Reg. No: ${doctorInfo.registrationNumber}</div>
+                <div class="doctor-credentials">${doctorInfo.credentials
+    } | Reg. No: ${doctorInfo.registrationNumber}</div>
               </div>
             </div>
             <div class="clinic-info">
               <div class="clinic-name">${doctorInfo.clinicName}</div>
               <div class="clinic-details">${doctorInfo.clinicAddress}</div>
-              <div class="clinic-details">Ph: ${
-                doctorInfo.contactNumber
-              }, Timing: 09:00 AM - 02:00 PM |</div>
+              <div class="clinic-details">Ph: ${doctorInfo.contactNumber
+    }, Timing: 09:00 AM - 02:00 PM |</div>
               <div class="clinic-details">Closed: Thursday</div>
             </div>
           </div>
           
           <div class="patient-info">
-            <div class="patient-id">ID: ${
-              patient.patientId || "14"
-            } - ${patient.name.toUpperCase()} (${patient.sex}) / ${
-    patient.age
-  } Y</div>
+            <div class="patient-id">ID: ${patient.patientId || "14"
+    } - ${patient.name.toUpperCase()} (${patient.sex}) / ${patient.age
+    } Y</div>
             <div class="patient-date">Date: ${formattedDate}</div>
           </div>
           
@@ -523,42 +520,40 @@ const generateHtml = (
             </thead>
             <tbody>
               ${medications
-                .map((med, index) => {
-                  const medName = med.name
-                    ? med.name.toUpperCase()
-                    : `MEDICATION ${index + 1}`;
-                  const timingDisplay = formatTimingDisplay(med);
-                  const foodInstructions = getMedicationFoodInstructions(med);
-                  let unit = "Tab";
-                  if (med.unit) {
-                    if (med.unit.toLowerCase() === "capsule") unit = "Cap";
-                    else if (med.unit.toLowerCase() === "tablet") unit = "Tab";
-                    else
-                      unit =
-                        med.unit.charAt(0).toUpperCase() + med.unit.slice(1);
-                  }
-                  const duration = med.duration || "As directed";
-                  const totalCount = calculateTotalMedications(med);
-                  const nameDisplay = `${
-                    index + 1
-                  }) ${unit.toUpperCase()}. ${medName}`;
-                  return `
+      .map((med, index) => {
+        const medName = med.name
+          ? med.name.toUpperCase()
+          : `MEDICATION ${index + 1}`;
+        const timingDisplay = formatTimingDisplay(med);
+        const foodInstructions = getMedicationFoodInstructions(med);
+        let unit = "Tab";
+        if (med.unit) {
+          if (med.unit.toLowerCase() === "capsule") unit = "Cap";
+          else if (med.unit.toLowerCase() === "tablet") unit = "Tab";
+          else
+            unit =
+              med.unit.charAt(0).toUpperCase() + med.unit.slice(1);
+        }
+        const duration = med.duration || "As directed";
+        const totalCount = calculateTotalMedications(med);
+        const nameDisplay = `${index + 1
+          }) ${unit.toUpperCase()}. ${medName}`;
+        return `
                     <tr>
                       <td>${nameDisplay}</td>
                       <td>${timingDisplay}<br>${foodInstructions}</td>
                       <td>${duration}<br>(Tot:${totalCount} ${unit})</td>
                     </tr>
                   `;
-                })
-                .join("")}
+      })
+      .join("")}
             </tbody>
           </table>
           
           <div class="advice">
             <div class="section-title">Advice Given:</div>
-            <p>* ${
-              additionalNotes || patient.prescription || "DRINK BOILED WATER"
-            }</p>
+            <p>* ${additionalNotes || patient.prescription || "DRINK BOILED WATER"
+    }</p>
           </div>
           
           <div class="follow-up">
@@ -568,8 +563,8 @@ const generateHtml = (
           <div class="signature-section">
             <div class="signature-line"></div>
             <div class="doctor-signature-name">Dr. ${doctorInfo.name
-              .split(" ")
-              .pop()}</div>
+      .split(" ")
+      .pop()}</div>
           </div>
         </div>
       </body>
@@ -588,8 +583,7 @@ const PrescriptionGenerator: React.FC<PrescriptionGeneratorProps> = ({
   additionalNotes,
 }) => {
   const [fileName, setFileName] = useState<string>(
-    `Prescription_${patient.name.replace(/\s+/g, "_")}_${
-      new Date().toISOString().split("T")[0]
+    `Prescription_${patient.name.replace(/\s+/g, "_")}_${new Date().toISOString().split("T")[0]
     }`
   );
   const [isGenerating, setIsGenerating] = useState<boolean>(false);

@@ -1158,7 +1158,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
   };
 
   const handleGenerate = async () => {
-    let success: boolean;
+    let success: boolean | undefined;
     if (typeof window !== 'undefined') (window as any).isCriticalOperation = true;
     setIsGenerating(true);
     console.log('generating');
