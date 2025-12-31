@@ -22,6 +22,8 @@ import { signOut } from "@aws-amplify/auth";
 
 import { API_ENDPOINTS } from "../../Config";
 import { handleApiError } from "../../Utils/ApiErrorHandler";
+import { useFocusEffect } from "@react-navigation/native";
+import { DraftService, DraftPatient } from "../NewPatientForm/Services/DraftService";
 
 const { width } = Dimensions.get("window");
 const API_URL = API_ENDPOINTS.DOCTOR_DASHBOARD;
@@ -89,6 +91,8 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   const [isDeletingPatient, setIsDeletingPatient] = useState<string | null>(
     null
   );
+  const [drafts, setDrafts] = useState<DraftPatient[]>([]);
+  const [isLoadingDrafts, setIsLoadingDrafts] = useState(false);
 
   useEffect(() => {
     console.log('dashboard', isAuthenticated);
@@ -100,6 +104,43 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
       });
     }
   }, [isAuthenticated, navigation]);
+
+  // Load drafts when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadDrafts();
+    }, [])
+  );
+
+  const loadDrafts = async () => {
+    try {
+      setIsLoadingDrafts(true);
+      const loadedDrafts = await DraftService.getAllDrafts();
+      setDrafts(loadedDrafts);
+    } catch (error) {
+      console.error("Failed to load drafts:", error);
+    } finally {
+      setIsLoadingDrafts(false);
+    }
+  };
+
+  const handleDeleteDraft = async (draftId: string) => {
+    Alert.alert(
+      "Delete Draft",
+      "Are you sure you want to discard this draft?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Discard",
+          style: "destructive",
+          onPress: async () => {
+            await DraftService.deleteDraft(draftId);
+            loadDrafts(); // Refresh list
+          }
+        }
+      ]
+    );
+  };
 
   // Track touches for pinch zoom
   const handleTouchMove = (event: GestureResponderEvent) => {
@@ -819,6 +860,72 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           </TouchableOpacity>
         </View>
 
+        {/* Drafts Section */}
+        {drafts.length > 0 && (
+          <View style={styles.sectionContainer}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>In-Progress Drafts</Text>
+              <Text style={styles.viewAllText}>{drafts.length} Saved</Text>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.draftsList}
+              contentContainerStyle={{ paddingHorizontal: 4 }}
+            >
+              {drafts.map((draft) => (
+                <TouchableOpacity
+                  key={draft.patientId}
+                  style={styles.draftCard}
+                  onPress={() => {
+                    // Determine parameters based on whether it's a new or existing patient draft
+                    const isNewPatient = draft.patientId.startsWith("draft_");
+                    navigation.navigate("NewPatientForm", {
+                      patient: {
+                        ...draft.patientData,
+                        patientId: isNewPatient ? undefined : draft.patientId
+                      },
+                      prefillMode: !isNewPatient,
+                      initialTab: "basic" // Start from basic to be safe, or logic to resume exact tab
+                    });
+                  }}
+                >
+                  <View style={styles.draftHeader}>
+                    <View style={styles.draftIconContainer}>
+                      <Ionicons name="document-text-outline" size={16} color="#FF9800" />
+                    </View>
+                    <TouchableOpacity
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDeleteDraft(draft.patientId);
+                      }}
+                      style={styles.deleteDraftButton}
+                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                    >
+                      <Ionicons name="close" size={16} color="#A0AEC0" />
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={styles.draftName} numberOfLines={1}>
+                    {draft.patientData.name || "Untitled Patient"}
+                  </Text>
+
+                  <Text style={styles.draftInfo}>
+                    {draft.patientData.age ? `${draft.patientData.age} Yrs` : "Age N/A"} • {draft.patientData.sex || "Sex N/A"}
+                  </Text>
+
+                  <View style={styles.draftFooter}>
+                    <Text style={styles.draftDate}>
+                      {new Date(draft.lastUpdatedAt).toLocaleDateString()}
+                    </Text>
+                    <Text style={styles.draftStatus}>Resume</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
         {/* Patient Section */}
         <View style={styles.sectionContainer}>
           <View style={styles.sectionHeader}>
@@ -1398,6 +1505,63 @@ const styles = StyleSheet.create({
   statLabel: {
     fontSize: 12,
     color: "#718096",
+  },
+  // Draft Styles
+  draftsList: {
+    paddingBottom: 8,
+  },
+  draftCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 12,
+    padding: 12,
+    marginRight: 12,
+    width: 160,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  draftHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 8,
+  },
+  draftIconContainer: {
+    backgroundColor: "#FFF3DC",
+    padding: 6,
+    borderRadius: 8,
+  },
+  draftName: {
+    fontSize: 14,
+    fontWeight: "bold",
+    color: "#2D3748",
+    marginBottom: 4,
+  },
+  draftInfo: {
+    fontSize: 12,
+    color: "#718096",
+    marginBottom: 12,
+  },
+  draftFooter: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  draftDate: {
+    fontSize: 10,
+    color: "#A0AEC0",
+  },
+  draftStatus: {
+    fontSize: 10,
+    color: "#0070D6",
+    fontWeight: "600",
+  },
+  deleteDraftButton: {
+    padding: 4,
   },
   statDivider: {
     width: 1,

@@ -12,6 +12,7 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  AlertButton,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -708,7 +709,7 @@ const MedicationGroupCard = ({
     }
 
     // Create options for selection
-    const options = [];
+    const options: AlertButton[] = [];
 
     if (hasDiagnosis && hasAdvisedInvestigations) {
       options.push(

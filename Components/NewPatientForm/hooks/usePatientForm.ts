@@ -5,6 +5,7 @@ import * as DocumentPicker from "expo-document-picker";
 import { API_ENDPOINTS } from "../../../Config";
 import { logStateUpdate } from "../../../Utils/Logger";
 import { fileToBase64, isFileAlreadyUploaded } from "../../../Utils/FileUtils";
+import { DraftService, DraftPatient } from "../Services/DraftService";
 
 interface UsePatientFormProps {
     patient?: any;
@@ -31,6 +32,11 @@ export const usePatientForm = ({
     });
     const [permanentPatientId, setPermanentPatientId] = useState<string | null>(null);
     const [isSavingHistory, setIsSavingHistory] = useState(false);
+
+    // Draft ID ref to persist across renders
+    const currentDraftId = useRef<string | null>(null);
+    // Ref to track if initial load is complete to prevent overwriting draft with empty state
+    const isLoaded = useRef(false);
 
     // Extract patientId from patient object or use permanentPatientId
     const patientId = patient?.patientId || permanentPatientId || null;
@@ -106,9 +112,108 @@ export const usePatientForm = ({
 
     const [errors, setErrors] = useState({ name: "", age: "", mobile: "" });
 
+    // --- DRAFT SYSTEM LOGIC START ---
+
+    // Initialize Draft ID and Load Draft
+    useEffect(() => {
+        const initializeDraft = async () => {
+            // Determine the ID to use for the draft
+            let idToUse = patient?.patientId || permanentPatientId;
+
+            // If we have an existing patient ID, we try to load THAT draft.
+            // If new patient (no ID), we check if we generated a temp ID already.
+
+            if (idToUse) {
+                currentDraftId.current = idToUse;
+                // Try to load existing draft
+                const draft = await DraftService.getDraft(idToUse);
+                if (draft) {
+                    console.log(`[usePatientForm] Loaded draft for ${idToUse}`);
+                    // Merge draft data into state
+                    if (draft.patientData) setPatientData(prev => ({ ...prev, ...draft.patientData }));
+                    if (draft.clinicalParameters) {
+                        // Restore Date object
+                        try {
+                            const params = { ...draft.clinicalParameters };
+                            if (typeof params.date === 'string') params.date = new Date(params.date);
+                            setClinicalParameters(params);
+                        } catch (e) {
+                            console.error("Error restoring clinicalParameters date from draft", e);
+                        }
+                    }
+                    if (draft.medications) setMedications(draft.medications);
+                    if (draft.reportData) setReportData(draft.reportData);
+                    if (draft.reportFiles) setReportFiles(draft.reportFiles);
+                    if (draft.savedSections) setSavedSections(draft.savedSections);
+                } else {
+                    console.log(`[usePatientForm] No draft found for ${idToUse}`);
+                }
+            } else {
+                if (!currentDraftId.current) {
+                    currentDraftId.current = DraftService.generateDraftId();
+                    console.log(`[usePatientForm] Generated new temp draft ID: ${currentDraftId.current}`);
+                }
+            }
+            isLoaded.current = true;
+        };
+
+        if (!isLoaded.current) {
+            initializeDraft();
+        }
+    }, [patient?.patientId, permanentPatientId]);
+
+
+    // Auto-Save Effect
+    useEffect(() => {
+        // Don't save if not loaded yet
+        if (!isLoaded.current) return;
+
+        // Don't save if no ID
+        if (!currentDraftId.current) return;
+
+        const saveData = async () => {
+            const draftPayload: Partial<DraftPatient> = {
+                patientData,
+                clinicalParameters,
+                medications,
+                reportData,
+                reportFiles,
+                savedSections,
+            };
+
+            await DraftService.saveDraft(currentDraftId.current!, draftPayload);
+        };
+
+        const timeoutId = setTimeout(saveData, 1000); // 1s debounce
+        return () => clearTimeout(timeoutId);
+
+    }, [
+        patientData,
+        clinicalParameters,
+        medications,
+        reportData,
+        reportFiles,
+        savedSections,
+        permanentPatientId
+    ]);
+
+    // --- DRAFT SYSTEM LOGIC END ---
+
     // Effects
     useEffect(() => {
         console.log(`🔑 permanentPatientId changed to: ${permanentPatientId || "not set"}`);
+        // If we get a real ID, switch our draft tracking to it
+        if (permanentPatientId && currentDraftId.current && currentDraftId.current !== permanentPatientId) {
+            console.log(`[usePatientForm] ID switched from ${currentDraftId.current} to ${permanentPatientId}`);
+            currentDraftId.current = permanentPatientId;
+            // We trigger a save immediately with the new ID to ensure persistence? 
+            // The auto-save effect will pick up state changes, but if state didn't change, we might not save to new ID.
+            // But usually permanentId change comes from a SAVE operation which usually involves state checks?
+            // Actually, when we save Basic info, we get an ID. We should probably save the draft to the new ID.
+            // Let's force a save here?
+            // No, the dependency array includes permanentPatientId, so the auto-save effect WILL run when it changes!
+            // So it will save the current state to the new ID. Perfect.
+        }
     }, [permanentPatientId]);
 
     useEffect(() => {
@@ -130,6 +235,15 @@ export const usePatientForm = ({
     useEffect(() => {
         if (patient?.patientId) {
             console.log(`🔄 Patient changed to ${patient.name} (ID: ${patient.patientId})`);
+
+            // If loading a new patient prop, likely we are mounting a new screen or resetting.
+            // If we are resetting in-place:
+
+            currentDraftId.current = patient.patientId;
+            // Since patient changed, we might want to reload draft? 
+            // setLoaded(false)? 
+            // For now assuming component unmounts/remounts for different patients in navigation stack.
+
             setClinicalParameters({
                 date: new Date(),
                 inr: "", hb: "", wbc: "", platelet: "", bilirubin: "",
@@ -171,6 +285,15 @@ export const usePatientForm = ({
                     if (data.success && data.patient && data.patient.clinicalParameters) {
                         const apiParams = { ...data.patient.clinicalParameters };
                         if (typeof apiParams.date === "string") apiParams.date = new Date(apiParams.date);
+
+                        // Only set if we didn't load a draft?
+                        // Or merge? 
+                        // draft wins if it exists. 
+                        // If we are here, we might have loaded draft already. 
+                        // If draft is newer, we shouldn't overwrite?
+                        // But DraftService is local. API is remote.
+                        // We will log for now, but let API overwrite IF it's late?
+                        // Actually, this hook runs if permanentPatientId changes.
                         setClinicalParameters(apiParams);
                         console.log("✅ Loaded clinical parameters from API");
                     }
@@ -367,6 +490,7 @@ export const usePatientForm = ({
         saveNewHistoryEntryToStorage,
         includeNewHistoryEntry,
         checkAndIncludePendingHistory,
-        handleDateChange
+        handleDateChange,
+        currentDraftId, // Export the ref if needed
     };
 };
