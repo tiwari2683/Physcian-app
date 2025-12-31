@@ -1068,83 +1068,43 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                 numberOfLines={12}
               />
             ) : (
-              // For EXISTING patients: Show non-editable display with either buttons or direct text entry
+              // For EXISTING patients: Show direct text box for adding history
               <>
-                {/* Conditional rendering based on route (hideBasicTab) */}
-                {hideBasicTab ? (
-                  // Direct text box for adding history (coming from dashboard)
-                  <>
-                    <View style={{ marginTop: 12 }}>
-                      <Text style={styles.addHistoryLabel}>Add History:</Text>
-                      <AutoBulletTextArea
-                        value={directHistoryText}
-                        onChangeText={(text) => {
-                          console.log(
-                            `🔄 Updating directHistoryText to: ${text.substring(
-                              0,
-                              20
-                            )}...`
-                          );
-                          setDirectHistoryText(text);
-                        }}
-                        placeholder="Enter new history entry here..."
-                        style={[styles.textArea, { minHeight: 100 }]}
-                        numberOfLines={6}
-                        // Modify onEndEditing handler to update patientData directly using updateField
-                        onEndEditing={transferHistoryText}
-                      />
-                    </View>
-                    <View style={styles.historyButtonsRow}>
-                      <TouchableOpacity
-                        style={styles.viewHistoryButtonBelow}
-                        onPress={() => setHistoryModalVisible(true)}
-                      >
-                        <Ionicons
-                          name="eye-outline"
-                          size={18}
-                          color="#FFFFFF"
-                        />
-                        <Text style={styles.viewHistoryButtonText}>
-                          View History
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                ) : (
-                  // Standard buttons for normal navigation
-                  <View style={styles.historyButtonsRow}>
-                    {patientData.medicalHistory ? (
-                      <TouchableOpacity
-                        style={styles.viewHistoryButtonBelow}
-                        onPress={() => setHistoryModalVisible(true)}
-                      >
-                        <Ionicons
-                          name="eye-outline"
-                          size={18}
-                          color="#FFFFFF"
-                        />
-                        <Text style={styles.viewHistoryButtonText}>
-                          View History
-                        </Text>
-                      </TouchableOpacity>
-                    ) : null}
-
-                    {/* Add History button */}
-                    <TouchableOpacity
-                      style={styles.addHistoryButton}
-                      onPress={() => setAddHistoryModalVisible(true)}
-                    >
-                      <Ionicons
-                        name="add-circle-outline"
-                        size={18}
-                        color="#FFFFFF"
-                      />
-                      <Text style={styles.addHistoryButtonText}>
-                        Add History
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
+                <View style={{ marginTop: 12 }}>
+                  <Text style={styles.inputLabel}>History/Complaints/Symptoms:</Text>
+                  <AutoBulletTextArea
+                    value={directHistoryText}
+                    onChangeText={(text) => {
+                      console.log(
+                        `🔄 Updating directHistoryText to: ${text.substring(
+                          0,
+                          20
+                        )}...`
+                      );
+                      setDirectHistoryText(text);
+                    }}
+                    placeholder="Enter new history entry here..."
+                    style={[styles.textArea, { minHeight: 100 }]}
+                    numberOfLines={6}
+                    // Modify onEndEditing handler to update patientData directly using updateField
+                    onEndEditing={transferHistoryText}
+                  />
+                </View>
+                <View style={styles.historyButtonsRow}>
+                  <TouchableOpacity
+                    style={styles.viewHistoryButtonBelow}
+                    onPress={() => setHistoryModalVisible(true)}
+                  >
+                    <Ionicons
+                      name="eye-outline"
+                      size={18}
+                      color="#FFFFFF"
+                    />
+                    <Text style={styles.viewHistoryButtonText}>
+                      View History
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </>
             )}
 

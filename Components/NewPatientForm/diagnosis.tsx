@@ -1522,11 +1522,14 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
           }, 10000);
         }
 
-        // Always clear diagnosis field on component mount regardless of block flag
+        // REMOVED: Always clear diagnosis field on component mount
+        // This was causing data loss when switching tabs (draft system)
+        /*
         if (patientData.diagnosis) {
           logWarning("🧹 Clearing diagnosis on mount - should start empty");
           updateField("diagnosis", "");
         }
+        */
       } catch (error) {
         logError("Error checking block_diagnosis_refetch on mount:", error);
       }
