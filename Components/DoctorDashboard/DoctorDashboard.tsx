@@ -885,55 +885,57 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
               style={styles.draftsList}
               contentContainerStyle={{ paddingHorizontal: 4 }}
             >
-              {drafts.map((draft) => (
-                <TouchableOpacity
-                  key={draft.patientId}
-                  style={styles.draftCard}
-                  onPress={() => {
-                    // Determine parameters based on whether it's a new or existing patient draft
-                    const isNewPatient = draft.patientId.startsWith("draft_");
-                    navigation.navigate("NewPatientForm", {
-                      patient: {
-                        ...draft.patientData,
-                        patientId: isNewPatient ? undefined : draft.patientId
-                      },
-                      prefillMode: !isNewPatient,
-                      initialTab: "basic" // Start from basic to be safe, or logic to resume exact tab
-                    });
-                  }}
-                >
-                  <View style={styles.draftHeader}>
-                    <View style={styles.draftIconContainer}>
-                      <Ionicons name="document-text-outline" size={16} color="#FF9800" />
+              {drafts
+                .filter(draft => draft.patientData?.name?.trim()) // UX Guard: Hide nameless drafts
+                .map((draft) => (
+                  <TouchableOpacity
+                    key={draft.patientId}
+                    style={styles.draftCard}
+                    onPress={() => {
+                      // Determine parameters based on whether it's a new or existing patient draft
+                      const isNewPatient = draft.patientId.startsWith("draft_");
+                      navigation.navigate("NewPatientForm", {
+                        patient: {
+                          ...draft.patientData,
+                          patientId: isNewPatient ? undefined : draft.patientId
+                        },
+                        prefillMode: !isNewPatient,
+                        initialTab: "basic" // Start from basic to be safe, or logic to resume exact tab
+                      });
+                    }}
+                  >
+                    <View style={styles.draftHeader}>
+                      <View style={styles.draftIconContainer}>
+                        <Ionicons name="document-text-outline" size={16} color="#FF9800" />
+                      </View>
+                      <TouchableOpacity
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDraft(draft.patientId);
+                        }}
+                        style={styles.deleteDraftButton}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                      >
+                        <Ionicons name="close" size={16} color="#A0AEC0" />
+                      </TouchableOpacity>
                     </View>
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDraft(draft.patientId);
-                      }}
-                      style={styles.deleteDraftButton}
-                      hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    >
-                      <Ionicons name="close" size={16} color="#A0AEC0" />
-                    </TouchableOpacity>
-                  </View>
 
-                  <Text style={styles.draftName} numberOfLines={1}>
-                    {draft.patientData.name || "Untitled Patient"}
-                  </Text>
-
-                  <Text style={styles.draftInfo}>
-                    {draft.patientData.age ? `${draft.patientData.age} Yrs` : "Age N/A"} • {draft.patientData.sex || "Sex N/A"}
-                  </Text>
-
-                  <View style={styles.draftFooter}>
-                    <Text style={styles.draftDate}>
-                      {new Date(draft.lastUpdatedAt).toLocaleDateString()}
+                    <Text style={styles.draftName} numberOfLines={1}>
+                      {draft.patientData.name || "Untitled Patient"}
                     </Text>
-                    <Text style={styles.draftStatus}>Resume</Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
+
+                    <Text style={styles.draftInfo}>
+                      {draft.patientData.age ? `${draft.patientData.age} Yrs` : "Age N/A"} • {draft.patientData.sex || "Sex N/A"}
+                    </Text>
+
+                    <View style={styles.draftFooter}>
+                      <Text style={styles.draftDate}>
+                        {new Date(draft.lastUpdatedAt).toLocaleDateString()}
+                      </Text>
+                      <Text style={styles.draftStatus}>Resume</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
             </ScrollView>
           </View>
         )}

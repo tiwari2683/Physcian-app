@@ -64,10 +64,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     pickDocument,
     removeReportFile,
     ensureFilesHaveBase64,
-    saveNewHistoryEntryToStorage,
-    includeNewHistoryEntry,
-    checkAndIncludePendingHistory,
-    handleDateChange
+    // legacy history functions removed from destructuring
+    handleDateChange,
+    createBasicPatient
   } = usePatientForm({
     patient,
     initialTab,
@@ -288,39 +287,10 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     // Get patient ID for existing patients
     const patId = patient?.patientId || permanentPatientId;
 
-    // --- CLINICAL HISTORY SYNC LOGIC (Preserved) ---
-    // If in clinical section and we have an entry in the "Enter new history entry..." field
-    if (activeSection === "clinical" && clinicalTabRef && clinicalTabRef.current) {
-      try {
-        console.log("🔄 Attempting to visibly transfer history text before submission");
-        // Try to access the directHistoryText value
-        if (clinicalTabRef.current.directHistoryText && clinicalTabRef.current.directHistoryText.trim()) {
-          const historyText = clinicalTabRef.current.directHistoryText;
-          const timestamp = new Date().toLocaleString();
-          let updatedHistory = "";
+    // --- CLINICAL HISTORY SYNC LOGIC (Legacy Removed) ---
+    // History is now merged only during final submission (Prescription Tab)
 
-          if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-            updatedHistory = `--- New Entry (${timestamp}) ---\n${historyText}\n\n${patientData.medicalHistory}`;
-          } else {
-            updatedHistory = `--- Entry (${timestamp}) ---\n${historyText}`;
-          }
-
-          updateField("medicalHistory", updatedHistory);
-          // Clear the input text from ClinicalTab component
-          if (clinicalTabRef.current.setDirectHistoryText) {
-            clinicalTabRef.current.setDirectHistoryText("");
-          }
-          setIsSavingHistory(true);
-          // Give the UI a moment to update
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-
-        // Ensure history from ref is saved to state or AsyncStorage
-        await clinicalTabRef.current.saveDirectHistoryToMedicalHistory();
-      } catch (error: any) {
-        console.error("❌ Error during history transfer:", error);
-      }
-    }
+    // Verify field values before proceeding
 
     // Verify field values before proceeding
     verifyFieldsBeforeSubmit(activeSection);
@@ -329,9 +299,33 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     if (activeSection === "basic") {
       console.log("🔄 BASIC SECTION VALIDATION");
       if (validateForm()) {
-        console.log("✅ Basic section valid. Proceeding to next section.");
-        setSavedSections((prev) => ({ ...prev, basic: true }));
-        proceedToNextSection();
+
+        // Immediate Creation Logic
+        if (!permanentPatientId && !patient?.patientId) {
+          setIsSubmitting(true);
+          try {
+            const result = await createBasicPatient();
+            if (result.success && result.patientId) {
+              // Success: Set ID and Proceed
+              setPermanentPatientId(result.patientId);
+              setSavedSections((prev) => ({ ...prev, basic: true }));
+              proceedToNextSection();
+            } else {
+              Alert.alert("Creation Failed", result.error || "Could not create patient record.");
+            }
+          } catch (e) {
+            Alert.alert("Error", "An unexpected error occurred while creating patient.");
+            console.error(e);
+          } finally {
+            setIsSubmitting(false);
+          }
+        } else {
+          // ID already exists, just proceed
+          console.log("✅ Basic section valid & Patient exists. Proceeding.");
+          setSavedSections((prev) => ({ ...prev, basic: true }));
+          proceedToNextSection();
+        }
+
       } else {
         console.log("❌ Basic section validation failed");
         Alert.alert("Validation Error", "Please fill in all required fields (Name, Age, Mobile).");
@@ -395,7 +389,11 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           address: patientData.address,
 
           // Clinical Info
-          medicalHistory: patientData.medicalHistory,
+          // MERGE NEW HISTORY ENTRY IF EXISTS (Phase 3 Fix)
+          medicalHistory: (patientData.newHistoryEntry && patientData.newHistoryEntry.trim())
+            ? `--- New Entry (${new Date().toLocaleString()}) ---\n${patientData.newHistoryEntry}\n\n${patientData.medicalHistory || ""}`
+            : patientData.medicalHistory,
+
           diagnosis: patientData.diagnosis, // Separate field
           advisedInvestigations: patientData.advisedInvestigations,
           reports: patientData.reports,
@@ -422,15 +420,17 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           isPartialSave: false, // This is a FULL save
         };
 
-        // 4. Handle ID (Update vs Create)
-        if (permanentPatientId) {
-          console.log(`🔑 Updating existing patient: ${permanentPatientId}`);
-          finalPayload.patientId = permanentPatientId;
+        // 4. Handle ID (Update vs Create) - Phase 4 Hardening
+        const resolvedPatientId = permanentPatientId || patient?.patientId || patientId;
+
+        if (resolvedPatientId) {
+          console.log(`🔑 Updating existing patient: ${resolvedPatientId}`);
+          finalPayload.patientId = resolvedPatientId;
           finalPayload.updateMode = true;
           finalPayload.action = "updatePatientData";
           // No updateSection means "Full Update" in backend logic
         } else {
-          console.log("🆕 Creating new patient");
+          console.log("🆕 Creating new patient (Fallback)");
           finalPayload.patientId = null;
           // Logic will fall through to processPatientData in backend
         }
@@ -459,7 +459,8 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         console.log("✅ Patient saved successfully!");
 
         // 5. Cleanup Draft - use the most current draft ID
-        const draftIdToDelete = permanentPatientId || patientId;
+        // In Phase 4, resolvedPatientId is the definitive ID
+        const draftIdToDelete = resolvedPatientId;
         console.log(`🧹 Deleting draft with ID: ${draftIdToDelete}`);
 
         if (draftIdToDelete) {
@@ -498,6 +499,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               patientData={patientData}
               errors={errors}
               updateField={updateField}
+              showCreationBanner={!permanentPatientId && !patient?.patientId} // UX: Show only for new patients
             />
           </KeyboardAwareScrollView>
         );
@@ -523,7 +525,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               patientId={patient?.patientId || permanentPatientId}
               prefillMode={prefillMode}
               hideBasicTab={hideBasicTab}
-              saveNewHistoryEntryToStorage={saveNewHistoryEntryToStorage}
+            // saveNewHistoryEntryToStorage prop removed
             />
           </KeyboardAwareScrollView>
         );
@@ -615,7 +617,13 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           {isSubmitting ? (
             <ActivityIndicator color="#FFFFFF" size="small" />
           ) : (
-            <Text style={styles.saveButtonText}>{getSubmitButtonText()}</Text>
+            <Text style={styles.saveButtonText}>
+              {activeSection === "prescription"
+                ? "Save Patient"
+                : activeSection === "basic" && !permanentPatientId && !patient?.patientId
+                  ? "Create Patient" // UX: Explicit action for new patients
+                  : "Next"}
+            </Text>
           )}
         </TouchableOpacity>
       </View>

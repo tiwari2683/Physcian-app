@@ -57,6 +57,7 @@ export const usePatientForm = ({
         reports: prefillMode && patient ? patient.reports : "",
         advisedInvestigations: prefillMode && patient ? patient.advisedInvestigations : "",
         existingData: prefillMode && patient ? patient.existingData || "" : "",
+        newHistoryEntry: "", // Phase 3: Unified Clinical History Draft Field
     });
 
     // Clinical parameters state
@@ -168,10 +169,8 @@ export const usePatientForm = ({
                     console.log(`[usePatientForm] No draft found for ${idToUse}`);
                 }
             } else {
-                if (!currentDraftId.current) {
-                    currentDraftId.current = DraftService.generateDraftId();
-                    console.log(`[usePatientForm] Generated new temp draft ID: ${currentDraftId.current}`);
-                }
+                // BUG FIX: Do NOT generate temp IDs. Wait for Basic Tab submission (Phase 1).
+                console.log("[usePatientForm] New patient - waiting for Basic Tab submission to initialize draft");
             }
             isLoaded.current = true;
         };
@@ -196,6 +195,16 @@ export const usePatientForm = ({
                 console.log("[AutoSave] Skipping save - component unmounted");
                 return;
             }
+
+            // BUG FIX: Draft Invariant - Only save if we have a REAL patient ID
+            const effectiveId = permanentPatientId || patient?.patientId;
+            if (!effectiveId) {
+                console.log("[AutoSave] Skipped - Basic not committed (No Patient ID)");
+                return;
+            }
+
+            // Sync currentDraftId to the real ID
+            currentDraftId.current = effectiveId;
 
             try {
                 const draftPayload: Partial<DraftPatient> = {
@@ -317,6 +326,13 @@ export const usePatientForm = ({
         const loadPatientClinicalData = async () => {
             if (permanentPatientId && !prefillMode) {
                 try {
+                    // PRECEDENCE CHECK: If a valid draft exists, SKIP API load
+                    const existingDraft = await DraftService.getDraft(permanentPatientId);
+                    if (existingDraft) {
+                        console.log(`🛡️ Draft precedence: Draft found for ${permanentPatientId}, skipping API hydration to protect local changes.`);
+                        return;
+                    }
+
                     const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
                     const response = await fetch(apiUrl, {
                         method: "POST",
@@ -330,14 +346,6 @@ export const usePatientForm = ({
                         const apiParams = { ...data.patient.clinicalParameters };
                         if (typeof apiParams.date === "string") apiParams.date = new Date(apiParams.date);
 
-                        // Only set if we didn't load a draft?
-                        // Or merge? 
-                        // draft wins if it exists. 
-                        // If we are here, we might have loaded draft already. 
-                        // If draft is newer, we shouldn't overwrite?
-                        // But DraftService is local. API is remote.
-                        // We will log for now, but let API overwrite IF it's late?
-                        // Actually, this hook runs if permanentPatientId changes.
                         setClinicalParameters(apiParams);
                         console.log("✅ Loaded clinical parameters from API");
                     }
@@ -369,10 +377,10 @@ export const usePatientForm = ({
 
         if (!patientData.name.trim()) { newErrors.name = "Name is required"; isValid = false; }
         if (!patientData.age.trim()) { newErrors.age = "Age is required"; isValid = false; }
-        else if (isNaN(Number(patientData.age)) || Number(patientData.age) <= 0) { newErrors.age = "Please enter a valid age"; isValid = false; }
+        else if (isNaN(Number(patientData.age)) || Number(patientData.age) <= 0 || Number(patientData.age) > 130) { newErrors.age = "Please enter a valid age (1-130)"; isValid = false; }
 
         if (!patientData.mobile.trim()) { newErrors.mobile = "Mobile number is required"; isValid = false; }
-        else if (!/^[0-9]{10}$/.test(patientData.mobile.trim())) { newErrors.mobile = "Please enter a valid 10-digit mobile number"; isValid = false; }
+        else if (!/^[6-9]\d{9}$/.test(patientData.mobile.trim())) { newErrors.mobile = "Enter valid 10-digit mobile (starts with 6-9)"; isValid = false; }
 
         setErrors(newErrors);
         return isValid;
@@ -445,54 +453,10 @@ export const usePatientForm = ({
         return processed;
     };
 
-    // History Helpers
-    const saveNewHistoryEntryToStorage = async (pId: string, text: string) => {
-        if (!pId || !text?.trim()) return false;
-        try {
-            await AsyncStorage.setItem(`pending_history_${pId}`, text);
-            return true;
-        } catch (e) { return false; }
-    };
-
-    const includeNewHistoryEntry = async (pId: string, text: string) => {
-        if (!pId || !text?.trim()) return false;
-        try {
-            const timestamp = new Date().toLocaleString();
-            const current = patientData.medicalHistory || "";
-            let updated = "";
-            if (current.trim()) updated = `--- New Entry (${timestamp}) ---\n${text}\n\n${current}`;
-            else updated = `--- Entry (${timestamp}) ---\n${text}`;
-
-            setPatientData(prev => ({ ...prev, medicalHistory: updated }));
-            setIsSavingHistory(true);
-            return true;
-        } catch (e) { return false; }
-    };
-
-    const checkAndIncludePendingHistory = async (pId: string) => {
-        if (!pId) return false;
-        try {
-            const key = `pending_history_${pId}`;
-            const pending = await AsyncStorage.getItem(key);
-            if (pending && pending.trim()) {
-                const timestamp = new Date().toLocaleString();
-                let updated = "";
-                if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-                    if (!patientData.medicalHistory.includes(pending.substring(0, 20))) {
-                        updated = `--- New Entry (${timestamp}) ---\n${pending}\n\n${patientData.medicalHistory}`;
-                    } else {
-                        updated = patientData.medicalHistory;
-                    }
-                } else {
-                    updated = `--- Entry (${timestamp}) ---\n${pending}`;
-                }
-                setPatientData(prev => ({ ...prev, medicalHistory: updated }));
-                await AsyncStorage.removeItem(key);
-                return true;
-            }
-        } catch (e) { }
-        return false;
-    };
+    // History helpers removed (Phase 3 cleanup) - newHistoryEntry in patientData handles this now.
+    // saveNewHistoryEntryToStorage removed
+    // includeNewHistoryEntry removed
+    // checkAndIncludePendingHistory removed
 
     // Date Handler
     const handleDateChange = (event: any, selectedDate?: Date) => {
@@ -502,6 +466,67 @@ export const usePatientForm = ({
             setClinicalParameters(prev => ({ ...prev, date: selectedDate }));
             const formatted = selectedDate.toISOString().split("T")[0];
             updateReportField("testDate", formatted);
+        }
+    };
+
+    // Immediate Patient Creation
+    const createBasicPatient = async () => {
+        try {
+            console.log("🚀 Creating new patient from Basic Tab...");
+            const payload = {
+                action: "processPatientData",
+                name: patientData.name,
+                age: patientData.age,
+                sex: patientData.sex,
+                mobile: patientData.mobile,
+                address: patientData.address,
+                patientId: null
+            };
+
+            const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+                method: "POST",
+                headers: { "Content-Type": "application/json", Accept: "application/json" },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            const body = result.body ? (typeof result.body === "string" ? JSON.parse(result.body) : result.body) : result;
+
+            if (body.success && body.patientId) {
+                console.log(`✅ Patient created immediately: ${body.patientId}`);
+
+                // --- FIX: Explicit Draft Initialization (Minimal & Idempotent) ---
+                // Ensure we don't overwrite if a draft somehow already exists (race condition safety)
+                const existingDraft = await DraftService.getDraft(body.patientId);
+
+                if (!existingDraft) {
+                    console.log(`📝 Initializing minimal draft for ${body.patientId}`);
+                    // Minimal payload: Only Basic data is guaranteed to be valid here.
+                    const initialDraft: Partial<DraftPatient> = {
+                        patientData: {
+                            ...patientData,
+                            patientId: body.patientId // Ensure ID is part of the draft data
+                        },
+                        // Intentionally OMITTING clinical/reports/etc to avoid freezing unstable state
+                        lastUpdatedAt: Date.now(),
+                        status: "DRAFT"
+                    };
+
+                    await DraftService.saveDraft(body.patientId, initialDraft);
+                    currentDraftId.current = body.patientId; // Sync immediately
+                } else {
+                    console.log(`ℹ️ Draft already exists for ${body.patientId}, skipping initialization.`);
+                    currentDraftId.current = body.patientId; // Still need to sync ref
+                }
+                // -----------------------------------------------------------------
+
+                return { success: true, patientId: body.patientId };
+            } else {
+                throw new Error(body.error || "Failed to create patient");
+            }
+        } catch (error: any) {
+            console.error("❌ Error in createBasicPatient:", error);
+            return { success: false, error: error.message };
         }
     };
 
@@ -531,10 +556,9 @@ export const usePatientForm = ({
         pickDocument,
         removeReportFile,
         ensureFilesHaveBase64,
-        saveNewHistoryEntryToStorage,
-        includeNewHistoryEntry,
-        checkAndIncludePendingHistory,
+        // legacy history functions removed from exports
         handleDateChange,
         currentDraftId, // Export the ref if needed
+        createBasicPatient, // New export
     };
 };

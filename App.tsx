@@ -166,11 +166,10 @@ export default function App(): React.JSX.Element {
       const exports = awsExports as any;
       console.log("📄 AWS Exports structure:", {
         hasAuth: !!exports.Auth,
-        hasAPI: !!exports.API,
-        hasStorage: !!exports.Storage,
-        region: exports.aws_project_region,
-        userPoolId: exports.aws_user_pools_id,
-        userPoolWebClientId: exports.aws_user_pools_web_client_id,
+        hasCocoa: exports.Auth?.Cognito || "No Cognito in Auth",
+        region: exports.aws_project_region || exports.Auth?.Cognito?.region,
+        userPoolId: exports.aws_user_pools_id || exports.Auth?.Cognito?.userPoolId,
+        userPoolWebClientId: exports.aws_user_pools_web_client_id || exports.Auth?.Cognito?.userPoolClientId,
       });
 
       // Configure Amplify with the exports

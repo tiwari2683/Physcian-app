@@ -24,7 +24,7 @@ export const useClinicalForm = (props: any) => {
     } = props;
 
     // State
-    const [directHistoryText, setDirectHistoryText] = useState("");
+    // directHistoryText removed - Using patientData.newHistoryEntry from parent
     const [tableModalVisible, setTableModalVisible] = useState(false);
     const [historicalData, setHistoricalData] = useState<any[]>([]);
     const [dataFetched, setDataFetched] = useState(false);
@@ -429,78 +429,7 @@ export const useClinicalForm = (props: any) => {
     };
 
 
-    // Function to save pending history text to AsyncStorage
-    const savePendingHistoryText = async (text: string) => {
-        if (!patientId) return;
-
-        try {
-            const key = `pending_history_${patientId}`;
-            await AsyncStorage.setItem(key, text);
-        } catch (error) {
-            console.error("❌ Error saving pending history to AsyncStorage:", error);
-        }
-    };
-
-    const saveDirectHistoryToMedicalHistory = async () => {
-        if (directHistoryText.trim()) {
-            const timestamp = new Date().toLocaleString();
-            let updatedHistory = "";
-
-            if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-                updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
-            } else {
-                updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
-            }
-
-            updateField("medicalHistory", updatedHistory);
-
-            if (patientId) {
-                try {
-                    await AsyncStorage.removeItem(`pending_history_${patientId}`);
-                    await AsyncStorage.removeItem(`new_history_input_${patientId}`);
-                } catch (e) { }
-            }
-
-            setDirectHistoryText("");
-            return true;
-        }
-        return false;
-    };
-
-    const getLatestMedicalHistory = () => {
-        if (directHistoryText && directHistoryText.trim()) {
-            const timestamp = new Date().toLocaleString();
-            if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-                return `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
-            } else {
-                return `--- Entry (${timestamp}) ---\n${directHistoryText}`;
-            }
-        }
-        return patientData.medicalHistory;
-    };
-
-    const transferHistoryText = () => {
-        if (directHistoryText.trim()) {
-            const timestamp = new Date().toLocaleString();
-            let updatedHistory = "";
-
-            if (patientData.medicalHistory && patientData.medicalHistory.trim()) {
-                updatedHistory = `--- New Entry (${timestamp}) ---\n${directHistoryText}\n\n${patientData.medicalHistory}`;
-            } else {
-                updatedHistory = `--- Entry (${timestamp}) ---\n${directHistoryText}`;
-            }
-
-            updateField("medicalHistory", updatedHistory);
-            setDirectHistoryText("");
-
-            if (patientId) {
-                AsyncStorage.removeItem(`pending_history_${patientId}`);
-                AsyncStorage.removeItem(`new_history_input_${patientId}`);
-            }
-            return true;
-        }
-        return false;
-    };
+    // Legacy history transfer functions removed. History now merges only on final save.
 
     const handleSaveNewHistory = (newHistoryText: string) => {
         const timestamp = new Date().toLocaleString();
@@ -543,40 +472,8 @@ export const useClinicalForm = (props: any) => {
         });
     };
 
-    // Effects
-    useEffect(() => {
-        if (directHistoryText.trim() && patientId) {
-            savePendingHistoryText(directHistoryText);
-            AsyncStorage.setItem(`new_history_input_${patientId}`, directHistoryText).catch(e => { });
-        }
-    }, [directHistoryText, patientId]);
-
-    // RESTORE DRAFT: Load saved history text when patient changes
-    useEffect(() => {
-        const restoreDraft = async () => {
-            if (!patientId) return;
-            try {
-                // Try to get the latest draft first
-                const newHistory = await AsyncStorage.getItem(`new_history_input_${patientId}`);
-                if (newHistory && newHistory.trim()) {
-                    console.log(`📝 Restoring draft history for ${patientId} from new_history_input`);
-                    setDirectHistoryText(newHistory);
-                    return;
-                }
-
-                // Fallback to legacy key
-                const pendingHistory = await AsyncStorage.getItem(`pending_history_${patientId}`);
-                if (pendingHistory && pendingHistory.trim()) {
-                    console.log(`📝 Restoring draft history for ${patientId} from pending_history`);
-                    setDirectHistoryText(pendingHistory);
-                }
-            } catch (e) {
-                console.error("❌ Error restoring history draft:", e);
-            }
-        };
-
-        restoreDraft();
-    }, [patientId]);
+    // Legacy useEffects for history persistence removed.
+    // DraftService now handles all persistence via patientData.
 
     useEffect(() => {
         if (patientId) {
@@ -641,7 +538,6 @@ export const useClinicalForm = (props: any) => {
 
 
     return {
-        directHistoryText, setDirectHistoryText,
         tableModalVisible, setTableModalVisible,
         historicalData, setHistoricalData,
         dataFetched, setDataFetched,
@@ -656,14 +552,11 @@ export const useClinicalForm = (props: any) => {
         removeReportFileWithBackend,
         createPermanentFileStorage,
         safePickDocument,
-        saveDirectHistoryToMedicalHistory,
-        getLatestMedicalHistory,
-        transferHistoryText,
         handleSaveNewHistory,
         toggleSection,
         handleParameterUpdate,
         fetchCurrentPatientData,
         fetchHistoricalData,
         clearClinicalDraft,
-    }
+    };
 };

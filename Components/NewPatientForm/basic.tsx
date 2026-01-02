@@ -35,6 +35,7 @@ interface BasicTabProps {
   patientData: PatientData;
   errors: Errors;
   updateField: (field: string, value: string) => void;
+  showCreationBanner?: boolean;
 }
 
 // RadioButton component
@@ -64,9 +65,19 @@ const BasicTab: React.FC<BasicTabProps> = ({
   patientData,
   errors,
   updateField,
+  showCreationBanner
 }) => {
   return (
     <KeyboardAwareScrollView>
+      {/* SD3-Level UX Guard Banner */}
+      {showCreationBanner && (
+        <View style={styles.creationBanner}>
+          <Text style={styles.creationBannerText}>
+            ℹ️ This patient will be created only after you complete the Basic Details and click "Create Patient".
+          </Text>
+        </View>
+      )}
+
       <View style={styles.formSection}>
         <View style={styles.inputWrapper}>
           <Text style={styles.inputLabel}>Full Name</Text>
@@ -109,9 +120,14 @@ const BasicTab: React.FC<BasicTabProps> = ({
           <TextInput
             style={[styles.textInput, errors.mobile ? styles.inputError : null]}
             value={patientData.mobile}
-            onChangeText={(text) => updateField("mobile", text)}
+            onChangeText={(text) => {
+              // SD3-Level Restriction: Digits only, max 10, no exceptions
+              const cleanText = text.replace(/[^0-9]/g, "").slice(0, 10);
+              updateField("mobile", cleanText);
+            }}
             placeholder="Enter patient's 10-digit mobile number"
-            keyboardType="phone-pad"
+            keyboardType="number-pad"
+            maxLength={10}
             placeholderTextColor='#c8c8c8'
 
             blurOnSubmit={true}
@@ -228,6 +244,20 @@ const styles = StyleSheet.create({
     backgroundColor: "#0070D6",
   },
   radioLabel: { fontSize: 14, color: "#2D3748" },
+  creationBanner: {
+    backgroundColor: "#EBF8FF",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: "#BEE3F8",
+  },
+  creationBannerText: {
+    color: "#2C5282",
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: "500",
+  },
 });
 
 export default BasicTab;

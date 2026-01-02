@@ -183,7 +183,6 @@ interface ClinicalTabProps {
   patientId: string;
   prefillMode?: boolean;
   hideBasicTab?: boolean;
-  saveNewHistoryEntryToStorage?: (pId: string, text: string) => Promise<boolean>;
 }
 
 // Modify the component definition to use forwardRef with proper typing
@@ -212,7 +211,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
   ) => {
     // Use the custom hook for all form logic
     const {
-      directHistoryText, setDirectHistoryText,
+      // directHistoryText, setDirectHistoryText removed
       tableModalVisible, setTableModalVisible,
       historicalData, setHistoricalData,
       dataFetched, setDataFetched,
@@ -227,9 +226,9 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
       removeReportFileWithBackend,
       createPermanentFileStorage,
       safePickDocument,
-      saveDirectHistoryToMedicalHistory,
-      getLatestMedicalHistory,
-      transferHistoryText,
+      // saveDirectHistoryToMedicalHistory removed
+      // getLatestMedicalHistory removed
+      // transferHistoryText removed
       handleSaveNewHistory,
       toggleSection,
       handleParameterUpdate,
@@ -251,9 +250,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
     });
 
     useImperativeHandle(ref, () => ({
-      saveDirectHistoryToMedicalHistory,
-      getLatestMedicalHistory,
-      transferHistoryText,
+      // Legacy methods removed - History is now integrated into patientData
       clearClinicalDraft, // Exposed for parent to clear draft after save
     }));
 
@@ -1057,63 +1054,39 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           icon="document-text-outline"
         >
           <View style={styles.inputWrapper}>
-            {/* Use different input based on whether it's a new patient or existing patient */}
-            {!prefillMode ? (
-              // For NEW patients: Show editable text area directly
+            {/* Phase 3 Fix: Unified Input Logic - Always bind to newHistoryEntry */}
+            <View style={{ marginTop: 12 }}>
+              <Text style={styles.inputLabel}>History/Complaints/Symptoms:</Text>
               <AutoBulletTextArea
-                value={patientData.medicalHistory}
-                onChangeText={(text: string) => updateField("medicalHistory", text)}
-                placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (â€¢) at the beginning of a line for auto-bulleting."
-                style={[styles.textArea, { minHeight: 200 }]}
+                value={patientData.newHistoryEntry || ""} // Always bind to draft field
+                onChangeText={(text: string) => updateField("newHistoryEntry", text)}
+                placeholder="Enter patient's history, complaints, and symptoms. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
+                style={[styles.textArea, { minHeight: 200 }]} // Keep the larger height
                 numberOfLines={12}
               />
-            ) : (
-              // For EXISTING patients: Show direct text box for adding history
-              <>
-                <View style={{ marginTop: 12 }}>
-                  <Text style={styles.inputLabel}>History/Complaints/Symptoms:</Text>
-                  <AutoBulletTextArea
-                    value={directHistoryText}
-                    onChangeText={(text: string) => {
-                      console.log(
-                        `🔄 Updating directHistoryText to: ${text.substring(
-                          0,
-                          20
-                        )}...`
-                      );
-                      setDirectHistoryText(text);
-                    }}
-                    placeholder="Enter new history entry here..."
-                    style={[styles.textArea, { minHeight: 100 }]}
-                    numberOfLines={6}
-                    // Modify onEndEditing handler to update patientData directly using updateField
-                    onEndEditing={transferHistoryText}
-                  />
-                </View>
-                <View style={styles.historyButtonsRow}>
-                  <TouchableOpacity
-                    style={styles.viewHistoryButtonBelow}
-                    onPress={() => setHistoryModalVisible(true)}
-                  >
-                    <Ionicons
-                      name="eye-outline"
-                      size={18}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.viewHistoryButtonText}>
-                      View History
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
+            </View>
 
-            {/* Add a hint for auto-bulleting in new patient mode */}
-            {!prefillMode && (
-              <Text style={styles.hintText}>
-                Tip: Start a line with "-" to create a bulleted list
-              </Text>
-            )}
+            <View style={styles.historyButtonsRow}>
+              <TouchableOpacity
+                style={styles.viewHistoryButtonBelow}
+                onPress={() => setHistoryModalVisible(true)}
+              >
+                <Ionicons
+                  name="eye-outline"
+                  size={18}
+                  color="#FFFFFF"
+                />
+                <Text style={styles.viewHistoryButtonText}>
+                  View History {patientData.medicalHistory ? "(Has Data)" : ""}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Hint text moved inside the unified view or simply kept below */}
+            <Text style={styles.hintText}>
+              Tip: Start a line with "-" to create a bulleted list
+            </Text>
+
           </View>
         </CollapsibleSection>
 
@@ -1292,10 +1265,10 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
               </View>
             )}
           </View>
-        </CollapsibleSection>
+        </CollapsibleSection >
 
         {/* Clinical Parameters Section */}
-        <CollapsibleSection
+        < CollapsibleSection
           title="Clinical Parameters"
           isExpanded={expandedSections.clinicalParameters}
           onToggle={() => toggleSection("clinicalParameters")}
@@ -1611,10 +1584,10 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
                 </TouchableOpacity>
               )}
           </ScrollView>
-        </CollapsibleSection>
+        </CollapsibleSection >
 
         {/* Use the ViewParametersModal component */}
-        <ViewParametersModal
+        < ViewParametersModal
           isVisible={tableModalVisible}
           onClose={() => {
             console.log("ðŸ”’ Closing parameters modal");
@@ -1630,7 +1603,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         />
 
         {/* Add the History/Complaints/Symptoms Modal */}
-        <ViewHistoryModal
+        < ViewHistoryModal
           isVisible={historyModalVisible}
           onClose={() => setHistoryModalVisible(false)}
           historyText={patientData.medicalHistory}
@@ -1638,7 +1611,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         />
 
         {/* Add the View Files Modal - Updated to use enhanced deletion */}
-        <ViewFilesModal
+        < ViewFilesModal
           isVisible={viewFilesModalVisible}
           onClose={() => setViewFilesModalVisible(false)}
           reportFiles={reportFiles}
@@ -1647,7 +1620,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         />
 
         {/* Add the ViewUploadedFilesModal component */}
-        <ViewUploadedFilesModal
+        < ViewUploadedFilesModal
           isVisible={viewUploadedFilesModalVisible}
           onClose={() => setViewUploadedFilesModalVisible(false)}
           patientId={patientId}
@@ -1657,13 +1630,13 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         />
 
         {/* Add the Add History Modal */}
-        <AddHistoryModal
+        < AddHistoryModal
           isVisible={addHistoryModalVisible}
           onClose={() => setAddHistoryModalVisible(false)}
           onSave={handleSaveNewHistory}
           patientId={patientId}
         />
-      </View>
+      </View >
     );
   }
 );
