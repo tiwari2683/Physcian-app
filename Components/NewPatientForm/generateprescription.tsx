@@ -264,7 +264,7 @@ interface PrescriptionGeneratorProps {
 
 // Default doctor information
 const DEFAULT_DOCTOR_INFO: DoctorInfo = {
-  name: "Dr. Onkar Bhave",
+  name: "Dr. Dipak Gawli",
   credentials: "M.B.B.S., M.D., M.S.",
   clinicName: "Care Clinic",
   clinicAddress: "Kothrud, Pune - 411038",
