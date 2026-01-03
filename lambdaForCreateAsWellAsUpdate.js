@@ -1,6 +1,6 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
-import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
@@ -2426,43 +2426,26 @@ async function updatePatientData(updateData) {
         // Process report files if any are included in the update
         if (updateData.reportFiles && updateData.reportFiles.length > 0) {
             console.log(`📂 REPORT FILES UPDATE: Processing ${updateData.reportFiles.length} report files for patient ${patientId}`);
-            console.log(`📂 Update section: ${updateData.updateSection}`);
 
-            // Log file categories and more details for debugging
-            updateData.reportFiles.forEach((file, index) => {
-                console.log(`📄 Report file ${index + 1}/${updateData.reportFiles.length}:`);
-                console.log(`   Name: ${file.name || 'unnamed'}`);
-                console.log(`   Type: ${file.type || 'unknown'}`);
-                console.log(`   Category: ${file.category || 'uncategorized'}`);
-                console.log(`   Has base64Data: ${!!file.base64Data}`);
-                if (file.uri) console.log(`   URI preview: ${file.uri.substring(0, 40)}...`);
-                if (file.base64Data) console.log(`   Base64 length: ${file.base64Data.length}`);
-            });
-
-            // Better file deduplication
+            // Deduplicate logic
             const existingFiles = currentPatient.reportFiles || [];
-            console.log(`📂 Found ${existingFiles.length} existing files for patient ${patientId}`);
-
             const newFilesToProcess = deduplicateFiles(updateData.reportFiles, existingFiles);
 
             if (newFilesToProcess.length > 0) {
                 console.log(`✅ After deduplication, processing ${newFilesToProcess.length} new files`);
 
-                // Upload files to S3
                 try {
-                    const processedFiles = await processReportFiles(newFilesToProcess, patientId);
+                    // Use centralized processReportFiles logic
+                    // This returns { processedFiles (for DB), failedUploads, filesForResponse }
+                    const { processedFiles, failedUploads } = await processReportFiles(newFilesToProcess, patientId);
 
-                    // Log each processed file
-                    processedFiles.forEach((file, idx) => {
-                        console.log(`📄 Processed file ${idx + 1}/${processedFiles.length}:`);
-                        console.log(`   Name: ${file.name || 'unnamed'}`);
-                        console.log(`   URL: ${file.url ? file.url.substring(0, 40) + '...' : 'none'}`);
-                        console.log(`   Uploaded to S3: ${file.uploadedToS3 || false}`);
-                        if (file.uploadedToS3) console.log(`   Upload time: ${file.uploadSuccessTime || 'unknown'}`);
-                        if (file.s3UploadFailed) console.log(`   ⚠️ Upload failed: ${file.s3ErrorMessage || 'unknown error'}`);
-                    });
+                    // Log failures if any
+                    if (failedUploads.length > 0) {
+                        console.error(`❌ Some files failed to upload: ${failedUploads.join(', ')}`);
+                    }
 
                     // Merge with existing files
+                    // processedFiles contains ONLY verified S3 uploads (or existing verified remote URLs)
                     const mergedFiles = [...existingFiles, ...processedFiles];
                     console.log(`📂 Final merged files count: ${mergedFiles.length}`);
 
@@ -2470,7 +2453,6 @@ async function updatePatientData(updateData) {
                     expressionAttributeValues[":reportFiles"] = mergedFiles;
                 } catch (error) {
                     console.error(`❌ Error processing report files: ${error.message}`);
-                    console.error(error.stack);
                 }
             } else {
                 console.log("⚠️ No new files to process after deduplication");
@@ -3120,205 +3102,14 @@ async function processPatientData(patientData) {
         const reportFiles = patientData.reportFiles || [];
         console.log(`Found ${reportFiles.length} report files to process`);
 
-        // Array to store file metadata after processing
-        const processedFiles = [];
-        let filesUploadedToS3 = 0;
+        // Use centralized function for strictly verified S3 uploads
+        // Returns: processedFiles (pure DB objects, no URLs), failedUploads, filesForResponse (with Signed URLs)
+        const { processedFiles, failedUploads, filesForResponse } = await processReportFiles(reportFiles, patientId);
 
-        // Enhanced file processing with better validation and logging
-        for (let i = 0; i < reportFiles.length; i++) {
-            const reportFile = reportFiles[i];
-            console.log(`🔄 Processing file ${i + 1}/${reportFiles.length}: ${reportFile.name || 'unnamed'}`);
+        // Count confirmed uploads
+        const filesUploadedToS3 = processedFiles.filter(f => f.uploadedToS3).length;
 
-            // Log category if available
-            if (reportFile.category) {
-                console.log(`File category: ${reportFile.category}`);
-            }
-
-            // Check if file is already a remote URL
-            if (reportFile.uri && (reportFile.uri.startsWith('http://') || reportFile.uri.startsWith('https://'))) {
-                console.log(`📋 File ${i + 1} is already a remote URL. Adding as existing file: ${reportFile.uri.substring(0, 30)}...`);
-
-                processedFiles.push({
-                    name: reportFile.name || `file_${Date.now()}`,
-                    type: reportFile.type || 'application/octet-stream',
-                    url: reportFile.uri,
-                    uri: reportFile.uri,
-                    existing: true,
-                    category: reportFile.category || 'uncategorized',
-                    processedAt: new Date().toISOString()
-                });
-
-                continue;
-            }
-
-            // Validate report file data
-            if (!reportFile.base64Data) {
-                console.warn(`⚠️ File ${i + 1} "${reportFile.name || 'unnamed'}" missing base64Data, skipping`);
-                continue;
-            }
-
-            // Ensure file has name and type
-            if (!reportFile.name) {
-                reportFile.name = `file_${Date.now()}.${reportFile.type?.split('/')[1] || 'bin'}`;
-                console.log(`📋 File ${i + 1} missing name, assigned: ${reportFile.name}`);
-            }
-
-            if (!reportFile.type) {
-                reportFile.type = 'application/octet-stream';
-                console.log(`📋 File ${i + 1} missing type, assigned: ${reportFile.type}`);
-            }
-
-            try {
-                // Extract actual base64 data by removing data URI prefix if it exists
-                let cleanBase64 = reportFile.base64Data;
-                let detectedType = null;
-
-                if (cleanBase64.startsWith('data:')) {
-                    console.log(`📋 File ${reportFile.name} has data URI prefix`);
-                    // Extract the base64 part from format like: data:image/jpeg;base64,/9j/4AAQ...
-                    const base64Parts = cleanBase64.split(',');
-                    if (base64Parts.length > 1) {
-                        // Try to extract content type from the data URI
-                        try {
-                            detectedType = base64Parts[0].split(':')[1].split(';')[0];
-                            console.log(`📋 Detected content type from URI: ${detectedType}`);
-                        } catch (e) {
-                            console.warn(`⚠️ Couldn't extract content type from URI: ${e.message}`);
-                        }
-
-                        cleanBase64 = base64Parts[1];
-                        console.log(`📋 Extracted base64 data without prefix, length: ${cleanBase64.length}`);
-                    } else {
-                        console.warn(`⚠️ Invalid data URI format for ${reportFile.name}`);
-                    }
-                } else {
-                    console.log(`📋 File ${reportFile.name} does not have data URI prefix`);
-                }
-
-                // Use detected type from data URI if available and not already set
-                if (detectedType && reportFile.type === 'application/octet-stream') {
-                    reportFile.type = detectedType;
-                    console.log(`📋 Updated content type to ${reportFile.type} based on data URI`);
-                }
-
-                // Create a unique key for the S3 object with more uniqueness
-                const timestamp = Date.now();
-                const randomSuffix = Math.floor(Math.random() * 10000);
-                const sanitizedName = reportFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-                const fileKey = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
-
-                // Decode base64 data
-                const fileBuffer = Buffer.from(cleanBase64, 'base64');
-                const fileSizeKB = Math.round(fileBuffer.length / 1024);
-                console.log(`📋 Decoded file size: ${fileBuffer.length} bytes (${fileSizeKB} KB)`);
-
-                if (fileBuffer.length === 0) {
-                    throw new Error("Decoded file is empty");
-                }
-
-                // Validate file size
-                if (fileBuffer.length > 10485760) { // 10MB limit
-                    console.warn(`⚠️ Large file detected (${Math.round(fileBuffer.length / 1024 / 1024)}MB), may encounter issues`);
-                }
-
-                // Set up S3 upload parameters with additional metadata including category
-                const uploadParams = {
-                    Bucket: REPORTS_BUCKET,
-                    Key: fileKey,
-                    Body: fileBuffer,
-                    ContentType: reportFile.type,
-                    ACL: 'public-read',  // Make object publicly accessible
-                    Metadata: {
-                        'patient-id': patientId,
-                        'original-name': sanitizedName,
-                        'upload-date': new Date().toISOString(),
-                        'category': reportFile.category || 'uncategorized'
-                    }
-                };
-
-                // Generate the S3 URL
-                const s3Url = `${S3_URL_PREFIX}${fileKey}`;
-                console.log(`📋 Generated S3 URL: ${s3Url.substring(0, 60)}...`);
-
-                // Initialize file info object with more metadata including category
-                const fileInfo = {
-                    key: fileKey,
-                    name: reportFile.name,
-                    type: reportFile.type,
-                    url: s3Url,
-                    size: fileBuffer.length,
-                    category: reportFile.category || 'uncategorized',
-                    processedAt: new Date().toISOString(),
-                    storedLocally: false,
-                    patientId: patientId
-                };
-
-                // Try to upload to S3 directly with better error handling
-                console.log(`📤 Attempting S3 upload for: ${fileKey}`);
-                try {
-                    // Use direct S3 upload with no timeout
-                    const uploadResult = await s3.send(new PutObjectCommand(uploadParams));
-                    console.log(`✅ S3 upload successful for: ${fileKey}`);
-                    console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
-                    console.log(`📋 S3 URL: ${s3Url}`);
-
-                    // Set success flags
-                    fileInfo.eTag = uploadResult.ETag;
-                    fileInfo.uploadedToS3 = true;
-                    fileInfo.uploadSuccessTime = new Date().toISOString();
-                    filesUploadedToS3++;
-
-                    // Verify upload by attempting to get object metadata
-                    try {
-                        await s3.send(new GetObjectCommand({
-                            Bucket: REPORTS_BUCKET,
-                            Key: fileKey,
-                        }));
-                        fileInfo.verified = true;
-                        console.log(`✅ S3 upload verified for: ${fileKey}`);
-                    } catch (verifyError) {
-                        console.warn(`⚠️ Could not verify S3 upload: ${verifyError.message}`);
-                        fileInfo.verified = false;
-                    }
-                } catch (s3Error) {
-                    console.error(`❌ S3 upload error for ${fileKey}: ${s3Error.message}`);
-                    console.error(`Stack trace: ${s3Error.stack ? s3Error.stack.split('\n')[0] : 'No stack'}`);
-
-                    // Still keep the URL, but mark as stored locally with truncated data
-                    fileInfo.storedLocally = true;
-                    fileInfo.s3UploadFailed = true;
-                    fileInfo.s3ErrorMessage = s3Error.message;
-                    fileInfo.s3ErrorTime = new Date().toISOString();
-
-                    // Store a small portion of the base64 data as fallback
-                    const maxBase64Length = 1000;
-                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) +
-                        (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
-
-                    // Include detailed error information
-                    fileInfo.errorDetails = {
-                        code: s3Error.code || 'Unknown',
-                        time: new Date().toISOString(),
-                        message: s3Error.message,
-                        requestId: s3Error.$metadata?.requestId,
-                    };
-
-                    // Try again in the background with no await - "fire and forget"
-                    retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64);
-                }
-
-                // Add to processed files array
-                processedFiles.push(fileInfo);
-                console.log(`✅ Added file info to results. Total processed files: ${processedFiles.length}`);
-            } catch (fileError) {
-                // Log the error but continue processing other files
-                console.error(`❌ Error processing file ${reportFile.name}:`, fileError);
-                console.error(`Stack trace: ${fileError.stack ? fileError.stack.split('\n')[0] : 'No stack'}`);
-                console.log("Continuing with other files");
-            }
-        }
-
-        console.log(`📋 Completed processing ${reportFiles.length} files. Successfully processed: ${processedFiles.length}, uploaded to S3: ${filesUploadedToS3}`);
+        console.log(`📋 Completed processing ${reportFiles.length} files. Verified Success: ${processedFiles.length}, Failures: ${failedUploads.length}`);
 
         // Generate a prescription text string if medications exist
         let generatedPrescription = "";
@@ -3462,13 +3253,13 @@ async function processPatientData(patientData) {
                 patientId: patientId,
                 savedSections: savedSections, // Include saved sections in response
                 pendingHistoryCleared: patientData.pendingHistoryIncluded || false, // Indicate if pending history was included
-                fileDetails: processedFiles.length > 0 ? {
+                fileDetails: (processedFiles.length > 0 || failedUploads.length > 0) ? {
                     filesProcessed: processedFiles.length,
                     filesUploadedToS3: filesUploadedToS3,
-                    filesStoredLocally: processedFiles.length - filesUploadedToS3,
-                    fileUrls: processedFiles.map(file => ({
+                    failedUploads: failedUploads, // Include failures in response
+                    fileUrls: filesForResponse.map(file => ({
                         name: file.name,
-                        url: file.url,
+                        url: file.url, // Signed URL (or remote URL) for immediate display
                         category: file.category || 'uncategorized',
                         uploadStatus: file.uploadedToS3 ? 'success' : 'pending'
                     }))
@@ -3482,12 +3273,13 @@ async function processPatientData(patientData) {
     }
 }
 
-// Enhanced processReportFiles function with better error handling, logging, and category support
+// Strict S3 Upload + Verification Function
+// Returns: { processedFiles, failedUploads, filesForResponse }
 async function processReportFiles(reportFiles, patientId) {
     console.log(`🔄 Processing ${reportFiles.length} report files`);
-    const processedFiles = [];
-    let successCount = 0;
-    let failureCount = 0;
+    const processedFiles = []; // For DynamoDB (clean, no URLs)
+    const filesForResponse = []; // For API Response (with Signed URLs)
+    const failedUploads = [];
 
     // Ensure reportFiles is always an array
     if (!Array.isArray(reportFiles)) {
@@ -3495,321 +3287,116 @@ async function processReportFiles(reportFiles, patientId) {
         reportFiles = [];
     }
 
-    // Deduplicate files before processing
+    // Deduplicate files using Map
     const uniqueFileMap = new Map();
     reportFiles.forEach(file => {
         const fileKey = getFileUniqueKey(file);
-        if (!uniqueFileMap.has(fileKey)) {
-            uniqueFileMap.set(fileKey, file);
-        } else {
-            console.log(`Skipping duplicate file in processReportFiles: ${file.name}`);
-        }
+        if (!uniqueFileMap.has(fileKey)) uniqueFileMap.set(fileKey, file);
     });
-
     const deduplicatedFiles = Array.from(uniqueFileMap.values());
-    console.log(`After deduplication in processReportFiles: ${deduplicatedFiles.length} files (from ${reportFiles.length})`);
 
     for (let i = 0; i < deduplicatedFiles.length; i++) {
         const reportFile = deduplicatedFiles[i];
-        console.log(`🔄 Processing file ${i + 1}/${deduplicatedFiles.length}: ${reportFile.name || 'unnamed'}`);
-
-        // Log category if available
-        if (reportFile.category) {
-            console.log(`File category: ${reportFile.category}`);
-        }
-
-        // Skip remote URLs (already processed)
-        if (reportFile.uri && (reportFile.uri.startsWith('http://') || reportFile.uri.startsWith('https://'))) {
-            console.log(`📋 File ${reportFile.name} is already a remote URL, skipping upload: ${reportFile.uri.substring(0, 30)}...`);
-
-            processedFiles.push({
-                name: reportFile.name || `file_${Date.now()}`,
-                type: reportFile.type || 'application/octet-stream',
-                url: reportFile.uri,
-                uri: reportFile.uri,
-                existing: true,
-                category: reportFile.category || 'uncategorized',
-                processedAt: new Date().toISOString()
-            });
-
-            successCount++;
-            continue;
-        }
-
-        // Validate file data with better error reporting
-        if (!reportFile.base64Data) {
-            console.warn(`⚠️ File ${i + 1} missing base64Data, attempting to use URI directly: ${reportFile.name || 'unnamed'}`);
-
-            // If no base64Data but we have a URI, add a placeholder and skip processing
-            if (reportFile.uri) {
-                processedFiles.push({
-                    name: reportFile.name || `file_${Date.now()}`,
-                    type: reportFile.type || 'application/octet-stream',
-                    uri: reportFile.uri,
-                    category: reportFile.category || 'uncategorized',
-                    status: 'skipped_no_base64',
-                    error: 'Missing base64Data',
-                    processedAt: new Date().toISOString()
-                });
-            }
-
-            failureCount++;
-            continue;
-        }
-
-        // Ensure the file has a name and type
-        if (!reportFile.name) {
-            reportFile.name = `file_${Date.now()}.${reportFile.type?.split('/')[1] || 'bin'}`;
-            console.log(`📋 File ${i + 1} missing name, assigned: ${reportFile.name}`);
-        }
-
-        if (!reportFile.type) {
-            // Try to detect type from base64 data
-            const mimeMatch = reportFile.base64Data.match(/^data:([^;]+);/);
-            reportFile.type = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-            console.log(`📋 File ${i + 1} missing type, detected/assigned: ${reportFile.type}`);
-        }
 
         try {
-            // Extract base64 data with improved handling
-            let cleanBase64 = reportFile.base64Data;
-            let fileType = reportFile.type || 'application/octet-stream';
+            // Case 1: Existing Remote URL (already processed)
+            if (reportFile.uri && (reportFile.uri.startsWith('http://') || reportFile.uri.startsWith('https://'))) {
+                const existingFile = {
+                    name: reportFile.name || `file_${Date.now()}`,
+                    type: reportFile.type || 'application/octet-stream',
+                    // Keep existing URLs for backward compatibility
+                    url: reportFile.uri,
+                    uri: reportFile.uri,
+                    existing: true,
+                    category: reportFile.category || 'uncategorized',
+                    processedAt: new Date().toISOString()
+                };
 
-            // Handle data URI format
-            if (cleanBase64.startsWith('data:')) {
-                console.log(`📋 File ${reportFile.name} has data URI prefix`);
-                const base64Parts = cleanBase64.split(',');
-                if (base64Parts.length > 1) {
-                    try {
-                        // Try to extract content type from URI
-                        const typeMatch = base64Parts[0].match(/^data:([^;]+);/);
-                        if (typeMatch) {
-                            fileType = typeMatch[1];
-                            console.log(`📋 Detected content type from URI: ${fileType}`);
-                        }
-                    } catch (e) {
-                        console.warn(`⚠️ Could not extract content type from URI: ${e.message}`);
-                    }
-
-                    cleanBase64 = base64Parts[1];
-                    console.log(`📋 Extracted base64 data without prefix, length: ${cleanBase64.length}`);
-                } else {
-                    console.warn(`⚠️ Invalid data URI format for ${reportFile.name}, but continuing with original`);
-                }
-            } else {
-                console.log(`📋 File ${reportFile.name} does not have data URI prefix, treating as raw base64`);
+                processedFiles.push(existingFile);
+                filesForResponse.push(existingFile);
+                continue;
             }
 
-            // Create a unique key for the S3 object
+            // Case 2: New Upload
+            if (!reportFile.base64Data) {
+                console.warn(`⚠️ Skipping file ${reportFile.name}: Missing base64Data`);
+                failedUploads.push(reportFile.name || "Unknown File");
+                continue;
+            }
+
+            // Prepare Metadata
             const timestamp = Date.now();
             const randomSuffix = Math.floor(Math.random() * 10000);
-            const sanitizedName = reportFile.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+            const sanitizedName = (reportFile.name || "file").replace(/[^a-zA-Z0-9._-]/g, '_');
             const fileKey = `${patientId}/${timestamp}-${randomSuffix}-${sanitizedName}`;
 
-            // Validate base64 data
-            if (!cleanBase64 || cleanBase64.trim() === '') {
-                throw new Error("Base64 data is empty or invalid");
+            // Clean Base64
+            let cleanBase64 = reportFile.base64Data;
+            if (cleanBase64.startsWith('data:')) {
+                cleanBase64 = cleanBase64.split(',')[1];
             }
+            const fileBuffer = Buffer.from(cleanBase64, 'base64');
+            const fileType = reportFile.type || 'application/octet-stream';
 
-            // Decode base64 data
-            try {
-                const fileBuffer = Buffer.from(cleanBase64, 'base64');
-                const fileSizeKB = Math.round(fileBuffer.length / 1024);
-                console.log(`📋 Decoded file size: ${fileBuffer.length} bytes (${fileSizeKB} KB)`);
-
-                if (fileBuffer.length === 0) {
-                    throw new Error("Decoded file is empty");
+            // 1. Upload (NO ACL)
+            const uploadParams = {
+                Bucket: REPORTS_BUCKET,
+                Key: fileKey,
+                Body: fileBuffer,
+                ContentType: fileType,
+                // NO ACL: "public-read" REMOVED
+                Metadata: {
+                    'patient-id': patientId,
+                    'original-name': sanitizedName,
+                    'category': reportFile.category || 'uncategorized'
                 }
+            };
 
-                // Set up S3 upload parameters with category metadata
-                const uploadParams = {
-                    Bucket: REPORTS_BUCKET,
-                    Key: fileKey,
-                    Body: fileBuffer,
-                    ContentType: fileType,
-                    // ACL: 'public-read', // Removed to prevent AccessDenied if Block Public Access is on
-                    Metadata: {
-                        'patient-id': patientId,
-                        'original-name': sanitizedName,
-                        'upload-date': new Date().toISOString(),
-                        'category': reportFile.category || 'uncategorized'
-                    }
-                };
+            console.log(`📤 Uploading ${fileKey} to S3...`);
+            const uploadResult = await s3.send(new PutObjectCommand(uploadParams));
 
-                // Generate the S3 URL
-                const s3Url = `${S3_URL_PREFIX}${fileKey}`;
-                console.log(`📋 Generated S3 URL: ${s3Url.substring(0, 60)}...`);
+            // 2. VERIFY (HeadObject) - CRITICAL STEP
+            console.log(`🔍 Verifying upload for ${fileKey}...`);
+            await s3.send(new HeadObjectCommand({ Bucket: REPORTS_BUCKET, Key: fileKey }));
+            console.log(`✅ Verification Successful: ${fileKey}`);
 
-                // Initialize file info object with category
-                const fileInfo = {
-                    key: fileKey,
-                    name: reportFile.name,
-                    type: fileType,
-                    url: s3Url,
-                    size: fileBuffer.length,
-                    category: reportFile.category || 'uncategorized',
-                    processedAt: new Date().toISOString(),
-                    storedLocally: false,
-                    patientId: patientId
-                };
-
-                // Try to upload to S3
-                try {
-                    console.log(`📤 Attempting S3 upload for: ${fileKey}`);
-                    const uploadResult = await s3.send(new PutObjectCommand(uploadParams));
-                    console.log(`✅ S3 upload successful for: ${fileKey}`);
-                    console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
-
-                    fileInfo.eTag = uploadResult.ETag;
-                    fileInfo.uploadedToS3 = true;
-                    fileInfo.uploadSuccessTime = new Date().toISOString();
-                    successCount++;
-
-                    // Add the successfully processed file
-                    processedFiles.push(fileInfo);
-                    console.log(`✅ Added file info to results. Total processed: ${processedFiles.length}`);
-                } catch (s3Error) {
-                    console.error(`❌ S3 upload error: ${s3Error.message}`);
-                    fileInfo.storedLocally = true;
-                    fileInfo.s3UploadFailed = true;
-                    fileInfo.s3ErrorMessage = s3Error.message;
-                    fileInfo.s3ErrorTime = new Date().toISOString();
-                    failureCount++;
-
-                    // Store truncated data as fallback
-                    const maxBase64Length = 1000;
-                    fileInfo.truncatedBase64 = cleanBase64.substring(0, maxBase64Length) +
-                        (cleanBase64.length > maxBase64Length ? '...[truncated]' : '');
-
-                    // Include error information
-                    fileInfo.errorDetails = {
-                        code: s3Error.code || 'Unknown',
-                        time: new Date().toISOString(),
-                        message: s3Error.message,
-                        requestId: s3Error.$metadata?.requestId,
-                        httpStatus: s3Error.$metadata?.httpStatusCode
-                    };
-
-                    // Add the file info even with error so we can retry later
-                    processedFiles.push(fileInfo);
-
-                    // Try again in background
-                    retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64);
-                }
-            } catch (bufferError) {
-                console.error(`❌ Error decoding base64 data for ${reportFile.name}: ${bufferError.message}`);
-                failureCount++;
-
-                // Add file with error status
-                processedFiles.push({
-                    name: reportFile.name,
-                    type: fileType,
-                    category: reportFile.category || 'uncategorized',
-                    error: `Base64 decoding failed: ${bufferError.message}`,
-                    processedAt: new Date().toISOString(),
-                    status: 'error'
-                });
-            }
-        } catch (fileError) {
-            console.error(`❌ Error processing file ${reportFile.name}:`, fileError.message);
-            console.error(`Stack trace: ${fileError.stack ? fileError.stack.split('\n')[0] : 'No stack'}`);
-            failureCount++;
-
-            // Add file with error status
-            processedFiles.push({
-                name: reportFile.name || `file_${i + 1}`,
-                type: reportFile.type || 'unknown',
+            // 3. Prepare DB Object (Clean, No URL)
+            const dbEntry = {
+                key: fileKey, // ONLY KEY
+                name: reportFile.name || sanitizedName,
+                type: fileType,
+                size: fileBuffer.length,
                 category: reportFile.category || 'uncategorized',
-                error: fileError.message,
-                processedAt: new Date().toISOString(),
-                status: 'error'
-            });
+                uploadedToS3: true,
+                eTag: uploadResult.ETag,
+                uploadSuccessTime: new Date().toISOString(),
+                patientId: patientId
+                // storedLocally: REMOVED
+                // s3UploadFailed: REMOVED
+            };
+
+            // 4. Prepare Response Object (Enriched with Signed URL)
+            const signedUrl = await getSignedUrl(s3, new GetObjectCommand({
+                Bucket: REPORTS_BUCKET,
+                Key: fileKey
+            }), { expiresIn: 3600 });
+
+            const responseEntry = {
+                ...dbEntry,
+                url: signedUrl // Present only in Response, NOT in DB
+            };
+
+            processedFiles.push(dbEntry);
+            filesForResponse.push(responseEntry);
+
+        } catch (error) {
+            console.error(`❌ Upload Failed for ${reportFile.name}: ${error.message}`);
+            // failedUploads tracked, NOT added to processedFiles
+            failedUploads.push(reportFile.name || "Unknown File");
         }
     }
 
-    console.log(`📋 Report files processing complete. Total: ${reportFiles.length}, Success: ${successCount}, Failures: ${failureCount}`);
-    return processedFiles;
-}
-
-// Enhanced retry logic for S3 uploads with more robust handling
-function retryS3Upload(uploadParams, fileKey, s3Url, patientId, cleanBase64 = null) {
-    // This runs asynchronously - we're not awaiting it
-    (async () => {
-        try {
-            console.log(`🔄 Starting background S3 upload retry for ${fileKey}`);
-
-            // Try multiple times with exponential backoff
-            const maxRetries = 5;
-            let success = false;
-
-            for (let i = 0; i < maxRetries; i++) {
-                try {
-                    // Create a new S3 client for each retry to avoid stale connections
-                    const retryS3 = new S3Client({
-                        region: "ap-southeast-2", // FIXED: Correct region
-                        forcePathStyle: true,
-                        maxAttempts: 3 // Built-in retry for the SDK
-                    });
-
-                    console.log(`🔄 Background upload attempt ${i + 1}/${maxRetries} for ${fileKey}`);
-
-                    // If the original request used a file buffer that we don't have anymore,
-                    // and we have the base64 data, recreate the buffer
-                    if (!uploadParams.Body && cleanBase64) {
-                        console.log(`🔄 Recreating file buffer from saved base64 data`);
-                        uploadParams.Body = Buffer.from(cleanBase64, 'base64');
-                    }
-
-                    // Add a retry timestamp to help debug
-                    if (uploadParams.Metadata) {
-                        uploadParams.Metadata.retryTimestamp = new Date().toISOString();
-                        uploadParams.Metadata.retryCount = `${i + 1}`;
-                    }
-
-                    const uploadResult = await retryS3.send(new PutObjectCommand(uploadParams));
-
-                    console.log(`✅ Background S3 upload succeeded for ${fileKey}`);
-                    console.log(`📋 S3 ETag: ${uploadResult.ETag}`);
-
-                    // Update DynamoDB to reflect successful upload
-                    await updateFileStatusInDB(patientId, fileKey, s3Url, uploadResult.ETag);
-
-                    // Success - exit retry loop
-                    success = true;
-                    break;
-                } catch (error) {
-                    const waitMs = Math.pow(2, i) * 1000; // Exponential backoff: 1s, 2s, 4s, 8s, 16s
-
-                    console.error(`❌ Background upload attempt ${i + 1} failed: ${error.message}`);
-                    console.error(`📋 Error code: ${error.code}, Error name: ${error.name}`);
-
-                    if (error.$metadata) {
-                        console.log(`📋 Request ID: ${error.$metadata.requestId}`);
-                        console.log(`📋 HTTP Status: ${error.$metadata.httpStatusCode}`);
-                    }
-
-                    if (i < maxRetries - 1) {
-                        console.log(`⏳ Waiting ${waitMs}ms before retry ${i + 2}`);
-                        await new Promise(resolve => setTimeout(resolve, waitMs));
-                    } else {
-                        console.log(`❌ All ${maxRetries} background upload attempts failed for ${fileKey}`);
-
-                        // Update DynamoDB with permanent failure status
-                        await updateFileFailureStatus(patientId, fileKey, error.message);
-                    }
-                }
-            }
-
-            if (success) {
-                console.log(`✅ Background upload process completed successfully for ${fileKey}`);
-            } else {
-                console.log(`❌ Background upload process failed after all retries for ${fileKey}`);
-            }
-        } catch (error) {
-            console.error(`❌ Fatal error in background upload process: ${error.message}`);
-            console.error(error.stack);
-        }
-    })();
+    return { processedFiles, failedUploads, filesForResponse };
 }
 
 // Update file status in DynamoDB after successful retry with enhanced logging
