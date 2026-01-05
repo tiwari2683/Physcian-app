@@ -59,8 +59,21 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
     };
 
     // Image Viewer Handler
-    const handleViewImage = (url: string) => {
-        setSelectedImage(url);
+    const handleViewImage = (file: any) => {
+        // Try multiple possible URL properties
+        const imageUrl = file.url || file.uri || file.fileUrl || file.s3Url;
+
+        // Debug logging
+        console.log("File object:", JSON.stringify(file, null, 2));
+        console.log("Using imageUrl:", imageUrl);
+
+        if (!imageUrl) {
+            Alert.alert("Error", "Image URL not found. Please check the file data.");
+            console.error("No valid URL found in file:", file);
+            return;
+        }
+
+        setSelectedImage(imageUrl);
         setImageScale(1);
         setLastDistance(0);
         setModalVisible(true);
@@ -298,28 +311,64 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
                 {/* Reports Section */}
                 {patient.reportFiles && patient.reportFiles.length > 0 && (
                     <Section title="Attached Reports" icon="document-text-outline">
-                        {patient.reportFiles.map((file: any, index: number) => (
-                            <TouchableOpacity
-                                key={index}
-                                style={styles.fileCard}
-                                onPress={() => {
-                                    if (file.type?.includes('image') || (file.url && file.url.match(/\.(jpeg|jpg|png)$/i))) {
-                                        handleViewImage(file.url);
-                                    } else {
-                                        Alert.alert("Document", `Cannot preview ${file.type} files yet. Please edit to view.`);
-                                    }
-                                }}
-                            >
-                                <View style={styles.fileIconBox}>
-                                    <Ionicons name={file.type?.includes("image") ? "image-outline" : "document-outline"} size={22} color="#0070D6" />
-                                </View>
-                                <View style={styles.fileInfo}>
-                                    <Text style={styles.fileName}>{file.name}</Text>
-                                    <Text style={styles.fileType}>{file.type || "Document"}</Text>
-                                </View>
-                                <Ionicons name="eye-outline" size={18} color="#0070D6" />
-                            </TouchableOpacity>
-                        ))}
+                        {patient.reportFiles.map((file: any, index: number) => {
+                            // Determine if it's an image
+                            const isImage = file.type?.includes('image') ||
+                                file.type?.startsWith('image/') ||
+                                (file.url && file.url.match(/\.(jpeg|jpg|png|gif|webp)$/i)) ||
+                                (file.name && file.name.match(/\.(jpeg|jpg|png|gif|webp)$/i));
+
+                            return (
+                                <TouchableOpacity
+                                    key={index}
+                                    style={styles.fileCard}
+                                    onPress={() => {
+                                        if (isImage) {
+                                            handleViewImage(file);
+                                        } else {
+                                            Alert.alert(
+                                                "Document",
+                                                `File: ${file.name}\nType: ${file.type || "Unknown"}\n\nDocument preview not available yet.`,
+                                                [
+                                                    { text: "OK" },
+                                                    {
+                                                        text: "Copy URL",
+                                                        onPress: () => {
+                                                            const url = file.url || file.uri || file.fileUrl || file.s3Url;
+                                                            if (url) {
+                                                                console.log("Document URL:", url);
+                                                                Alert.alert("URL", url);
+                                                            }
+                                                        }
+                                                    }
+                                                ]
+                                            );
+                                        }
+                                    }}
+                                >
+                                    <View style={styles.fileIconBox}>
+                                        <Ionicons
+                                            name={isImage ? "image-outline" : "document-outline"}
+                                            size={22}
+                                            color="#0070D6"
+                                        />
+                                    </View>
+                                    <View style={styles.fileInfo}>
+                                        <Text style={styles.fileName} numberOfLines={1}>
+                                            {file.name || "Unnamed File"}
+                                        </Text>
+                                        <Text style={styles.fileType}>
+                                            {file.type || "Document"} {isImage ? "• Tap to view" : ""}
+                                        </Text>
+                                    </View>
+                                    <Ionicons
+                                        name={isImage ? "eye-outline" : "download-outline"}
+                                        size={18}
+                                        color="#0070D6"
+                                    />
+                                </TouchableOpacity>
+                            );
+                        })}
                     </Section>
                 )}
 
