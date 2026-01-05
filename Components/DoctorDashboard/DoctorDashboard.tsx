@@ -560,11 +560,33 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   }, []);
 
   // View full image and reset zoom
-  const handleViewImage = (imageUrl: string) => {
-    setSelectedImage(imageUrl);
-    setImageScale(1);
-    setLastDistance(0);
-    setModalVisible(true);
+  const handleViewImage = (report: any) => {
+    // Debug: Log the entire report object
+    console.log("Full report object:", JSON.stringify(report, null, 2));
+
+    // Try multiple possible URL properties
+    // The report object structure might vary, so we check all possibility
+    const imageUrl = report.url || report.uri || report.fileUrl || report.s3Url;
+
+    if (!imageUrl) {
+      Alert.alert("Error", "Image URL not found - Please try refreshing");
+      console.error("Report URL missing in object:", report);
+      return;
+    }
+
+    Alert.alert("View Image", "Would you like to view this medical report?", [
+      {
+        text: "Open",
+        onPress: () => {
+          console.log("Opening image:", imageUrl);
+          setSelectedImage(imageUrl);
+          setImageScale(1);
+          setLastDistance(0);
+          setModalVisible(true);
+        }
+      },
+      { text: "Cancel", style: "cancel" }
+    ]);
   };
 
   // Handle Fitness Certificate generation
@@ -1060,6 +1082,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                     </View>
                   )}
 
+                  {/* Reports Section */}
                   {patient.reportFiles && patient.reportFiles.length > 0 && (
                     <View style={styles.reportsSection}>
                       <Text style={styles.sectionLabel}>Reports:</Text>
@@ -1069,31 +1092,36 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                             {report.type && report.type.startsWith("image") ? (
                               <TouchableOpacity
                                 style={styles.reportImageContainer}
-                                onPress={() => handleViewImage(report.url)}
+                                onPress={() => handleViewImage(report)}
+                                accessibilityLabel={`View image ${report.name}`}
                               >
                                 <Image
-                                  source={{ uri: report.url }}
+                                  source={{ uri: report.url || report.uri }}
                                   style={styles.reportThumbnail}
+                                  resizeMode="cover"
                                 />
                                 <Text
                                   style={styles.reportImageName}
                                   numberOfLines={1}
                                 >
-                                  {report.name.length > 20
-                                    ? report.name.substring(0, 20) + "..."
-                                    : report.name}
+                                  {(() => {
+                                    const cleanName = report.name.replace(/^\d+-\d+-/, '');
+                                    return cleanName.length > 20
+                                      ? cleanName.substring(0, 20) + "..."
+                                      : cleanName;
+                                  })()}
                                 </Text>
                               </TouchableOpacity>
                             ) : (
                               <TouchableOpacity
                                 style={styles.reportItem}
-                                onPress={() => {
-                                  // Handle document viewing
+                                onPress={() =>
                                   Alert.alert(
                                     "View Document",
                                     `Opening ${report.name}`
-                                  );
-                                }}
+                                  )
+                                }
+                                accessibilityLabel={`Open document ${report.name}`}
                               >
                                 <Ionicons
                                   name="document-outline"
@@ -1375,23 +1403,23 @@ const styles = StyleSheet.create({
   },
   // New report thumbnail styles
   reportImageContainer: {
-    marginRight: 12,
-    marginBottom: 10,
-    alignItems: "center",
-    width: 100,
+    width: 80,
+    alignItems: 'center',
   },
   reportThumbnail: {
-    width: 100,
-    height: 100,
+    width: 80,
+    height: 80,
     borderRadius: 8,
+    backgroundColor: '#F7FAFC',
     borderWidth: 1,
-    borderColor: "#E2E8F0",
+    borderColor: '#E2E8F0',
   },
   reportImageName: {
-    fontSize: 11,
-    color: "#4A5568",
+    fontSize: 10,
+    color: '#4A5568',
     marginTop: 4,
-    textAlign: "center",
+    textAlign: 'center',
+    width: 80,
   },
   noPatientCard: {
     padding: 30,
@@ -1799,27 +1827,33 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
   reportsSection: {
-    marginBottom: 4,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
   },
   reportsList: {
-    flexDirection: "row",
-    flexWrap: "wrap",
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 8,
   },
   reportItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#EDF2F7",
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    marginRight: 8,
-    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F7FAFC',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    gap: 6,
+    maxWidth: 150,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
   },
   reportName: {
     fontSize: 12,
-    color: "#4A5568",
-    marginLeft: 4,
-    maxWidth: 120,
+    color: '#4A5568',
+    flex: 1,
   },
   patientCardFooter: {
     flexDirection: "row",
