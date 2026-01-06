@@ -53,13 +53,56 @@ exports.handler = async (event) => {
             }
 
             if (!body.id) {
-                // Generate ID if not present
+                // Generate ID if not present - always as string
                 body.id = Date.now().toString();
+            } else {
+                // Ensure ID is always a string
+                body.id = String(body.id);
             }
 
             // Ensure status defaults to upcoming if missing
             if (!body.status) {
                 body.status = "upcoming";
+            }
+
+            // VALIDATION: Required fields for new appointments
+            if (body.status === "upcoming") {
+                if (!body.date) {
+                    return {
+                        statusCode: 400,
+                        headers,
+                        body: JSON.stringify({ message: "Date is required for appointments." })
+                    };
+                }
+                if (!body.time) {
+                    return {
+                        statusCode: 400,
+                        headers,
+                        body: JSON.stringify({ message: "Time is required for appointments." })
+                    };
+                }
+            }
+
+            // VALIDATION: Patient age must be a positive number if provided
+            if (body.patientAge !== undefined && body.patientAge !== null) {
+                const age = parseInt(body.patientAge);
+                if (isNaN(age) || age < 0 || age > 150) {
+                    return {
+                        statusCode: 400,
+                        headers,
+                        body: JSON.stringify({ message: "Patient age must be a valid number between 0 and 150." })
+                    };
+                }
+                body.patientAge = age;
+            }
+
+            // SANITIZATION: Clean notes field (remove potential script tags)
+            if (body.notes && typeof body.notes === 'string') {
+                body.notes = body.notes
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                    .replace(/<[^>]*>/g, '')
+                    .trim()
+                    .substring(0, 1000); // Limit notes length
             }
 
             // Allow patientId to be passed

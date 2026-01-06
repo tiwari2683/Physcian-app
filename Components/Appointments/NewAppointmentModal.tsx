@@ -74,6 +74,9 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
     "Emergency",
   ];
 
+  // Available sex options
+  const sexOptions = ["Male", "Female", "Other"];
+
   // Debounced Search Effect
   useEffect(() => {
     if (mode === "search" && searchQuery.length > 2) {
@@ -132,6 +135,16 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   const handleSave = async () => {
     if (!patientName) {
       Alert.alert("Error", "Patient Name is required");
+      return;
+    }
+
+    // Validate date and time are in the future
+    const appointmentDateTime = new Date(date);
+    appointmentDateTime.setHours(time.getHours(), time.getMinutes(), 0, 0);
+    const now = new Date();
+
+    if (appointmentDateTime <= now) {
+      Alert.alert("Invalid Time", "Please select a future date and time for the appointment.");
       return;
     }
 
@@ -246,12 +259,18 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
     setTime(new Date());
   };
 
+  // Handle modal close with form reset
+  const handleModalClose = () => {
+    resetForm();
+    onClose();
+  };
+
   return (
     <Modal
       visible={visible}
       animationType="slide"
       transparent={true}
-      onRequestClose={onClose}
+      onRequestClose={handleModalClose}
     >
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
@@ -262,7 +281,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
             <Text style={styles.modalTitle}>
               {mode === "search" ? "Select Patient" : "New Patient Appointment"}
             </Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <TouchableOpacity onPress={handleModalClose} style={styles.closeButton}>
               <Ionicons name="close" size={24} color="#718096" />
             </TouchableOpacity>
           </View>
@@ -385,6 +404,24 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
                       </View>
                     </View>
                   </View>
+
+                  {/* Sex Selection - only for new patients */}
+                  {!selectedPatient && (
+                    <View style={{ marginBottom: 16 }}>
+                      <Text style={styles.inputLabel}>Sex</Text>
+                      <View style={styles.typeContainer}>
+                        {sexOptions.map(sex => (
+                          <TouchableOpacity
+                            key={sex}
+                            style={[styles.typeButton, patientSex === sex && styles.selectedTypeButton]}
+                            onPress={() => setPatientSex(sex)}
+                          >
+                            <Text style={[styles.typeButtonText, patientSex === sex && styles.selectedTypeButtonText]}>{sex}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </View>
+                  )}
                 </View>
 
                 {/* Appointment Details (Always Editable) */}
@@ -441,7 +478,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
           </ScrollView>
 
           <View style={styles.actionsContainer}>
-            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleModalClose}>
               <Text style={styles.cancelButtonText}>Cancel</Text>
             </TouchableOpacity>
             <TouchableOpacity
