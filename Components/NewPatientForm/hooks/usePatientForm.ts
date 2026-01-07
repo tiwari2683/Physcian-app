@@ -8,6 +8,50 @@ import { isFileAlreadyUploaded } from "../../../Utils/FileUtils";
 import { uploadFilesWithPresignedUrls, FileToUpload } from "../../../Utils/UploadService";
 import { DraftService, DraftPatient } from "../Services/DraftService";
 
+// ============================================
+// FILE DEDUPLICATION HELPER
+// ============================================
+
+/**
+ * Deduplicate files by s3Key or name+size
+ * Prevents duplicate files in the reportFiles array
+ */
+const deduplicateFiles = (files: any[]): any[] => {
+    if (!files || files.length === 0) return [];
+
+    const seen = new Map<string, boolean>();
+    const deduplicated: any[] = [];
+
+    for (const file of files) {
+        // Primary: deduplicate by s3Key (most reliable)
+        const s3Key = file.s3Key || file.key;
+        if (s3Key) {
+            if (seen.has(s3Key)) {
+                console.warn(`⚠️ Duplicate file by s3Key removed: ${file.name || file.fileName}`);
+                continue;
+            }
+            seen.set(s3Key, true);
+            deduplicated.push(file);
+            continue;
+        }
+
+        // Fallback: deduplicate by name+size (for new files)
+        const fallbackKey = `${file.name || file.fileName}_${file.size || 0}`;
+        if (seen.has(fallbackKey)) {
+            console.warn(`⚠️ Duplicate file by name+size removed: ${file.name || file.fileName}`);
+            continue;
+        }
+        seen.set(fallbackKey, true);
+        deduplicated.push(file);
+    }
+
+    if (deduplicated.length !== files.length) {
+        console.log(`📁 Deduplication: ${files.length} files → ${deduplicated.length} unique files`);
+    }
+
+    return deduplicated;
+};
+
 interface UsePatientFormProps {
     patient?: any;
     initialTab?: string;
@@ -101,15 +145,35 @@ export const usePatientForm = ({
         };
     });
 
-    // Report files state
-    const [reportFiles, setReportFiles] = useState<Array<{ uri: string; name: string; type: string; category?: string; base64Data?: string }>>(() => {
+    // Report files state - ENHANCED to preserve S3 metadata and deduplicate
+    const [reportFiles, setReportFiles] = useState<Array<{ uri: string; name: string; type: string; category?: string; base64Data?: string; s3Key?: string; uploadedToS3?: boolean; uploadDate?: string; fileId?: string }>>(() => {
         if (prefillMode && patient && patient.reportFiles && patient.reportFiles.length > 0) {
-            return patient.reportFiles.map((file: any) => ({
-                uri: file.url || "",
-                name: file.name || "",
-                type: file.type || "application/pdf",
-                category: file.category || "",
-            }));
+            console.log(`📁 Initializing ${patient.reportFiles.length} reportFiles from patient data`);
+            const mappedFiles = patient.reportFiles.map((file: any) => {
+                // Detect and log files with incomplete S3 metadata
+                const hasS3Metadata = !!(file.s3Key || file.key);
+                const hasUrl = !!(file.url || file.signedUrl);
+
+                if (hasUrl && !hasS3Metadata) {
+                    console.warn(`⚠️ File missing S3 metadata: ${file.name || file.fileName}`);
+                }
+
+                return {
+                    uri: file.url || file.signedUrl || "",
+                    name: file.name || file.fileName || "",
+                    type: file.type || file.fileType || "application/pdf",
+                    category: file.category || "",
+                    // CRITICAL: Preserve S3 metadata for deduplication
+                    s3Key: file.s3Key || file.key || null,
+                    uploadedToS3: file.uploadedToS3 || !!file.s3Key || !!file.key,
+                    uploadDate: file.uploadDate || file.uploadedAt || null,
+                    // Add unique ID for tracking
+                    fileId: file.s3Key || file.key || `pending_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                };
+            });
+
+            // Deduplicate to prevent duplicate files in state
+            return deduplicateFiles(mappedFiles);
         }
         return [];
     });
@@ -432,6 +496,10 @@ export const usePatientForm = ({
     const uploadFilesToS3 = async (files: any[], patientId: string) => {
         console.log(`🚀 Starting S3 upload for ${files.length} files with patientId: ${patientId}`);
 
+        // Count existing files for logging
+        const existingUploadedFiles = files.filter(file => isFileAlreadyUploaded(file));
+        console.log(`⏭️ Skipping ${existingUploadedFiles.length} already-uploaded files`);
+
         // Filter out already uploaded files and files without URIs
         const filesToUpload = files.filter(file =>
             !isFileAlreadyUploaded(file) &&
@@ -441,8 +509,10 @@ export const usePatientForm = ({
             !file.uri.startsWith("https://")
         );
 
+        console.log(`📤 Uploading ${filesToUpload.length} new files`);
+
         if (filesToUpload.length === 0) {
-            console.log("✅ No files need uploading");
+            console.log("✅ No files need uploading - all files already on S3");
             return files; // Return original files if no upload needed
         }
 
@@ -476,6 +546,7 @@ export const usePatientForm = ({
                     // Return the uploaded file metadata (S3 key only)
                     return {
                         key: uploadedFile.key,
+                        s3Key: uploadedFile.key, // Add s3Key for backend compatibility
                         name: uploadedFile.name,
                         type: uploadedFile.type,
                         category: uploadedFile.category,
@@ -483,8 +554,15 @@ export const usePatientForm = ({
                         uploadedToS3: true,
                         uploadDate: uploadedFile.uploadDate
                     };
-                } else if (isFileAlreadyUploaded(originalFile) || originalFile.base64Data) {
-                    // Keep existing uploaded files or legacy base64 files as-is
+                } else if (isFileAlreadyUploaded(originalFile)) {
+                    // Keep existing uploaded files as-is, ensure s3Key is preserved
+                    return {
+                        ...originalFile,
+                        s3Key: originalFile.s3Key || originalFile.key, // Ensure s3Key exists
+                        uploadedToS3: true
+                    };
+                } else if (originalFile.base64Data) {
+                    // Legacy base64 file - keep as-is
                     return originalFile;
                 } else {
                     // This file failed to upload, skip it
@@ -492,7 +570,7 @@ export const usePatientForm = ({
                 }
             }).filter(file => file !== null); // Remove failed uploads
 
-            console.log(`✅ Successfully processed ${processedFiles.length} files`);
+            console.log(`✅ Successfully processed ${processedFiles.length} files (${existingUploadedFiles.length} skipped, ${uploaded.length} uploaded)`);
             return processedFiles;
 
         } catch (error: any) {

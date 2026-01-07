@@ -61,7 +61,7 @@ async function generatePresignedUploadUrl(requestData) {
             }
         });
 
-        const presignedUrl = await getSignedUrl(s3, command, { 
+        const presignedUrl = await getSignedUrl(s3, command, {
             expiresIn: 300 // 5 minutes
         });
 
@@ -312,7 +312,7 @@ async function handleGetPatientFiles(patientId) {
         }
 
         const reportFiles = patientResult.Item.reportFiles || [];
-        
+
         // Enrich with signed URLs
         const enrichedFiles = await enrichPatientFilesWithSignedUrls(reportFiles);
 
@@ -360,7 +360,7 @@ async function deletePatientFile(requestData) {
 
         // Find and remove file from array
         let reportFiles = patientResult.Item.reportFiles || [];
-        const fileToDelete = reportFiles.find(f => 
+        const fileToDelete = reportFiles.find(f =>
             f.s3Key === s3Key || f.fileName === fileName
         );
 
@@ -383,7 +383,7 @@ async function deletePatientFile(requestData) {
         }
 
         // Remove from array
-        reportFiles = reportFiles.filter(f => 
+        reportFiles = reportFiles.filter(f =>
             f.s3Key !== s3Key && f.fileName !== fileName
         );
 
@@ -444,7 +444,7 @@ export const handler = async (event, context) => {
         // Parse request body
         let requestData;
         if (event.body) {
-            const rawBody = event.isBase64Encoded 
+            const rawBody = event.isBase64Encoded
                 ? Buffer.from(event.body, 'base64').toString('utf8')
                 : event.body;
             requestData = JSON.parse(rawBody);
@@ -459,40 +459,40 @@ export const handler = async (event, context) => {
         switch (action) {
             case 'getPresignedUploadUrl':
                 return await generatePresignedUploadUrl(requestData);
-            
+
             case 'confirmFileUpload':
                 return await confirmFileUpload(requestData);
-            
+
             case 'getPatient':
                 return await handleGetPatient(requestData.patientId);
-            
+
             case 'getPatientFiles':
                 return await handleGetPatientFiles(requestData.patientId);
-            
+
             case 'deletePatientFile':
                 return await deletePatientFile(requestData);
-            
+
             case 'getClinicalHistory':
                 return await fetchClinicalHistory(requestData.patientId);
-            
+
             case 'getMedicalHistory':
                 return await fetchMedicalHistory(requestData.patientId);
-            
+
             case 'getDiagnosisHistory':
                 return await fetchDiagnosisHistory(requestData.patientId);
-            
+
             case 'getInvestigationsHistory':
                 return await fetchInvestigationsHistory(requestData.patientId);
-            
+
             case 'getAllPatients':
                 return await getAllPatients();
-            
+
             case 'searchPatients':
                 return await searchPatients(requestData);
-            
+
             case 'deletePatient':
                 return await deletePatient(requestData);
-            
+
             default:
                 // Handle legacy create/update operations
                 if (requestData.patientId && requestData.updateMode) {
@@ -558,6 +558,143 @@ function formatSuccessResponse(data) {
         },
         body: JSON.stringify(data)
     };
+}
+
+// ============================================
+// FILE DEDUPLICATION LOGIC
+// ============================================
+
+/**
+ * Verify if a file exists in S3 (for corrupted metadata recovery)
+ * @param {string} s3Key - The S3 key to verify
+ * @returns {Promise<boolean>} - True if file exists in S3
+ */
+async function verifyFileExistsInS3(s3Key) {
+    if (!s3Key) return false;
+    try {
+        await s3.send(new HeadObjectCommand({
+            Bucket: REPORTS_BUCKET,
+            Key: s3Key
+        }));
+        return true;
+    } catch (error) {
+        if (error.name === 'NotFound' || error.$metadata?.httpStatusCode === 404) {
+            return false;
+        }
+        console.warn(`⚠️ S3 verification error for ${s3Key}:`, error.message);
+        return false;
+    }
+}
+
+/**
+ * Deduplicate report files - prevents re-uploading existing files
+ * 
+ * @param {Array} existingFiles - Files already in DynamoDB for this patient
+ * @param {Array} incomingFiles - Files sent from frontend in update request
+ * @returns {Object} - { mergedFiles, stats: { kept, skipped, new, corrupted } }
+ */
+async function deduplicateReportFiles(existingFiles = [], incomingFiles = []) {
+    console.log(`🔍 Deduplicating files: ${existingFiles.length} existing, ${incomingFiles.length} incoming`);
+
+    const stats = { kept: 0, skipped: 0, new: 0, corrupted: 0, fixed: 0 };
+
+    // Create a Map of existing files by s3Key for O(1) lookup
+    const existingByKey = new Map();
+    const existingByName = new Map(); // Fallback for legacy files
+
+    for (const file of existingFiles) {
+        const key = file.s3Key || file.key;
+        if (key) {
+            existingByKey.set(key, file);
+        }
+        // Also track by fileName for fallback matching
+        if (file.fileName || file.name) {
+            existingByName.set(file.fileName || file.name, file);
+        }
+    }
+
+    const mergedFiles = [];
+    const processedKeys = new Set();
+
+    // Process incoming files
+    for (const incomingFile of incomingFiles) {
+        const incomingKey = incomingFile.s3Key || incomingFile.key;
+
+        // Case 1: File already has S3 key and uploadedToS3 flag - KEEP as-is
+        if (incomingKey && incomingFile.uploadedToS3 === true) {
+            console.log(`⏭️ Keeping already-uploaded file: ${incomingFile.fileName || incomingFile.name}`);
+            mergedFiles.push(incomingFile);
+            processedKeys.add(incomingKey);
+            stats.kept++;
+            continue;
+        }
+
+        // Case 2: File has S3 key but uploadedToS3 is false/missing (corrupted metadata)
+        if (incomingKey && incomingFile.uploadedToS3 !== true) {
+            console.warn(`⚠️ Detected corrupted metadata for file: ${incomingFile.fileName || incomingFile.name}`);
+            stats.corrupted++;
+
+            // Verify with S3 HeadObject
+            const existsInS3 = await verifyFileExistsInS3(incomingKey);
+
+            if (existsInS3) {
+                console.log(`✅ File exists in S3, fixing metadata for: ${incomingKey}`);
+                mergedFiles.push({
+                    ...incomingFile,
+                    uploadedToS3: true, // Fix the corrupted flag
+                    metadataFixedAt: new Date().toISOString()
+                });
+                processedKeys.add(incomingKey);
+                stats.fixed++;
+            } else {
+                console.log(`❌ File NOT in S3, marking as failed: ${incomingKey}`);
+                mergedFiles.push({
+                    ...incomingFile,
+                    uploadedToS3: false,
+                    uploadFailed: true,
+                    verifiedAt: new Date().toISOString()
+                });
+            }
+            continue;
+        }
+
+        // Case 3: File matches existing by s3Key - SKIP (duplicate from frontend)
+        if (incomingKey && existingByKey.has(incomingKey)) {
+            console.log(`⏭️ Skipping duplicate file (matches existing s3Key): ${incomingKey}`);
+            stats.skipped++;
+            // Use the existing file data instead
+            if (!processedKeys.has(incomingKey)) {
+                mergedFiles.push(existingByKey.get(incomingKey));
+                processedKeys.add(incomingKey);
+            }
+            continue;
+        }
+
+        // Case 4: Genuinely NEW file (no s3Key, needs upload)
+        console.log(`📤 New file detected (needs upload): ${incomingFile.fileName || incomingFile.name}`);
+        mergedFiles.push({
+            ...incomingFile,
+            isNew: true,
+            pendingUpload: true
+        });
+        stats.new++;
+    }
+
+    // Add any existing files that weren't in the incoming array
+    // (This preserves files that frontend didn't send - partial array support)
+    for (const [key, existingFile] of existingByKey) {
+        if (!processedKeys.has(key)) {
+            console.log(`📁 Preserving existing file not in update: ${existingFile.fileName || existingFile.name}`);
+            mergedFiles.push(existingFile);
+            processedKeys.add(key);
+            stats.kept++;
+        }
+    }
+
+    console.log(`✅ Deduplication complete: ${JSON.stringify(stats)}`);
+    console.log(`📊 Final merged files count: ${mergedFiles.length}`);
+
+    return { mergedFiles, stats };
 }
 
 // Stub functions (keep existing logic from your original file)
@@ -629,19 +766,69 @@ async function deletePatient(requestData) {
 async function updatePatientData(requestData) {
     try {
         const { patientId, ...updateData } = requestData;
-        
+
         if (!patientId) {
             return formatErrorResponse("Missing patientId for update");
         }
 
         console.log(`🔄 Updating patient: ${patientId}`);
 
-        // Build update expression
+        // ============================================
+        // STEP 1: Fetch existing patient data first
+        // ============================================
+        let existingPatient = null;
+        try {
+            const existingResult = await dynamodb.send(new GetCommand({
+                TableName: PATIENTS_TABLE,
+                Key: { patientId }
+            }));
+            existingPatient = existingResult.Item;
+            console.log(`📋 Fetched existing patient, has ${existingPatient?.reportFiles?.length || 0} files`);
+        } catch (fetchError) {
+            console.warn(`⚠️ Could not fetch existing patient: ${fetchError.message}`);
+            // Continue anyway - will create if not exists
+        }
+
+        // ============================================
+        // STEP 2: Deduplicate reportFiles if present
+        // ============================================
+        let fileStats = null;
+        if (updateData.reportFiles && Array.isArray(updateData.reportFiles)) {
+            const existingFiles = existingPatient?.reportFiles || [];
+            const incomingFiles = updateData.reportFiles;
+
+            console.log(`📁 Processing reportFiles update...`);
+            console.log(`   ⏭️ Existing files in DB: ${existingFiles.length}`);
+            console.log(`   📥 Incoming files from frontend: ${incomingFiles.length}`);
+
+            // Deduplicate files
+            const { mergedFiles, stats } = await deduplicateReportFiles(existingFiles, incomingFiles);
+            fileStats = stats;
+
+            // Replace updateData.reportFiles with deduplicated array
+            updateData.reportFiles = mergedFiles;
+
+            // Log the action summary
+            console.log(`✅ File deduplication result:`);
+            console.log(`   ⏭️ Skipped (already uploaded): ${stats.skipped}`);
+            console.log(`   📁 Kept (preserved existing): ${stats.kept}`);
+            console.log(`   📤 New (pending upload): ${stats.new}`);
+            console.log(`   🔧 Fixed (corrupted metadata): ${stats.fixed}`);
+            console.log(`   📊 Final file count: ${mergedFiles.length}`);
+        } else if (existingPatient?.reportFiles && !updateData.reportFiles) {
+            // If frontend didn't send reportFiles, preserve existing ones
+            console.log(`📁 No reportFiles in update, preserving existing ${existingPatient.reportFiles.length} files`);
+            // Don't add to updateData - let existing files remain unchanged
+        }
+
+        // ============================================
+        // STEP 3: Build update expression
+        // ============================================
         const updateExpression = [];
         const expressionAttributeNames = {};
         const expressionAttributeValues = {};
 
-        Object.keys(updateData).forEach((key, index) => {
+        Object.keys(updateData).forEach((key) => {
             if (key !== 'action' && key !== 'updateMode' && key !== 'patientId') {
                 const attrName = `#${key}`;
                 const attrValue = `:${key}`;
@@ -655,6 +842,9 @@ async function updatePatientData(requestData) {
         expressionAttributeNames['#updatedAt'] = 'updatedAt';
         expressionAttributeValues[':updatedAt'] = new Date().toISOString();
 
+        // ============================================
+        // STEP 4: Execute conditional update
+        // ============================================
         const params = {
             TableName: PATIENTS_TABLE,
             Key: { patientId },
@@ -667,11 +857,19 @@ async function updatePatientData(requestData) {
         const result = await dynamodb.send(new UpdateCommand(params));
         console.log(`✅ Patient updated: ${patientId}`);
 
-        return formatSuccessResponse({
+        // Return response with file stats if applicable
+        const response = {
             success: true,
             patientId,
             updatedFields: Object.keys(updateData).filter(k => k !== 'action' && k !== 'updateMode')
-        });
+        };
+
+        if (fileStats) {
+            response.fileStats = fileStats;
+            response.message = `Updated with ${fileStats.kept} existing files preserved, ${fileStats.new} new files added`;
+        }
+
+        return formatSuccessResponse(response);
     } catch (error) {
         console.error('❌ Error updating patient:', error);
         return formatErrorResponse(`Failed to update patient: ${error.message}`);
@@ -681,7 +879,7 @@ async function updatePatientData(requestData) {
 async function processSectionSave(requestData) {
     try {
         const { patientId, section, ...sectionData } = requestData;
-        
+
         if (!patientId || !section) {
             return formatErrorResponse("Missing patientId or section");
         }

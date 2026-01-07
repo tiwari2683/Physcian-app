@@ -94,14 +94,34 @@ export const validateImageFile = async (asset: any) => {
 };
 
 // Function to check if a file has already been uploaded to S3
+// FIXED: Now checks S3 metadata first (most reliable), then URL patterns as fallback
 export const isFileAlreadyUploaded = (file: any) => {
-    if (!file.uri) return false;
+    // Primary check: S3 metadata (most reliable)
+    if (file.s3Key && file.uploadedToS3) {
+        console.log(`⏭️ File already uploaded (has s3Key + uploadedToS3): ${file.name || file.fileName}`);
+        return true;
+    }
 
-    return (
-        file.uri.includes("s3.amazonaws.com") ||
-        file.uri.includes("amazonaws.com") ||
-        file.uri.startsWith("https://")
-    );
+    // Secondary check: Has s3Key even if uploadedToS3 flag is missing (corrupted but likely uploaded)
+    if (file.s3Key || file.key) {
+        console.log(`⏭️ File has s3Key (treating as uploaded): ${file.name || file.fileName}`);
+        return true;
+    }
+
+    // Fallback: URL-based check for legacy files
+    if (file.uri) {
+        const isRemoteUrl = (
+            file.uri.includes("s3.amazonaws.com") ||
+            file.uri.includes("amazonaws.com") ||
+            file.uri.startsWith("https://")
+        );
+        if (isRemoteUrl) {
+            console.log(`⏭️ File is remote URL (legacy): ${file.name || file.fileName}`);
+        }
+        return isRemoteUrl;
+    }
+
+    return false;
 };
 
 // Utility: convert file to base64 - UPDATED VERSION

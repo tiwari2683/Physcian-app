@@ -366,8 +366,43 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         // 2. Process Files (now with patientId available)
         let processedReportFiles = [];
         if (reportFiles && reportFiles.length > 0) {
+          // Calculate accurate counts for user feedback
+          const alreadyUploaded = reportFiles.filter(f => isFileAlreadyUploaded(f));
+          const toUpload = reportFiles.filter(f =>
+            !isFileAlreadyUploaded(f) &&
+            f.uri &&
+            !f.uri.startsWith("http://") &&
+            !f.uri.startsWith("https://")
+          );
+
           console.log(`📁 Processing ${reportFiles.length} files for upload`);
-          Alert.alert("Processing Files", `Uploading ${reportFiles.length} file(s) to cloud storage...`, [{ text: "OK" }]);
+          console.log(`   ⏭️ Already uploaded: ${alreadyUploaded.length}`);
+          console.log(`   📤 To upload: ${toUpload.length}`);
+
+          // Debug: Log file details
+          console.log('📋 REPORT FILES BEFORE UPLOAD:', JSON.stringify(
+            reportFiles.map((f, idx) => ({
+              index: idx,
+              name: f.name,
+              isAlreadyUploaded: isFileAlreadyUploaded(f),
+              s3Key: f.s3Key || 'none',
+              uploadedToS3: f.uploadedToS3 || false,
+              uri: f.uri?.substring(0, 50)
+            })),
+            null,
+            2
+          ));
+
+          // Show accurate progress message
+          if (toUpload.length > 0) {
+            const message = alreadyUploaded.length > 0
+              ? `Uploading ${toUpload.length} new file(s) to cloud storage (${alreadyUploaded.length} already uploaded)...`
+              : `Uploading ${toUpload.length} file(s) to cloud storage...`;
+            Alert.alert("Processing Files", message, [{ text: "OK" }]);
+          } else {
+            console.log("✅ All files already uploaded - no upload needed");
+          }
+
           processedReportFiles = await uploadFilesToS3(reportFiles, resolvedPatientId || "temp-patient");
           console.log(`✅ Processed ${processedReportFiles.length} files`);
         }
