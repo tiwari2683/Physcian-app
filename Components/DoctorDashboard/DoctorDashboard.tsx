@@ -1096,7 +1096,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                                 accessibilityLabel={`View image ${report.name}`}
                               >
                                 <Image
-                                  source={{ uri: report.url || report.uri }}
+                                  source={{ uri: report.url }}
                                   style={styles.reportThumbnail}
                                   resizeMode="cover"
                                 />

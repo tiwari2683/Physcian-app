@@ -17,7 +17,8 @@ export interface FileToUpload {
 }
 
 export interface UploadedFile {
-    key: string;
+    key: string; // Keep for backward compatibility
+    s3Key?: string; // New field for the new lambda
     name: string;
     type: string;
     category: string;
@@ -29,15 +30,10 @@ export interface UploadedFile {
 export interface PresignedUrlResponse {
     success: boolean;
     uploadUrl?: string;
-    key?: string;
-    bucket?: string;
+    s3Key?: string; // New field name from lambda
+    key?: string; // Keep for backward compatibility
+    fileName?: string;
     expiresIn?: number;
-    metadata?: {
-        name: string;
-        type: string;
-        category: string;
-        size: number;
-    };
     error?: string;
 }
 
@@ -79,7 +75,7 @@ async function getPresignedUploadUrl(
             return { success: false, error: data.error };
         }
 
-        console.log(`✅ Got presigned URL for key: ${data.key}`);
+        console.log(`✅ Got presigned URL for key: ${data.s3Key || data.key}`);
         return data as PresignedUrlResponse;
     } catch (error: any) {
         console.error(`❌ Error requesting presigned URL: ${error.message}`);
@@ -88,8 +84,52 @@ async function getPresignedUploadUrl(
 }
 
 /**
- * Upload file binary directly to S3 using presigned URL
+ * Confirm file upload with lambda after successful S3 upload
  */
+async function confirmFileUpload(
+    patientId: string,
+    s3Key: string,
+    file: FileToUpload
+): Promise<{ success: boolean; error?: string }> {
+    console.log(`🔍 Confirming upload for: ${s3Key}`);
+
+    try {
+        const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+            },
+            body: JSON.stringify({
+                action: "confirmFileUpload",
+                patientId,
+                s3Key,
+                fileName: file.name,
+                fileType: file.type,
+                category: file.category || "uncategorized",
+                fileSize: file.size || 0,
+            }),
+        });
+
+        const result = await response.json();
+        const data = result.body
+            ? typeof result.body === "string"
+                ? JSON.parse(result.body)
+                : result.body
+            : result;
+
+        if (!data.success) {
+            console.error(`❌ Failed to confirm upload: ${data.error}`);
+            return { success: false, error: data.error };
+        }
+
+        console.log(`✅ Upload confirmed for: ${file.name}`);
+        return { success: true };
+    } catch (error: any) {
+        console.error(`❌ Error confirming upload: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
 async function uploadToS3(
     presignedUrl: string,
     file: FileToUpload
@@ -173,10 +213,23 @@ export async function uploadFileWithPresignedUrl(
         return null;
     }
 
-    // Step 5: Return metadata-only object (for DynamoDB storage)
-    console.log(`✅ Successfully uploaded: ${file.name} → ${presignedResponse.key}`);
+    // Step 5: Confirm upload with lambda (saves metadata to DynamoDB)
+    const confirmResult = await confirmFileUpload(
+        patientId,
+        presignedResponse.s3Key || presignedResponse.key!,
+        file
+    );
+    if (!confirmResult.success) {
+        console.error(`❌ Failed to confirm upload for ${file.name}: ${confirmResult.error}`);
+        return null;
+    }
+
+    // Step 6: Return metadata-only object (for DynamoDB storage)
+    const s3Key = presignedResponse.s3Key || presignedResponse.key!;
+    console.log(`✅ Successfully uploaded and confirmed: ${file.name} → ${s3Key}`);
     return {
-        key: presignedResponse.key!,
+        key: s3Key, // Keep for backward compatibility
+        s3Key: s3Key, // New field
         name: file.name,
         type: file.type,
         category: file.category || "uncategorized",

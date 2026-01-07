@@ -22,7 +22,7 @@ import PrescriptionTab from "./prescription";
 import * as DocumentPicker from "expo-document-picker";
 import KeyboardAwareScrollView from "./KeyboardAwareScrollView";
 import { logStateUpdate } from "../../Utils/Logger";
-import { fileToBase64, isFileAlreadyUploaded } from "../../Utils/FileUtils";
+import { isFileAlreadyUploaded } from "../../Utils/FileUtils";
 import { usePatientForm } from "./hooks/usePatientForm";
 import { DraftService } from "./Services/DraftService";
 
@@ -63,7 +63,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     validateForm,
     pickDocument,
     removeReportFile,
-    ensureFilesHaveBase64,
+    uploadFilesToS3,
     // legacy history functions removed from destructuring
     handleDateChange,
     createBasicPatient
@@ -360,16 +360,17 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           throw new Error("No internet connection. Please check your network and try again.");
         }
 
-        // 1. Process Files
+        // 1. Determine Patient ID first (needed for file uploads)
+        const resolvedPatientId = permanentPatientId || patient?.patientId || patientId;
+
+        // 2. Process Files (now with patientId available)
         let processedReportFiles = [];
         if (reportFiles && reportFiles.length > 0) {
           console.log(`📁 Processing ${reportFiles.length} files for upload`);
-          Alert.alert("Processing Files", `Preparing ${reportFiles.length} file(s) for upload...`, [{ text: "OK" }]);
-          processedReportFiles = await ensureFilesHaveBase64(reportFiles);
+          Alert.alert("Processing Files", `Uploading ${reportFiles.length} file(s) to cloud storage...`, [{ text: "OK" }]);
+          processedReportFiles = await uploadFilesToS3(reportFiles, resolvedPatientId || "temp-patient");
           console.log(`✅ Processed ${processedReportFiles.length} files`);
         }
-
-        // 2. Process Medications
         const processedMedications = medications.map((med: any) => ({
           name: med.name || "",
           duration: med.duration || "",
@@ -421,7 +422,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
         };
 
         // 4. Handle ID (Update vs Create) - Phase 4 Hardening
-        const resolvedPatientId = permanentPatientId || patient?.patientId || patientId;
+        // resolvedPatientId already determined above
 
         if (resolvedPatientId) {
           console.log(`🔑 Updating existing patient: ${resolvedPatientId}`);

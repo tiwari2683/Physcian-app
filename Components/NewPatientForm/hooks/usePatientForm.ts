@@ -4,7 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as DocumentPicker from "expo-document-picker";
 import { API_ENDPOINTS } from "../../../Config";
 import { logStateUpdate } from "../../../Utils/Logger";
-import { fileToBase64, isFileAlreadyUploaded } from "../../../Utils/FileUtils";
+import { isFileAlreadyUploaded } from "../../../Utils/FileUtils";
+import { uploadFilesWithPresignedUrls, FileToUpload } from "../../../Utils/UploadService";
 import { DraftService, DraftPatient } from "../Services/DraftService";
 
 interface UsePatientFormProps {
@@ -428,29 +429,78 @@ export const usePatientForm = ({
         ]);
     };
 
-    const ensureFilesHaveBase64 = async (files: any[]) => {
-        // ... (Logic from original file)
-        // Simplified for brevity here, utilizing extracted fileToBase64
-        const uniqueFileMap = new Map();
-        files.forEach(file => {
-            let key = file.uri || (file.name + "_" + file.category) || `unknown_${Math.random()}`;
-            if (!uniqueFileMap.has(key)) uniqueFileMap.set(key, file);
-        });
-        const deduplicated = Array.from(uniqueFileMap.values());
-        const processed = [];
-        for (const file of deduplicated) {
-            // Skip processing if file is already uploaded, has base64, or HAS NO URI
-            if (isFileAlreadyUploaded(file) || file.base64Data || !file.uri) {
-                processed.push(file); continue;
-            }
-            try {
-                const rawBase64 = await fileToBase64(file.uri);
-                processed.push({ ...file, base64Data: `data:${file.type || "application/octet-stream"};base64,${rawBase64}` });
-            } catch (e) {
-                processed.push(file);
-            }
+    const uploadFilesToS3 = async (files: any[], patientId: string) => {
+        console.log(`🚀 Starting S3 upload for ${files.length} files with patientId: ${patientId}`);
+
+        // Filter out already uploaded files and files without URIs
+        const filesToUpload = files.filter(file =>
+            !isFileAlreadyUploaded(file) &&
+            !file.base64Data &&
+            file.uri &&
+            !file.uri.startsWith("http://") &&
+            !file.uri.startsWith("https://")
+        );
+
+        if (filesToUpload.length === 0) {
+            console.log("✅ No files need uploading");
+            return files; // Return original files if no upload needed
         }
-        return processed;
+
+        // Convert to FileToUpload format for UploadService
+        const uploadFiles: FileToUpload[] = filesToUpload.map(file => ({
+            uri: file.uri,
+            name: file.name,
+            type: file.type,
+            category: file.category || "uncategorized",
+            size: file.size
+        }));
+
+        try {
+            // Upload files using presigned URLs
+            const { uploaded, failed } = await uploadFilesWithPresignedUrls(uploadFiles, patientId);
+
+            if (failed.length > 0) {
+                console.warn(`⚠️ Failed to upload ${failed.length} files:`, failed);
+                Alert.alert("Upload Warning", `Failed to upload ${failed.length} file(s). They will be skipped.`);
+            }
+
+            // Merge uploaded files back with original files
+            const processedFiles = files.map(originalFile => {
+                // Check if this file was uploaded
+                const uploadedFile = uploaded.find(uf =>
+                    uf.name === originalFile.name &&
+                    uf.category === (originalFile.category || "uncategorized")
+                );
+
+                if (uploadedFile) {
+                    // Return the uploaded file metadata (S3 key only)
+                    return {
+                        key: uploadedFile.key,
+                        name: uploadedFile.name,
+                        type: uploadedFile.type,
+                        category: uploadedFile.category,
+                        size: uploadedFile.size,
+                        uploadedToS3: true,
+                        uploadDate: uploadedFile.uploadDate
+                    };
+                } else if (isFileAlreadyUploaded(originalFile) || originalFile.base64Data) {
+                    // Keep existing uploaded files or legacy base64 files as-is
+                    return originalFile;
+                } else {
+                    // This file failed to upload, skip it
+                    return null;
+                }
+            }).filter(file => file !== null); // Remove failed uploads
+
+            console.log(`✅ Successfully processed ${processedFiles.length} files`);
+            return processedFiles;
+
+        } catch (error: any) {
+            console.error("❌ Error uploading files to S3:", error);
+            Alert.alert("Upload Error", `Failed to upload files: ${error.message}`);
+            // Return original files on error to avoid data loss
+            return files;
+        }
     };
 
     // History helpers removed (Phase 3 cleanup) - newHistoryEntry in patientData handles this now.
@@ -555,7 +605,7 @@ export const usePatientForm = ({
         validateForm,
         pickDocument,
         removeReportFile,
-        ensureFilesHaveBase64,
+        uploadFilesToS3,
         // legacy history functions removed from exports
         handleDateChange,
         currentDraftId, // Export the ref if needed
