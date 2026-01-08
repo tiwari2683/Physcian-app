@@ -697,21 +697,89 @@ async function deduplicateReportFiles(existingFiles = [], incomingFiles = []) {
     return { mergedFiles, stats };
 }
 
-// Stub functions (keep existing logic from your original file)
+// ============================================
+// HISTORY FETCH FUNCTIONS
+// ============================================
+
 async function fetchClinicalHistory(patientId) {
-    return { success: true, clinicalHistory: [] };
+    try {
+        console.log(`📊 Fetching clinical history for: ${patientId}`);
+
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: CLINICAL_HISTORY_TABLE,
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: { ":pid": patientId },
+            ScanIndexForward: false, // Latest first
+            Limit: 50 // Reasonable limit
+        }));
+
+        console.log(`✅ Found ${result.Items?.length || 0} clinical history entries`);
+        return { success: true, clinicalHistory: result.Items || [] };
+    } catch (error) {
+        console.error(`❌ Clinical history fetch error:`, error.message);
+        // Return empty on error - non-blocking
+        return { success: false, clinicalHistory: [], error: error.message };
+    }
 }
 
 async function fetchMedicalHistory(patientId) {
-    return { success: true, medicalHistory: [] };
+    try {
+        console.log(`🏥 Fetching medical history for: ${patientId}`);
+
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: MEDICAL_HISTORY_TABLE,
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: { ":pid": patientId },
+            ScanIndexForward: false,
+            Limit: 50
+        }));
+
+        console.log(`✅ Found ${result.Items?.length || 0} medical history entries`);
+        return { success: true, medicalHistory: result.Items || [] };
+    } catch (error) {
+        console.error(`❌ Medical history fetch error:`, error.message);
+        return { success: false, medicalHistory: [], error: error.message };
+    }
 }
 
 async function fetchDiagnosisHistory(patientId) {
-    return { success: true, diagnosisHistory: [] };
+    try {
+        console.log(`🩺 Fetching diagnosis history for: ${patientId}`);
+
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: DIAGNOSIS_HISTORY_TABLE,
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: { ":pid": patientId },
+            ScanIndexForward: false,
+            Limit: 50
+        }));
+
+        console.log(`✅ Found ${result.Items?.length || 0} diagnosis history entries`);
+        return { success: true, diagnosisHistory: result.Items || [] };
+    } catch (error) {
+        console.error(`❌ Diagnosis history fetch error:`, error.message);
+        return { success: false, diagnosisHistory: [], error: error.message };
+    }
 }
 
 async function fetchInvestigationsHistory(patientId) {
-    return { success: true, investigationsHistory: [] };
+    try {
+        console.log(`🔬 Fetching investigations history for: ${patientId}`);
+
+        const result = await dynamodb.send(new QueryCommand({
+            TableName: INVESTIGATIONS_HISTORY_TABLE,
+            KeyConditionExpression: "patientId = :pid",
+            ExpressionAttributeValues: { ":pid": patientId },
+            ScanIndexForward: false,
+            Limit: 50
+        }));
+
+        console.log(`✅ Found ${result.Items?.length || 0} investigations history entries`);
+        return { success: true, investigationsHistory: result.Items || [] };
+    } catch (error) {
+        console.error(`❌ Investigations history fetch error:`, error.message);
+        return { success: false, investigationsHistory: [], error: error.message };
+    }
 }
 
 async function getAllPatients() {
