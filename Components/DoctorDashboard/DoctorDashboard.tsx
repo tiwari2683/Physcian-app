@@ -29,7 +29,7 @@ const { width } = Dimensions.get("window");
 const API_URL = API_ENDPOINTS.DOCTOR_DASHBOARD;
 
 // Polling interval (in milliseconds) - Optimized to 30 seconds
-const POLLING_INTERVAL = 30000;
+const POLLING_INTERVAL = 1000000;
 
 // Types
 interface Patient {

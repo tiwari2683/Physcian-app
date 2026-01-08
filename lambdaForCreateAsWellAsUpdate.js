@@ -752,7 +752,96 @@ async function getAllPatients() {
 }
 
 async function searchPatients(requestData) {
-    return { success: true, patients: [] };
+    try {
+        const { searchTerm } = requestData;
+
+        if (!searchTerm || searchTerm.length < 2) {
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify({
+                    success: true,
+                    patients: [],
+                    message: "Search term too short"
+                })
+            };
+        }
+
+        console.log(`🔍 Searching patients with term: "${searchTerm}"`);
+
+        const searchTermLower = searchTerm.toLowerCase().trim();
+        const searchTermClean = searchTerm.replace(/\D/g, ''); // Digits only for phone search
+        const isPhoneSearch = /^\d{8,10}$/.test(searchTermClean);
+
+        // Fetch all patients (DynamoDB Scan - for small datasets this is acceptable)
+        const result = await dynamodb.send(new ScanCommand({
+            TableName: PATIENTS_TABLE,
+            ProjectionExpression: "patientId, #n, age, sex, mobile, #s",
+            ExpressionAttributeNames: {
+                "#n": "name",
+                "#s": "status"
+            }
+        }));
+
+        const allPatients = result.Items || [];
+        console.log(`📋 Scanned ${allPatients.length} patients`);
+
+        // Filter patients based on search term
+        let matchedPatients = [];
+
+        if (isPhoneSearch) {
+            // Phone number search - exact or partial match
+            console.log(`📞 Phone search mode: ${searchTermClean}`);
+            matchedPatients = allPatients.filter(patient => {
+                const patientMobile = (patient.mobile || '').replace(/\D/g, '');
+                return patientMobile.includes(searchTermClean) || searchTermClean.includes(patientMobile);
+            });
+        } else {
+            // Name search - case-insensitive contains
+            console.log(`👤 Name search mode: ${searchTermLower}`);
+            matchedPatients = allPatients.filter(patient => {
+                const patientName = (patient.name || '').toLowerCase();
+                const patientMobile = (patient.mobile || '').replace(/\D/g, '');
+                // Match by name OR partial phone
+                return patientName.includes(searchTermLower) ||
+                    patientMobile.includes(searchTermClean);
+            });
+        }
+
+        // Format results
+        const formattedPatients = matchedPatients.map(p => ({
+            patientId: p.patientId,
+            name: p.name || 'Unknown',
+            age: p.age ? String(p.age) : '0',
+            sex: p.sex || 'N/A',
+            mobile: p.mobile || '',
+            status: p.status || 'ACTIVE'
+        }));
+
+        console.log(`✅ Found ${formattedPatients.length} matching patients`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                patients: formattedPatients,
+                count: formattedPatients.length,
+                searchType: isPhoneSearch ? 'phone' : 'name'
+            })
+        };
+    } catch (error) {
+        console.error('❌ Search error:', error);
+        return formatErrorResponse(`Search failed: ${error.message}`);
+    }
 }
 
 async function deletePatient(requestData) {

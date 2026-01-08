@@ -15,7 +15,7 @@ exports.handler = async (event) => {
     const headers = {
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,DELETE"
+        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,DELETE,PATCH"
     };
 
     try {
@@ -154,6 +154,211 @@ exports.handler = async (event) => {
                 headers,
                 body: JSON.stringify({ message: "Appointment saved successfully", data: body })
             };
+        }
+
+        if (method === "PATCH") {
+            // PATCH /appointments - Reschedule an appointment
+            const body = JSON.parse(event.body);
+            const appointmentId = body.id ? String(body.id) : null;
+
+            // Validate required ID
+            if (!appointmentId) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({
+                        success: false,
+                        errorCode: "MISSING_ID",
+                        message: "Appointment ID is required for rescheduling."
+                    })
+                };
+            }
+
+            // 1. Fetch existing appointment
+            const getParams = {
+                TableName: TABLE_NAME,
+                Key: { id: appointmentId }
+            };
+            const existingResult = await dynamodb.send(new GetCommand(getParams));
+            const existingAppointment = existingResult.Item;
+
+            // 2. Validate: appointment exists
+            if (!existingAppointment) {
+                return {
+                    statusCode: 404,
+                    headers,
+                    body: JSON.stringify({
+                        success: false,
+                        errorCode: "NOT_FOUND",
+                        message: "Appointment not found."
+                    })
+                };
+            }
+
+            // 3. Validate: status is not cancelled or completed
+            if (existingAppointment.status === "canceled" || existingAppointment.status === "completed") {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({
+                        success: false,
+                        errorCode: "INVALID_STATUS",
+                        message: `Cannot reschedule a ${existingAppointment.status} appointment.`
+                    })
+                };
+            }
+
+            // Extract only allowed fields for update
+            const newDate = body.date || existingAppointment.date;
+            const newTime = body.time || existingAppointment.time;
+            const newNotes = body.notes !== undefined ? body.notes : existingAppointment.notes;
+
+            // 4. Validate: new date/time is in the future
+            const parseDateTime = (dateStr, timeStr) => {
+                const months = {
+                    "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5,
+                    "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11
+                };
+                const dateMatch = dateStr?.match(/(\w+)\s+(\d+),\s+(\d+)/);
+                if (!dateMatch) return new Date(0);
+
+                const month = months[dateMatch[1]] ?? 0;
+                const day = parseInt(dateMatch[2]);
+                const year = parseInt(dateMatch[3]);
+
+                const timeMatch = timeStr?.match(/(\d+):(\d+)\s*(AM|PM)/i);
+                if (!timeMatch) return new Date(year, month, day, 23, 59);
+
+                let hours = parseInt(timeMatch[1]);
+                const minutes = parseInt(timeMatch[2]);
+                const ampm = timeMatch[3].toUpperCase();
+
+                if (ampm === "PM" && hours !== 12) hours += 12;
+                if (ampm === "AM" && hours === 12) hours = 0;
+
+                return new Date(year, month, day, hours, minutes);
+            };
+
+            const newDateTime = parseDateTime(newDate, newTime);
+            const now = new Date();
+
+            if (newDateTime <= now) {
+                return {
+                    statusCode: 400,
+                    headers,
+                    body: JSON.stringify({
+                        success: false,
+                        errorCode: "INVALID_DATE",
+                        message: "Cannot reschedule to a past date or time."
+                    })
+                };
+            }
+
+            // 5. No-op: if date and time are unchanged
+            if (newDate === existingAppointment.date && newTime === existingAppointment.time && newNotes === existingAppointment.notes) {
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({
+                        success: true,
+                        message: "No changes detected.",
+                        data: existingAppointment
+                    })
+                };
+            }
+
+            // 6. Double-booking check (only if date or time changed)
+            if (newDate !== existingAppointment.date || newTime !== existingAppointment.time) {
+                const scanParams = {
+                    TableName: TABLE_NAME,
+                    FilterExpression: "#d = :date AND #t = :time AND #s <> :canceledStatus",
+                    ExpressionAttributeNames: {
+                        "#d": "date",
+                        "#t": "time",
+                        "#s": "status"
+                    },
+                    ExpressionAttributeValues: {
+                        ":date": newDate,
+                        ":time": newTime,
+                        ":canceledStatus": "canceled"
+                    }
+                };
+
+                const conflictResult = await dynamodb.send(new ScanCommand(scanParams));
+                const conflict = conflictResult.Items.find(item => item.id.toString() !== appointmentId);
+
+                if (conflict) {
+                    return {
+                        statusCode: 409,
+                        headers,
+                        body: JSON.stringify({
+                            success: false,
+                            errorCode: "SLOT_ALREADY_BOOKED",
+                            message: `Time slot ${newTime} on ${newDate} is already booked.`
+                        })
+                    };
+                }
+            }
+
+            // 7. Conditional update - only update if status hasn't changed (race condition protection)
+            // Sanitize notes if provided
+            let sanitizedNotes = newNotes;
+            if (sanitizedNotes && typeof sanitizedNotes === 'string') {
+                sanitizedNotes = sanitizedNotes
+                    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+                    .replace(/<[^>]*>/g, '')
+                    .trim()
+                    .substring(0, 1000);
+            }
+
+            const updateParams = {
+                TableName: TABLE_NAME,
+                Key: { id: appointmentId },
+                UpdateExpression: "SET #d = :newDate, #t = :newTime, #n = :newNotes, #updatedAt = :updatedAt",
+                ConditionExpression: "#s = :expectedStatus",
+                ExpressionAttributeNames: {
+                    "#d": "date",
+                    "#t": "time",
+                    "#n": "notes",
+                    "#s": "status",
+                    "#updatedAt": "updatedAt"
+                },
+                ExpressionAttributeValues: {
+                    ":newDate": newDate,
+                    ":newTime": newTime,
+                    ":newNotes": sanitizedNotes || "",
+                    ":expectedStatus": existingAppointment.status,
+                    ":updatedAt": new Date().toISOString()
+                },
+                ReturnValues: "ALL_NEW"
+            };
+
+            try {
+                const updateResult = await dynamodb.send(new UpdateCommand(updateParams));
+
+                return {
+                    statusCode: 200,
+                    headers,
+                    body: JSON.stringify({
+                        success: true,
+                        message: "Appointment rescheduled successfully.",
+                        data: updateResult.Attributes
+                    })
+                };
+            } catch (updateError) {
+                if (updateError.name === "ConditionalCheckFailedException") {
+                    return {
+                        statusCode: 409,
+                        headers,
+                        body: JSON.stringify({
+                            success: false,
+                            errorCode: "CONCURRENT_UPDATE",
+                            message: "Appointment was modified by another user. Please refresh and try again."
+                        })
+                    };
+                }
+                throw updateError;
+            }
         }
 
         if (method === "DELETE") {

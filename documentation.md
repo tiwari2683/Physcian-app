@@ -1,3 +1,35 @@
+# Backend Lambda Architecture
+
+## Lambda Functions Overview
+
+| Lambda File | API Endpoint | Purpose |
+|-------------|--------------|---------|
+| `lambdaForCreateAsWellAsUpdate.js` | `PATIENT_PROCESSOR` | Patient data operations |
+| `lambda/appointmentsFunction.js` | `APPOINTMENTS` | Appointment operations |
+
+### Patient Processor Lambda (`lambdaForCreateAsWellAsUpdate.js`)
+
+| Action | Description |
+|--------|-------------|
+| `searchPatients` | **Search patients by name or phone** (used in appointment booking) |
+| `getAllPatients` | Get all patients list |
+| `getPatient` | Get single patient with signed URLs |
+| `createPatient` | Create new patient |
+| `deletePatient` | Delete patient |
+
+### Appointments Lambda (`lambda/appointmentsFunction.js`)
+
+| Method | Description |
+|--------|-------------|
+| `GET` | Get all appointments |
+| `POST` | Create/update appointment |
+| `PATCH` | Reschedule appointment |
+| `DELETE` | Cancel appointment |
+
+> **⚠️ Important:** Patient search when booking appointments uses **PATIENT_PROCESSOR**, not Appointments Lambda. This is because it queries the Patients table, not Appointments.
+
+---
+
 I have completed the analysis of AsyncStorage usage in your project. It is primarily used for Data Caching, Draft Saving, and State Restoration.
 
 1. State Preservation (Crash Proofing)

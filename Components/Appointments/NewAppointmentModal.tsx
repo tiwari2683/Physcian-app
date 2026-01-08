@@ -48,6 +48,7 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   const [searchResults, setSearchResults] = useState<Patient[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+  const [searchType, setSearchType] = useState<"phone" | "name" | null>(null);
 
   // Form state (for new or selected)
   const [patientName, setPatientName] = useState("");
@@ -77,12 +78,33 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
   // Available sex options
   const sexOptions = ["Male", "Female", "Other"];
 
-  // Debounced Search Effect
+  // Phone number detection helper
+  const isPhoneNumber = (query: string): boolean => {
+    const cleanQuery = query.replace(/[\s\-()]/g, '');
+    return /^\d{8,10}$/.test(cleanQuery);
+  };
+
+  // Debounced Search Effect - Faster for phone, slower for name
   useEffect(() => {
-    if (mode === "search" && searchQuery.length > 2) {
+    if (mode !== "search") {
+      setSearchResults([]);
+      setSearchType(null);
+      return;
+    }
+
+    const cleanQuery = searchQuery.trim();
+    const isPhone = isPhoneNumber(cleanQuery);
+    setSearchType(isPhone ? "phone" : cleanQuery.length > 0 ? "name" : null);
+
+    // Phone search: start immediately with 8+ digits, 200ms debounce
+    // Name search: require 3+ chars, 500ms debounce
+    const minLength = isPhone ? 8 : 3;
+    const debounceMs = isPhone ? 200 : 500;
+
+    if (cleanQuery.length >= minLength) {
       const timer = setTimeout(() => {
-        performSearch(searchQuery);
-      }, 500);
+        performSearch(cleanQuery);
+      }, debounceMs);
       return () => clearTimeout(timer);
     } else {
       setSearchResults([]);
@@ -312,41 +334,116 @@ const NewAppointmentModal: React.FC<NewAppointmentModalProps> = ({
             {/* SEARCH SECTION */}
             {mode === "search" && !selectedPatient && (
               <View style={styles.searchSection}>
-                <Text style={styles.inputLabel}>Search Patient</Text>
+                <Text style={styles.inputLabel}>
+                  Search Patient {searchType === "phone" && "(by phone number)"}
+                </Text>
                 <View style={styles.inputContainer}>
-                  <Ionicons name="search" size={20} color="#718096" style={styles.inputIcon} />
+                  <Ionicons
+                    name={searchType === "phone" ? "call" : "search"}
+                    size={20}
+                    color={searchType === "phone" ? "#0070D6" : "#718096"}
+                    style={styles.inputIcon}
+                  />
                   <TextInput
                     style={styles.input}
-                    placeholder="Type name or mobile..."
+                    placeholder="Enter phone number or name..."
                     value={searchQuery}
                     onChangeText={setSearchQuery}
+                    keyboardType="default"
+                    autoCapitalize="words"
                   />
-                  {isSearching && <ActivityIndicator size="small" color="#0070D6" />}
+                  {isSearching && (
+                    <View style={styles.searchingIndicator}>
+                      <ActivityIndicator size="small" color="#0070D6" />
+                    </View>
+                  )}
                 </View>
+
+                {/* Search Type Hint */}
+                {searchType === "phone" && !isSearching && searchQuery.length >= 8 && searchQuery.length < 10 && (
+                  <Text style={styles.searchHint}>
+                    💡 Type {10 - searchQuery.replace(/\D/g, '').length} more digits for full phone search
+                  </Text>
+                )}
 
                 {/* Search Results */}
                 {searchResults.length > 0 && (
                   <View style={styles.resultsList}>
+                    <Text style={styles.resultsHeader}>
+                      {searchResults.length} patient{searchResults.length > 1 ? 's' : ''} found
+                    </Text>
                     {searchResults.map(p => (
-                      <TouchableOpacity key={p.patientId} style={styles.resultItem} onPress={() => selectPatient(p)}>
-                        <View>
-                          <Text style={styles.resultName}>{p.name}</Text>
-                          <Text style={styles.resultSub}>{p.age} yrs • {p.mobile || "No mobile"}</Text>
+                      <TouchableOpacity
+                        key={p.patientId}
+                        style={styles.resultItem}
+                        onPress={() => selectPatient(p)}
+                        activeOpacity={0.7}
+                      >
+                        <View style={styles.resultAvatar}>
+                          <Text style={styles.resultAvatarText}>
+                            {p.name.charAt(0).toUpperCase()}
+                          </Text>
                         </View>
-                        <Ionicons name="chevron-forward" size={20} color="#CBD5E0" />
+                        <View style={styles.resultInfo}>
+                          <Text style={styles.resultName}>{p.name}</Text>
+                          <View style={styles.resultDetails}>
+                            <Ionicons name="call" size={12} color="#0070D6" />
+                            <Text style={styles.resultPhone}>{p.mobile || "No phone"}</Text>
+                            <Text style={styles.resultMeta}>• {p.age} yrs • {p.sex || "N/A"}</Text>
+                          </View>
+                        </View>
+                        <View style={styles.selectButton}>
+                          <Text style={styles.selectButtonText}>Select</Text>
+                        </View>
                       </TouchableOpacity>
                     ))}
                   </View>
                 )}
 
-                {/* Create New Option */}
+                {/* No Results Message */}
+                {searchQuery.length >= 3 && !isSearching && searchResults.length === 0 && (
+                  <View style={styles.noResultsContainer}>
+                    <Ionicons name="search-outline" size={32} color="#CBD5E0" />
+                    <Text style={styles.noResultsText}>No patients found</Text>
+                    <Text style={styles.noResultsHint}>
+                      {searchType === "phone"
+                        ? "No patient with this phone number exists"
+                        : "Try searching by phone number for more accurate results"}
+                    </Text>
+                  </View>
+                )}
+
+                {/* Create New Option - Only if no phone match exists */}
                 {searchQuery.length > 0 && !isSearching && (
-                  <TouchableOpacity style={styles.createNewButton} onPress={createJobForNewPatient}>
-                    <View style={styles.createNewIcon}>
-                      <Ionicons name="add" size={20} color="white" />
-                    </View>
-                    <Text style={styles.createNewText}>Create new patient: "{searchQuery}"</Text>
-                  </TouchableOpacity>
+                  (() => {
+                    // Check if any search result has matching phone
+                    const cleanQuery = searchQuery.replace(/\D/g, '');
+                    const phoneMatchExists = searchResults.some(
+                      p => p.mobile && p.mobile.replace(/\D/g, '') === cleanQuery
+                    );
+
+                    if (phoneMatchExists) {
+                      return (
+                        <View style={styles.duplicateWarning}>
+                          <Ionicons name="warning" size={20} color="#F59E0B" />
+                          <Text style={styles.duplicateWarningText}>
+                            Patient with this number already exists. Please select from the list above.
+                          </Text>
+                        </View>
+                      );
+                    }
+
+                    return (
+                      <TouchableOpacity style={styles.createNewButton} onPress={createJobForNewPatient}>
+                        <View style={styles.createNewIcon}>
+                          <Ionicons name="add" size={20} color="white" />
+                        </View>
+                        <Text style={styles.createNewText}>
+                          Create new patient{searchType !== "phone" ? `: "${searchQuery}"` : ""}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })()
                 )}
               </View>
             )}
@@ -568,29 +665,130 @@ const styles = StyleSheet.create({
   searchSection: {
     marginBottom: 24,
   },
+  searchingIndicator: {
+    marginLeft: 8,
+  },
+  searchHint: {
+    fontSize: 12,
+    color: '#718096',
+    marginTop: 6,
+    paddingLeft: 4,
+  },
   resultsList: {
-    marginTop: 8,
+    marginTop: 12,
     borderWidth: 1,
     borderColor: "#E2E8F0",
-    borderRadius: 8,
-    maxHeight: 200,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    maxHeight: 280,
+  },
+  resultsHeader: {
+    fontSize: 12,
+    color: '#718096',
+    fontWeight: '600',
+    padding: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    backgroundColor: '#F8FAFC',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
   },
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
     padding: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#F7FAFC',
+    borderBottomColor: '#F1F5F9',
+  },
+  resultAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#0070D6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  resultAvatarText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  resultInfo: {
+    flex: 1,
   },
   resultName: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
     color: '#2D3748',
+    marginBottom: 4,
+  },
+  resultDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  resultPhone: {
+    fontSize: 13,
+    color: '#0070D6',
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  resultMeta: {
+    fontSize: 12,
+    color: '#718096',
+    marginLeft: 4,
   },
   resultSub: {
     fontSize: 12,
     color: '#718096',
+  },
+  selectButton: {
+    backgroundColor: '#EBF8FF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#BEE3F8',
+  },
+  selectButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#0070D6',
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    paddingVertical: 24,
+    paddingHorizontal: 16,
+  },
+  noResultsText: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#4A5568',
+    marginTop: 12,
+  },
+  noResultsHint: {
+    fontSize: 13,
+    color: '#718096',
+    textAlign: 'center',
+    marginTop: 6,
+  },
+  duplicateWarning: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#FFFBEB',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#FCD34D',
+    gap: 10,
+  },
+  duplicateWarningText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '500',
   },
   createNewButton: {
     flexDirection: 'row',
@@ -598,22 +796,23 @@ const styles = StyleSheet.create({
     marginTop: 12,
     padding: 12,
     backgroundColor: '#F0FFF4',
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: '#C6F6D5',
   },
   createNewIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#48BB78',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
+    marginRight: 10,
   },
   createNewText: {
     color: '#2F855A',
     fontWeight: '600',
+    fontSize: 14,
   },
   selectedPatientBanner: {
     flexDirection: 'row',

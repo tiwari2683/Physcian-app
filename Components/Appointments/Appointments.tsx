@@ -44,7 +44,7 @@ import { handleApiError } from "../../Utils/ApiErrorHandler";
 
 const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
   // Filter states
-  const [activeFilter, setActiveFilter] = useState<string>("upcoming");
+  const [activeFilter, setActiveFilter] = useState<string>("today");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
   // Modal visibility state
@@ -88,6 +88,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
 
   // Filter tabs
   const filterTabs = [
+    { key: "today", label: "Today" },
     { key: "upcoming", label: "Upcoming" },
     { key: "completed", label: "Completed" },
     { key: "canceled", label: "Canceled" },
@@ -160,10 +161,46 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
   // END COMPUTED STATUS LOGIC
   // ============================================
 
-  // Filtered appointments based on COMPUTED effective status (not stored status)
-  const filteredAppointments = appointments.filter(
-    (appointment) => getEffectiveStatus(appointment) === activeFilter
-  );
+  // ============================================
+  // TODAY'S APPOINTMENTS HELPER
+  // ============================================
+  const getTodaysAppointments = (): Appointment[] => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+    // Filter for today's appointments (only upcoming status, not cancelled/completed)
+    const todayAppts = appointments.filter((appointment) => {
+      const effectiveStatus = getEffectiveStatus(appointment);
+      // Only show upcoming appointments for today
+      if (effectiveStatus !== "upcoming") return false;
+
+      const apptDateTime = parseAppointmentDateTime(appointment.date, appointment.time);
+      return apptDateTime >= todayStart && apptDateTime <= todayEnd;
+    });
+
+    // Sort: Emergency first, then by time
+    return todayAppts.sort((a, b) => {
+      const aIsEmergency = a.type === "Emergency";
+      const bIsEmergency = b.type === "Emergency";
+
+      // Emergency appointments first
+      if (aIsEmergency && !bIsEmergency) return -1;
+      if (!aIsEmergency && bIsEmergency) return 1;
+
+      // Within same priority, sort by time
+      const aTime = parseAppointmentDateTime(a.date, a.time);
+      const bTime = parseAppointmentDateTime(b.date, b.time);
+      return aTime.getTime() - bTime.getTime();
+    });
+  };
+
+  // Filtered appointments based on active filter
+  const filteredAppointments = activeFilter === "today"
+    ? getTodaysAppointments()
+    : appointments.filter(
+      (appointment) => getEffectiveStatus(appointment) === activeFilter
+    );
 
   // Status colors
   const getStatusColor = (status: string) => {
@@ -369,11 +406,15 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
       <View style={styles.emptyIconContainer}>
         <Ionicons name="calendar-outline" size={48} color="#0D9488" />
       </View>
-      <Text style={styles.emptyStateTitle}>No {activeFilter} appointments</Text>
+      <Text style={styles.emptyStateTitle}>
+        {activeFilter === "today" ? "No appointments today" : `No ${activeFilter} appointments`}
+      </Text>
       <Text style={styles.emptyStateText}>
-        {activeFilter === "upcoming"
-          ? "Book a new appointment using the + button above"
-          : `You don't have any ${activeFilter} appointments yet`}
+        {activeFilter === "today"
+          ? "You have no scheduled appointments for today"
+          : activeFilter === "upcoming"
+            ? "Book a new appointment using the + button above"
+            : `You don't have any ${activeFilter} appointments yet`}
       </Text>
     </View>
   );
@@ -407,7 +448,7 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0D9488" />
+      <StatusBar barStyle="light-content" backgroundColor="#0070D6" />
       {/* Modern Gradient-style Header with SafeArea */}
       <View style={styles.headerBackground}>
         <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
@@ -528,7 +569,7 @@ const styles = StyleSheet.create({
   },
   // ====== HEADER STYLES ======
   headerBackground: {
-    backgroundColor: "#0D9488",
+    backgroundColor: "#0070D6",
     borderBottomLeftRadius: 24,
     borderBottomRightRadius: 24,
     paddingTop: Platform.OS === 'android' ? 35 : 0,
@@ -577,17 +618,17 @@ const styles = StyleSheet.create({
   filterContainer: {
     flexDirection: "row",
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
+    borderRadius: 12,
     padding: 6,
     ...Platform.select({
       ios: {
-        shadowColor: "#0D9488",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.1,
-        shadowRadius: 12,
+        shadowColor: "rgba(0, 0, 0, 0.1)",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.6,
+        shadowRadius: 3,
       },
       android: {
-        elevation: 4,
+        elevation: 2,
       },
     }),
   },
@@ -596,12 +637,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 8,
   },
   activeFilterTab: {
-    backgroundColor: "#0D9488",
+    backgroundColor: "#0070D6",
   },
   filterText: {
     fontSize: 14,
@@ -631,26 +672,26 @@ const styles = StyleSheet.create({
   // ====== APPOINTMENT CARD STYLES ======
   appointmentCard: {
     backgroundColor: "#FFFFFF",
-    borderRadius: 20,
+    borderRadius: 12,
     marginBottom: 12,
     flexDirection: "row",
     overflow: "hidden",
     ...Platform.select({
       ios: {
-        shadowColor: "#1E293B",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.08,
-        shadowRadius: 12,
+        shadowColor: "rgba(0, 0, 0, 0.1)",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.6,
+        shadowRadius: 3,
       },
       android: {
-        elevation: 3,
+        elevation: 2,
       },
     }),
   },
   statusIndicator: {
     width: 4,
-    borderTopLeftRadius: 20,
-    borderBottomLeftRadius: 20,
+    borderTopLeftRadius: 12,
+    borderBottomLeftRadius: 12,
   },
   cardContent: {
     flex: 1,
@@ -662,24 +703,24 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
     marginRight: 12,
   },
   avatarText: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "600",
   },
   patientInfo: {
     flex: 1,
   },
   patientName: {
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: "600",
-    color: "#1E293B",
+    color: "#2D3748",
     marginBottom: 3,
   },
   patientMeta: {
@@ -687,8 +728,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   patientAge: {
-    fontSize: 13,
-    color: "#64748B",
+    fontSize: 12,
+    color: "#718096",
   },
   dot: {
     width: 4,
@@ -702,12 +743,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
   typeTag: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
   },
   typeText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: "600",
   },
   // ====== APPOINTMENT DETAILS (DATE/TIME) ======

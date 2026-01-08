@@ -15,6 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import { API_ENDPOINTS } from "../../Config";
+import RescheduleModal from "./RescheduleModal";
 
 interface Appointment {
     id: number;
@@ -35,6 +36,9 @@ const AppointmentDetails = () => {
     const [appointment, setAppointment] = useState<Appointment>(initialAppointment);
     const [isLoadingProfile, setIsLoadingProfile] = useState(false);
     const [isCanceling, setIsCanceling] = useState(false);
+    const [isRescheduleModalVisible, setIsRescheduleModalVisible] = useState(false);
+    const [isRescheduling, setIsRescheduling] = useState(false);
+    const [rescheduleError, setRescheduleError] = useState<string | null>(null);
 
     const getStatusColor = (status: string) => {
         switch (status) {
@@ -109,8 +113,54 @@ const AppointmentDetails = () => {
 
     const effectiveStatus = getEffectiveStatus();
 
-    // Edit is disabled for now
-    const isEditDisabled = true;
+    // Reschedule handler
+    const handleReschedule = async (newDate: string, newTime: string, newNotes?: string): Promise<{ success: boolean; error?: string }> => {
+        setIsRescheduling(true);
+        setRescheduleError(null);
+
+        try {
+            const response = await fetch(API_ENDPOINTS.APPOINTMENTS, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    id: String(appointment.id),
+                    date: newDate,
+                    time: newTime,
+                    notes: newNotes
+                })
+            });
+
+            const data = await response.json();
+            const responseData = typeof data.body === 'string' ? JSON.parse(data.body) : data;
+
+            if (!response.ok || !responseData.success) {
+                const errorMessage = responseData.message || "Failed to reschedule appointment.";
+                setRescheduleError(errorMessage);
+                return { success: false, error: errorMessage };
+            }
+
+            // Update local state with new appointment data
+            if (responseData.data) {
+                setAppointment(prev => ({
+                    ...prev,
+                    date: responseData.data.date,
+                    time: responseData.data.time,
+                    notes: responseData.data.notes
+                }));
+            }
+
+            setIsRescheduleModalVisible(false);
+            Alert.alert("Success", "Appointment rescheduled successfully.");
+            return { success: true };
+        } catch (error) {
+            console.error("Reschedule error:", error);
+            const errorMessage = "Network error. Please check your connection and try again.";
+            setRescheduleError(errorMessage);
+            return { success: false, error: errorMessage };
+        } finally {
+            setIsRescheduling(false);
+        }
+    };
 
     // New Function: Fetch and View Profile
     const handleViewProfile = async () => {
@@ -209,7 +259,7 @@ const AppointmentDetails = () => {
 
     return (
         <View style={styles.container}>
-            <StatusBar barStyle="light-content" backgroundColor="#0D9488" />
+            <StatusBar barStyle="light-content" backgroundColor="#0070D6" />
             {/* Header Background that extends to top */}
             <View style={styles.headerBackground}>
                 <SafeAreaView edges={['top']} style={styles.headerSafeArea}>
@@ -323,6 +373,16 @@ const AppointmentDetails = () => {
                             </TouchableOpacity>
                         )}
 
+                        {/* Reschedule Button */}
+                        <TouchableOpacity
+                            style={styles.rescheduleButton}
+                            onPress={() => setIsRescheduleModalVisible(true)}
+                            activeOpacity={0.8}
+                        >
+                            <Ionicons name="calendar-outline" size={20} color="#0D9488" />
+                            <Text style={styles.rescheduleButtonText}>Reschedule</Text>
+                        </TouchableOpacity>
+
                         <View style={styles.actionRow}>
                             <TouchableOpacity style={styles.actionChip} onPress={handleCall}>
                                 <Ionicons name="call" size={18} color="#10B981" />
@@ -366,6 +426,19 @@ const AppointmentDetails = () => {
                     </View>
                 )}
             </ScrollView>
+
+            {/* Reschedule Modal */}
+            <RescheduleModal
+                visible={isRescheduleModalVisible}
+                onClose={() => {
+                    setIsRescheduleModalVisible(false);
+                    setRescheduleError(null);
+                }}
+                onReschedule={handleReschedule}
+                appointment={appointment}
+                isLoading={isRescheduling}
+                error={rescheduleError}
+            />
         </View>
     );
 };
@@ -377,7 +450,7 @@ const styles = StyleSheet.create({
     },
     // ====== HEADER STYLES ======
     headerBackground: {
-        backgroundColor: "#0D9488",
+        backgroundColor: "#0070D6",
         borderBottomLeftRadius: 24,
         borderBottomRightRadius: 24,
         paddingTop: Platform.OS === 'android' ? 35 : 0,
@@ -394,10 +467,10 @@ const styles = StyleSheet.create({
         paddingBottom: 20,
     },
     backButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 14,
-        backgroundColor: "rgba(255, 255, 255, 0.25)",
+        width: 40,
+        height: 40,
+        borderRadius: 12,
+        backgroundColor: "rgba(255, 255, 255, 0.2)",
         justifyContent: "center",
         alignItems: "center",
         borderWidth: 1,
@@ -435,18 +508,18 @@ const styles = StyleSheet.create({
     // ====== CARD STYLES ======
     card: {
         backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 20,
-        marginBottom: 16,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
         ...Platform.select({
             ios: {
-                shadowColor: "#1E293B",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.08,
-                shadowRadius: 12,
+                shadowColor: "rgba(0, 0, 0, 0.1)",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.6,
+                shadowRadius: 3,
             },
             android: {
-                elevation: 3,
+                elevation: 2,
             },
         }),
     },
@@ -457,24 +530,24 @@ const styles = StyleSheet.create({
         marginBottom: 16,
     },
     avatar: {
-        width: 56,
-        height: 56,
-        borderRadius: 18,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
         justifyContent: "center",
         alignItems: "center",
-        marginRight: 14,
+        marginRight: 12,
     },
     avatarText: {
-        fontSize: 20,
-        fontWeight: "700",
+        fontSize: 18,
+        fontWeight: "600",
     },
     patientInfo: {
         flex: 1,
     },
     patientName: {
-        fontSize: 20,
-        fontWeight: "700",
-        color: "#1E293B",
+        fontSize: 18,
+        fontWeight: "600",
+        color: "#2D3748",
         marginBottom: 4,
     },
     patientMeta: {
@@ -483,8 +556,8 @@ const styles = StyleSheet.create({
         flexWrap: "wrap",
     },
     patientAge: {
-        fontSize: 14,
-        color: "#64748B",
+        fontSize: 13,
+        color: "#718096",
     },
     verifiedBadge: {
         flexDirection: "row",
@@ -502,13 +575,13 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         alignSelf: "flex-start",
-        paddingHorizontal: 14,
-        paddingVertical: 8,
-        borderRadius: 12,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 8,
         gap: 6,
     },
     typeBadgeText: {
-        fontSize: 14,
+        fontSize: 12,
         fontWeight: "600",
     },
     // ====== SECTION TITLE ======
@@ -538,12 +611,12 @@ const styles = StyleSheet.create({
     },
     detailLabel: {
         fontSize: 12,
-        color: "#64748B",
+        color: "#718096",
         marginBottom: 2,
     },
     detailValue: {
-        fontSize: 16,
-        color: "#1E293B",
+        fontSize: 14,
+        color: "#2D3748",
         fontWeight: "600",
     },
     // ====== NOTES SECTION ======
@@ -572,45 +645,62 @@ const styles = StyleSheet.create({
     // ====== ACTIONS CARD ======
     actionsCard: {
         backgroundColor: "#FFFFFF",
-        borderRadius: 20,
-        padding: 20,
-        marginBottom: 16,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 12,
         ...Platform.select({
             ios: {
-                shadowColor: "#1E293B",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.08,
-                shadowRadius: 12,
+                shadowColor: "rgba(0, 0, 0, 0.1)",
+                shadowOffset: { width: 0, height: 2 },
+                shadowOpacity: 0.6,
+                shadowRadius: 3,
+            },
+            android: {
+                elevation: 2,
+            },
+        }),
+    },
+    primaryButton: {
+        flexDirection: "row",
+        backgroundColor: "#0070D6",
+        paddingVertical: 14,
+        borderRadius: 10,
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 12,
+        gap: 8,
+        ...Platform.select({
+            ios: {
+                shadowColor: "rgba(0, 112, 214, 0.3)",
+                shadowOffset: { width: 0, height: 3 },
+                shadowOpacity: 0.8,
+                shadowRadius: 4,
             },
             android: {
                 elevation: 3,
             },
         }),
     },
-    primaryButton: {
-        flexDirection: "row",
-        backgroundColor: "#0D9488",
-        paddingVertical: 16,
-        borderRadius: 14,
-        justifyContent: "center",
-        alignItems: "center",
-        marginBottom: 16,
-        gap: 8,
-        ...Platform.select({
-            ios: {
-                shadowColor: "#0D9488",
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.3,
-                shadowRadius: 8,
-            },
-            android: {
-                elevation: 4,
-            },
-        }),
-    },
     primaryButtonText: {
         color: "#FFFFFF",
         fontSize: 16,
+        fontWeight: "600",
+    },
+    rescheduleButton: {
+        flexDirection: "row",
+        backgroundColor: "#FFFFFF",
+        paddingVertical: 12,
+        borderRadius: 10,
+        justifyContent: "center",
+        alignItems: "center",
+        marginBottom: 12,
+        gap: 8,
+        borderWidth: 1.5,
+        borderColor: "#0070D6",
+    },
+    rescheduleButtonText: {
+        color: "#0070D6",
+        fontSize: 15,
         fontWeight: "600",
     },
     actionRow: {
