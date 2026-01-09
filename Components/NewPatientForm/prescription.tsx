@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { API_ENDPOINTS } from "../../Config";
 import {
   StyleSheet,
@@ -13,6 +13,8 @@ import {
   FlatList,
   ActivityIndicator,
   AlertButton,
+  Linking,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -59,6 +61,10 @@ interface MedicationGroupProps {
   onEditMedication: (medication: Medication, index: number) => void;
   onAddMedicationToGroup: (date: string | Date) => void;
   patient: any;
+  // NEW: Explicit read-only flag for past prescriptions
+  // When true, ALL edit actions are disabled (no edit icons, delete buttons, swipe, long-press)
+  // Doctor details from saved prescription are preserved and never replaced
+  isReadOnly?: boolean;
 }
 
 interface PrescriptionTabProps {
@@ -233,6 +239,218 @@ const Dropdown = ({
           </View>
         </View>
       </Modal>
+    </View>
+  );
+};
+
+// ============================================================================
+// MEDICINE AUTOCOMPLETE COMPONENT
+// ============================================================================
+// Replaces dropdown for scalable medicine selection
+// - Prefix-based search (case insensitive)
+// - 200ms debounce for performance
+// - Free-text entry always available
+// - Works with large medicine lists (100s to 1000s)
+// ============================================================================
+interface MedicineAutocompleteProps {
+  value: string;
+  onSelect: (value: string) => void;
+  medications: string[];
+  placeholder?: string;
+  label?: string;
+  // Future-safe: for read-only screens
+  isReadOnly?: boolean;
+}
+
+const MedicineAutocomplete: React.FC<MedicineAutocompleteProps> = ({
+  value,
+  onSelect,
+  medications,
+  placeholder = "Type medicine name...",
+  label = "Medication Name",
+  isReadOnly = false,
+}) => {
+  const [inputValue, setInputValue] = useState(value);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isFocused, setIsFocused] = useState(false);
+  const inputRef = React.useRef<TextInput>(null);
+
+  // Sync external value changes
+  React.useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  // Debounced search - 200ms delay
+  React.useEffect(() => {
+    if (isReadOnly) return;
+
+    const timer = setTimeout(() => {
+      const trimmedInput = inputValue.trim();
+
+      if (trimmedInput.length >= 1) {
+        // Prefix match, case-insensitive, alphabetically sorted
+        const filtered = medications
+          .filter(med => med.toLowerCase().startsWith(trimmedInput.toLowerCase()))
+          .sort((a, b) => a.localeCompare(b));
+        setSuggestions(filtered);
+        setShowSuggestions(isFocused && (filtered.length > 0 || trimmedInput.length > 0));
+      } else {
+        setSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(timer);
+  }, [inputValue, medications, isFocused, isReadOnly]);
+
+  // Handle selection of a suggestion
+  const handleSelectSuggestion = (medicine: string) => {
+    const trimmedValue = medicine.trim();
+    if (trimmedValue) {
+      setInputValue(trimmedValue);
+      onSelect(trimmedValue);
+    }
+    setShowSuggestions(false);
+    inputRef.current?.blur();
+  };
+
+  // Handle adding a custom/free-text medicine
+  const handleAddCustom = () => {
+    const trimmedValue = inputValue.trim();
+    if (trimmedValue) {
+      onSelect(trimmedValue);
+    }
+    setShowSuggestions(false);
+    inputRef.current?.blur();
+  };
+
+  // Check if typed value exactly matches a suggestion
+  const isExactMatch = suggestions.some(
+    s => s.toLowerCase() === inputValue.trim().toLowerCase()
+  );
+
+  // Render highlighted text (bold the matching prefix)
+  const renderHighlightedText = (text: string, query: string) => {
+    const trimmedQuery = query.trim().toLowerCase();
+    if (!trimmedQuery) return <Text style={styles.suggestionText}>{text}</Text>;
+
+    const lowerText = text.toLowerCase();
+    if (lowerText.startsWith(trimmedQuery)) {
+      const matchEnd = trimmedQuery.length;
+      return (
+        <Text style={styles.suggestionText}>
+          <Text style={styles.suggestionHighlight}>{text.substring(0, matchEnd)}</Text>
+          {text.substring(matchEnd)}
+        </Text>
+      );
+    }
+    return <Text style={styles.suggestionText}>{text}</Text>;
+  };
+
+  if (isReadOnly) {
+    return (
+      <View style={styles.inputWrapper}>
+        <Text style={styles.inputLabel}>{label}</Text>
+        <View style={[styles.autocompleteInput, styles.autocompleteInputDisabled]}>
+          <Text style={styles.autocompleteInputText}>{value || "—"}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.inputWrapper}>
+      <Text style={styles.inputLabel}>{label}</Text>
+
+      {/* Search Input */}
+      <View style={styles.autocompleteContainer}>
+        <View style={[
+          styles.autocompleteInputContainer,
+          isFocused && styles.autocompleteInputFocused
+        ]}>
+          <Ionicons name="search-outline" size={18} color="#718096" style={{ marginRight: 8 }} />
+          <TextInput
+            ref={inputRef}
+            style={styles.autocompleteTextInput}
+            value={inputValue}
+            onChangeText={setInputValue}
+            onFocus={() => {
+              setIsFocused(true);
+              if (inputValue.trim().length > 0) {
+                setShowSuggestions(true);
+              }
+            }}
+            onBlur={() => {
+              // Delay to allow tap on suggestion
+              setTimeout(() => {
+                setIsFocused(false);
+                setShowSuggestions(false);
+              }, 200);
+            }}
+            placeholder={placeholder}
+            placeholderTextColor="#A0AEC0"
+            autoCapitalize="words"
+            autoCorrect={false}
+          />
+          {inputValue.length > 0 && (
+            <TouchableOpacity
+              onPress={() => {
+                setInputValue("");
+                setSuggestions([]);
+                setShowSuggestions(false);
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Ionicons name="close-circle" size={20} color="#A0AEC0" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Suggestions Dropdown */}
+        {showSuggestions && (
+          <View style={styles.suggestionsContainer}>
+            {suggestions.length > 0 ? (
+              <ScrollView
+                style={styles.suggestionsList}
+                keyboardShouldPersistTaps="handled"
+                nestedScrollEnabled
+              >
+                {suggestions.slice(0, 10).map((medicine, index) => (
+                  <TouchableOpacity
+                    key={`suggestion-${index}`}
+                    style={styles.suggestionItem}
+                    onPress={() => handleSelectSuggestion(medicine)}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="medical-outline" size={16} color="#0070D6" />
+                    {renderHighlightedText(medicine, inputValue)}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            ) : (
+              <View style={styles.noMatchContainer}>
+                <Ionicons name="information-circle-outline" size={16} color="#718096" />
+                <Text style={styles.noMatchText}>No matches found</Text>
+              </View>
+            )}
+
+            {/* Free-entry option - ALWAYS show unless exact match */}
+            {inputValue.trim().length > 0 && !isExactMatch && (
+              <TouchableOpacity
+                style={styles.addCustomItem}
+                onPress={handleAddCustom}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="add-circle-outline" size={18} color="#38A169" />
+                <Text style={styles.addCustomText}>
+                  Add "<Text style={styles.addCustomHighlight}>{inputValue.trim()}</Text>"
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+      </View>
     </View>
   );
 };
@@ -660,6 +878,7 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
   onEditMedication, // New prop for handling edit medication
   onAddMedicationToGroup, // New prop for handling add to this prescription
   patient, // Added patient data for prescription generation
+  isReadOnly = false, // NEW: Explicit read-only flag for past prescriptions
 }) => {
   // Format the date to display in a readable format
   const formatDate = (dateString: string | Date): string => {
@@ -682,6 +901,15 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
 
   // Add this check to determine if this prescription group is from today
   const isPrescriptionFromToday = isDateToday(date);
+
+  // ============================================================================
+  // EDIT CONTROL: canEdit determines if this prescription group can be modified
+  // ============================================================================
+  // IMPORTANT: Past prescriptions are IMMUTABLE (legal medical records)
+  // - isReadOnly is explicit flag from parent for past prescription groups
+  // - isPrescriptionFromToday is implicit check based on date
+  // - Both must be satisfied for edit actions to be enabled
+  const canEdit = !isReadOnly && isPrescriptionFromToday;
 
   // Determine if any medication in this group is a new prescription
   const isAnyMedicationNew = medications.some((med) =>
@@ -1099,8 +1327,8 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
               <Text style={styles.expandedMedicationName}>
                 {med.name || `Medication ${idx + 1}`}
               </Text>
-              {/* Only show delete button if prescription is from today */}
-              {medications.length > 1 && isPrescriptionFromToday ? (
+              {/* Only show delete button if prescription can be edited */}
+              {medications.length > 1 && canEdit ? (
                 <TouchableOpacity
                   onPress={() => removeMedication(originalIndex)}
                 >
@@ -1183,8 +1411,8 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
               ) : null}
             </View>
 
-            {/* Edit button for medications - only show for today's prescriptions */}
-            {isPrescriptionFromToday ? (
+            {/* Edit button for medications - only show if editable */}
+            {canEdit ? (
               <TouchableOpacity
                 style={styles.editMedicationButton}
                 onPress={() => {
@@ -1200,8 +1428,8 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
         );
       })}
 
-      {/* Add medication to this group button - only show for today's prescriptions */}
-      {isPrescriptionFromToday && (
+      {/* Add medication to this group button - only show if editable */}
+      {canEdit && (
         <TouchableOpacity
           style={styles.addMedicationButton}
           onPress={() => {
@@ -1215,15 +1443,15 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
       )}
 
       {/* Show read-only message for older prescriptions */}
-      {!isPrescriptionFromToday && (
+      {!canEdit && (
         <View style={styles.readOnlyMessageContainer}>
           <Ionicons
-            name="information-circle-outline"
+            name="lock-closed-outline"
             size={16}
             color="#718096"
           />
           <Text style={styles.readOnlyMessage}>
-            Previous prescriptions are read-only
+            This prescription is read-only (medical record)
           </Text>
         </View>
       )}
@@ -1241,74 +1469,225 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
 };
 
 // Quick Access Modal Components
+// ENHANCED: ReportsModal with file preview functionality
+// - Images: Open in in-app preview modal
+// - PDFs: Open in external viewer via Linking
+// - View-only: No edit, replace, or delete options
 const ReportsModal: React.FC<ReportsModalProps> = ({ visible, setVisible, patientData, reportFiles }) => {
-  return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      transparent={true}
-      onRequestClose={() => setVisible(false)}
-    >
-      <View style={styles.quickAccessModalOverlay}>
-        <View style={styles.quickAccessModalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Reports</Text>
-            <TouchableOpacity onPress={() => setVisible(false)}>
-              <Ionicons name="close" size={24} color="#2D3748" />
-            </TouchableOpacity>
-          </View>
-          <ScrollView style={styles.quickAccessModalScroll}>
-            <View style={styles.quickAccessModalBody}>
-              {/* Reports Data */}
-              <Text style={styles.quickAccessSectionTitle}>Reports Data</Text>
-              <View style={styles.quickAccessDataContainer}>
-                {patientData.reports ? (
-                  <Text style={styles.quickAccessDataText}>
-                    {patientData.reports}
-                  </Text>
-                ) : (
-                  <Text style={styles.quickAccessEmptyText}>
-                    No reports data available
-                  </Text>
-                )}
-              </View>
+  // State for image preview modal
+  const [previewVisible, setPreviewVisible] = useState(false);
+  const [previewFile, setPreviewFile] = useState<{
+    url: string;
+    name: string;
+    type: string;
+  } | null>(null);
+  const [imageLoading, setImageLoading] = useState(false);
 
-              {/* Report Files */}
-              <Text style={styles.quickAccessSectionTitle}>Report Files</Text>
-              <View style={styles.quickAccessDataContainer}>
-                {reportFiles.length > 0 ? (
-                  reportFiles.map((file, index) => (
-                    <View key={index} style={styles.quickAccessFileItem}>
-                      <Ionicons
-                        name={
-                          file.type?.includes("pdf")
-                            ? "document-text-outline"
-                            : file.type?.includes("image")
-                              ? "image-outline"
-                              : "document-outline"
-                        }
-                        size={18}
-                        color="#0070D6"
-                      />
-                      <Text style={styles.quickAccessFileName}>
-                        {file.name || `File ${index + 1}`}
-                        {file.category && ` (${file.category})`}
-                      </Text>
-                    </View>
-                  ))
-                ) : (
-                  <Text style={styles.quickAccessEmptyText}>
-                    No report files available
-                  </Text>
-                )}
+  // Get file URL from various possible sources
+  const getFileUrl = (file: any): string | null => {
+    return file.url || file.uri || file.signedUrl || null;
+  };
+
+  // Get file type icon
+  const getFileIcon = (type: string | undefined): string => {
+    if (type?.includes("pdf")) return "document-text-outline";
+    if (type?.includes("image")) return "image-outline";
+    return "document-outline";
+  };
+
+  // Handle file preview
+  const handleFilePreview = async (file: any) => {
+    const fileUrl = getFileUrl(file);
+
+    if (!fileUrl) {
+      Alert.alert(
+        "Preview Unavailable",
+        "File URL not available. The file may need to be uploaded first."
+      );
+      return;
+    }
+
+    const fileType = file.type || file.mimeType || "";
+
+    if (fileType.includes("pdf")) {
+      // Open PDF in external viewer
+      try {
+        const canOpen = await Linking.canOpenURL(fileUrl);
+        if (canOpen) {
+          await Linking.openURL(fileUrl);
+        } else {
+          Alert.alert(
+            "Unable to Open PDF",
+            "No application available to open PDF files on this device."
+          );
+        }
+      } catch (error) {
+        console.error("Error opening PDF:", error);
+        Alert.alert(
+          "Error",
+          "Unable to open PDF on this device. Please try again later."
+        );
+      }
+    } else {
+      // Show image in preview modal
+      setPreviewFile({
+        url: fileUrl,
+        name: file.name || "Report",
+        type: fileType,
+      });
+      setImageLoading(true);
+      setPreviewVisible(true);
+    }
+  };
+
+  return (
+    <>
+      {/* Main Reports List Modal */}
+      <Modal
+        visible={visible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setVisible(false)}
+      >
+        <View style={styles.quickAccessModalOverlay}>
+          <View style={styles.quickAccessModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reports</Text>
+              <View style={styles.viewOnlyHeaderBadge}>
+                <Text style={styles.viewOnlyHeaderBadgeText}>View Only</Text>
+              </View>
+              <TouchableOpacity onPress={() => setVisible(false)}>
+                <Ionicons name="close" size={24} color="#2D3748" />
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.quickAccessModalScroll}>
+              <View style={styles.quickAccessModalBody}>
+                {/* Reports Data */}
+                <Text style={styles.quickAccessSectionTitle}>Reports Data</Text>
+                <View style={styles.quickAccessDataContainer}>
+                  {patientData.reports ? (
+                    <Text style={styles.quickAccessDataText}>
+                      {patientData.reports}
+                    </Text>
+                  ) : (
+                    <Text style={styles.quickAccessEmptyText}>
+                      No reports data available
+                    </Text>
+                  )}
+                </View>
+
+                {/* Report Files - Now with Preview */}
+                <Text style={styles.quickAccessSectionTitle}>Report Files</Text>
+                <View style={styles.quickAccessDataContainer}>
+                  {reportFiles.length > 0 ? (
+                    reportFiles.map((file, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.reportFileRow}
+                        onPress={() => handleFilePreview(file)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={getFileIcon(file.type) as any}
+                          size={24}
+                          color="#0070D6"
+                        />
+                        <View style={styles.reportFileInfo}>
+                          <Text style={styles.reportFileName} numberOfLines={1}>
+                            {file.name || `File ${index + 1}`}
+                          </Text>
+                          {file.category && (
+                            <Text style={styles.reportFileCategory}>
+                              {file.category}
+                            </Text>
+                          )}
+                        </View>
+                        <View style={styles.previewBadge}>
+                          <Text style={styles.previewBadgeText}>
+                            {file.type?.includes("pdf") ? "Open" : "Preview"}
+                          </Text>
+                          <Ionicons
+                            name="chevron-forward"
+                            size={14}
+                            color="#0070D6"
+                          />
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  ) : (
+                    <Text style={styles.quickAccessEmptyText}>
+                      No report files available
+                    </Text>
+                  )}
+                </View>
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Image Preview Modal - Full Screen */}
+      <Modal
+        visible={previewVisible}
+        animationType="fade"
+        transparent={true}
+        onRequestClose={() => {
+          setPreviewVisible(false);
+          setPreviewFile(null); // Cleanup to prevent stale image
+        }}
+      >
+        <View style={styles.imagePreviewOverlay}>
+          {/* Header */}
+          <View style={styles.imagePreviewHeader}>
+            <View style={styles.imagePreviewHeaderLeft}>
+              <View style={styles.viewOnlyHeaderBadge}>
+                <Ionicons name="eye-outline" size={14} color="#718096" />
+                <Text style={styles.viewOnlyHeaderBadgeText}>View Only</Text>
               </View>
             </View>
-          </ScrollView>
+            <Text style={styles.imagePreviewTitle} numberOfLines={1}>
+              {previewFile?.name || "Report Preview"}
+            </Text>
+            <TouchableOpacity
+              style={styles.imagePreviewCloseButton}
+              onPress={() => {
+                setPreviewVisible(false);
+                setPreviewFile(null); // Cleanup to prevent stale image
+              }}
+            >
+              <Ionicons name="close-circle" size={32} color="#FFFFFF" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Image Container */}
+          <View style={styles.imagePreviewContainer}>
+            {imageLoading && (
+              <View style={styles.imageLoadingContainer}>
+                <ActivityIndicator size="large" color="#FFFFFF" />
+                <Text style={styles.imageLoadingText}>Loading image...</Text>
+              </View>
+            )}
+            {previewFile && (
+              <Image
+                source={{ uri: previewFile.url }}
+                style={styles.previewImage}
+                resizeMode="contain"
+                onLoadStart={() => setImageLoading(true)}
+                onLoadEnd={() => setImageLoading(false)}
+                onError={() => {
+                  setImageLoading(false);
+                  Alert.alert("Error", "Failed to load image");
+                  setPreviewVisible(false);
+                }}
+              />
+            )}
+          </View>
         </View>
-      </View>
-    </Modal>
+      </Modal>
+    </>
   );
 };
+
 
 const HistoryModal: React.FC<HistoryModalProps> = ({ visible, setVisible, patientData }) => {
   return (
@@ -1652,6 +2031,232 @@ const formatHistoryDisplay = (text: string | null | undefined) => {
   ));
 };
 
+// ============================================================================
+// VISIT CONTEXT SUMMARY COMPONENT
+// ============================================================================
+// Shows a summary of clinical context from earlier tabs (Reports, History, Diagnosis)
+// This is draft state - data entered before final save, NOT committed to database.
+// Uses local device timezone consistently for date comparisons.
+
+interface VisitContextSummaryProps {
+  patientData: any;
+  reportFiles: any[];
+  isFirstVisit: boolean;
+  onExpandReports: () => void;
+  onExpandHistory: () => void;
+  onExpandDiagnosis: () => void;
+}
+
+// ============================================================================
+// VISIT CONTEXT SUMMARY - Collapsible by default
+// ============================================================================
+// Shows compact summary when collapsed, full cards when expanded
+// - Collapsed: One row with key hints (reports, diagnosis, etc.)
+// - Expanded: Full context cards with details
+// ============================================================================
+const VisitContextSummary: React.FC<VisitContextSummaryProps> = ({
+  patientData,
+  reportFiles,
+  isFirstVisit,
+  onExpandReports,
+  onExpandHistory,
+  onExpandDiagnosis,
+}) => {
+  // Collapsed by default for cleaner UI
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Helper to get reports summary text
+  const getReportsSummary = (): string | null => {
+    const count = reportFiles.length;
+    if (count === 0) return null;
+    return `${count} file${count > 1 ? "s" : ""} uploaded`;
+  };
+
+  // Helper to get history summary (first line preview)
+  const getHistorySummary = (): string | null => {
+    if (!patientData.medicalHistory) return null;
+    const lines = patientData.medicalHistory
+      .split("\n")
+      .filter((l: string) => l.trim() && !l.startsWith("---"));
+    if (lines.length === 0) return null;
+    const firstLine = lines[0].trim();
+    return firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
+  };
+
+  // Helper to get diagnosis summary
+  const getDiagnosisSummary = (): string | null => {
+    if (!patientData.diagnosis) return null;
+    const text = patientData.diagnosis.trim();
+    return text.length > 60 ? text.substring(0, 60) + "..." : text;
+  };
+
+  // Helper to get advised investigations summary
+  const getInvestigationsSummary = (): string | null => {
+    if (!patientData.advisedInvestigations) return null;
+    const text = patientData.advisedInvestigations.trim();
+    return text.length > 60 ? text.substring(0, 60) + "..." : text;
+  };
+
+  // Count how many context items have data
+  const contextItemsCount = [
+    getReportsSummary(),
+    getHistorySummary(),
+    getDiagnosisSummary(),
+    getInvestigationsSummary(),
+  ].filter(Boolean).length;
+
+  // Build collapsed hint text (e.g., "1 report • Diagnosis added")
+  const getCollapsedHints = (): string[] => {
+    const hints: string[] = [];
+    const reportCount = reportFiles.length;
+    if (reportCount > 0) {
+      hints.push(`${reportCount} report${reportCount > 1 ? "s" : ""}`);
+    }
+    if (patientData.diagnosis?.trim()) {
+      hints.push("Diagnosis");
+    }
+    if (patientData.advisedInvestigations?.trim()) {
+      hints.push("Investigations");
+    }
+    if (patientData.medicalHistory?.trim() && hints.length < 3) {
+      hints.push("History");
+    }
+    return hints;
+  };
+
+  const collapsedHints = getCollapsedHints();
+
+  return (
+    <View style={styles.contextSummaryContainer}>
+      {/* Tappable Header - Entire row toggles expand/collapse */}
+      <TouchableOpacity
+        style={styles.contextHeaderTouchable}
+        onPress={() => setIsExpanded(!isExpanded)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.contextHeaderLeft}>
+          <Text style={styles.contextSectionHeader}>
+            📋 Current Visit Context
+          </Text>
+          {/* Key hints in collapsed view */}
+          {!isExpanded && collapsedHints.length > 0 && (
+            <Text style={styles.contextCollapsedHints}>
+              {" • " + collapsedHints.join(" • ")}
+            </Text>
+          )}
+          {isExpanded && (
+            <Text style={styles.contextExpandedLabel}> – Full Details</Text>
+          )}
+        </View>
+        <View style={styles.contextHeaderRight}>
+          {contextItemsCount > 0 && !isExpanded && (
+            <View style={styles.contextItemCountBadge}>
+              <Text style={styles.contextItemCountText}>{contextItemsCount}</Text>
+            </View>
+          )}
+          <Ionicons
+            name={isExpanded ? "chevron-up" : "chevron-down"}
+            size={20}
+            color="#718096"
+          />
+        </View>
+      </TouchableOpacity>
+
+      {/* First visit indicator - always visible */}
+      {isFirstVisit && (
+        <View style={styles.firstVisitBadge}>
+          <Ionicons name="person-add-outline" size={14} color="#319795" />
+          <Text style={styles.firstVisitBadgeText}>First Visit</Text>
+        </View>
+      )}
+
+      {/* Expanded Content - Full context cards */}
+      {isExpanded && (
+        <View style={styles.contextCardsContainer}>
+          {/* Reports Card */}
+          <TouchableOpacity style={styles.contextCard} onPress={onExpandReports}>
+            <View style={styles.contextCardHeader}>
+              <Ionicons name="document-text-outline" size={20} color="#0070D6" />
+              <Text style={styles.contextCardTitle}>Reports</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color="#A0AEC0"
+                style={styles.contextCardChevron}
+              />
+            </View>
+            {getReportsSummary() ? (
+              <Text style={styles.contextCardPreview}>{getReportsSummary()}</Text>
+            ) : (
+              <Text style={styles.contextCardEmpty}>No reports uploaded</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* History Card */}
+          <TouchableOpacity style={styles.contextCard} onPress={onExpandHistory}>
+            <View style={styles.contextCardHeader}>
+              <Ionicons name="time-outline" size={20} color="#0070D6" />
+              <Text style={styles.contextCardTitle}>Medical History</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color="#A0AEC0"
+                style={styles.contextCardChevron}
+              />
+            </View>
+            {getHistorySummary() ? (
+              <Text style={styles.contextCardPreview}>{getHistorySummary()}</Text>
+            ) : (
+              <Text style={styles.contextCardEmpty}>No history recorded</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Diagnosis Card */}
+          <TouchableOpacity style={styles.contextCard} onPress={onExpandDiagnosis}>
+            <View style={styles.contextCardHeader}>
+              <Ionicons name="pulse-outline" size={20} color="#0070D6" />
+              <Text style={styles.contextCardTitle}>Current Diagnosis</Text>
+              <Ionicons
+                name="chevron-forward"
+                size={16}
+                color="#A0AEC0"
+                style={styles.contextCardChevron}
+              />
+            </View>
+            {getDiagnosisSummary() ? (
+              <Text style={styles.contextCardPreview}>{getDiagnosisSummary()}</Text>
+            ) : (
+              <Text style={styles.contextCardEmpty}>No diagnosis entered</Text>
+            )}
+          </TouchableOpacity>
+
+          {/* Advised Investigations Card - only show if data exists */}
+          {patientData.advisedInvestigations && (
+            <View style={styles.contextCard}>
+              <View style={styles.contextCardHeader}>
+                <Ionicons name="flask-outline" size={20} color="#0070D6" />
+                <Text style={styles.contextCardTitle}>Advised Investigations</Text>
+              </View>
+              <Text style={styles.contextCardPreview}>
+                {getInvestigationsSummary()}
+              </Text>
+            </View>
+          )}
+
+          {/* Collapse button at bottom */}
+          <TouchableOpacity
+            style={styles.collapseButton}
+            onPress={() => setIsExpanded(false)}
+          >
+            <Ionicons name="chevron-up" size={16} color="#718096" />
+            <Text style={styles.collapseButtonText}>Collapse</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </View>
+  );
+};
+
 const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   patientData,
   patient,
@@ -1712,6 +2317,87 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
     useState(false);
   const [currentPrescriptionDate, setCurrentPrescriptionDate] = useState("");
   const [currentPrescriptionMeds, setCurrentPrescriptionMeds] = useState([]);
+
+  // ============================================================================
+  // FIRST VISIT DETECTION & MEDICATION SEPARATION
+  // ============================================================================
+  // Current Visit = medications created/edited today, before final save (draft state)
+  // Uses local device timezone consistently for date comparisons.
+  // Past medications are strictly read-only - no edit/delete actions allowed.
+
+  /**
+   * Detect if this is a first visit (no past prescriptions)
+   * First visit conditions:
+   * - Not in prefillMode (creating new patient), OR
+   * - No medications with dates before today
+   */
+  const isFirstVisit = useMemo(() => {
+    // If not in prefillMode, it's definitely a new patient (first visit)
+    if (!prefillMode) return true;
+
+    // Get today's date at midnight (local timezone)
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // Check if any medications have dates before today
+    const hasPastMedications = medications.some((med) => {
+      if (!med.datePrescribed) return false;
+      const medDate = new Date(med.datePrescribed);
+      medDate.setHours(0, 0, 0, 0);
+      return medDate.getTime() < today.getTime();
+    });
+
+    return !hasPastMedications;
+  }, [prefillMode, medications]);
+
+  /**
+   * Separate medications into current visit (today) and past records
+   * - Current visit medications are editable
+   * - Past medications are strictly read-only (no swipe, no long-press, no edit buttons)
+   */
+  const { currentVisitMedications, pastMedications } = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const current: Medication[] = [];
+    const past: Medication[] = [];
+
+    medications.forEach((med, index) => {
+      if (!med.datePrescribed) {
+        // New medications without date go to current visit
+        current.push(med);
+        return;
+      }
+
+      const medDate = new Date(med.datePrescribed);
+      medDate.setHours(0, 0, 0, 0);
+
+      if (medDate.getTime() === today.getTime()) {
+        current.push(med);
+      } else {
+        past.push(med);
+      }
+    });
+
+    return { currentVisitMedications: current, pastMedications: past };
+  }, [medications]);
+
+  /**
+   * Helper to check if a date string represents today (local timezone)
+   */
+  const isDateToday = (dateString: string): boolean => {
+    try {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const date = new Date(dateString);
+      date.setHours(0, 0, 0, 0);
+
+      return date.getTime() === today.getTime();
+    } catch {
+      return false;
+    }
+  };
 
   // NEW: Function to fetch diagnosis data directly from database
   const fetchDiagnosisFromDatabase = async () => {
@@ -2391,91 +3077,142 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
       <View style={styles.formSection}>
         <Text style={styles.sectionTitle}>Prescriptions</Text>
 
-        {/* Quick access buttons */}
-        <View style={styles.quickAccessButtonsRow}>
-          <TouchableOpacity
-            style={styles.quickAccessButton}
-            onPress={() => setReportsModalVisible(true)}
-          >
-            <Ionicons name="document-text-outline" size={18} color="#0070D6" />
-            <Text style={styles.quickAccessButtonText}>Reports</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.quickAccessButton}
-            onPress={() => setHistoryModalVisible(true)}
-          >
-            <Ionicons name="time-outline" size={18} color="#0070D6" />
-            <Text style={styles.quickAccessButtonText}>History</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.quickAccessButton}
-            onPress={handleDiagnosisButtonClick}
-          >
-            <Ionicons name="pulse-outline" size={18} color="#0070D6" />
-            <Text style={styles.quickAccessButtonText}>Diagnosis</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Visit Context Summary - Shows clinical context from earlier tabs */}
+        <VisitContextSummary
+          patientData={patientData}
+          reportFiles={reportFiles}
+          isFirstVisit={isFirstVisit}
+          onExpandReports={() => setReportsModalVisible(true)}
+          onExpandHistory={() => setHistoryModalVisible(true)}
+          onExpandDiagnosis={handleDiagnosisButtonClick}
+        />
 
-        <View style={styles.prescriptionActionsContainer}>
-          {!(prefillMode && initialTab === "prescription") && (
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => createNewPrescription(false)}
-            >
-              <Ionicons name="add-circle" size={24} color="#0070D6" />
-              <Text style={styles.addButtonText}>New Prescription</Text>
-            </TouchableOpacity>
+        {/* ============================================================ */}
+        {/* CURRENT VISIT SECTION - Editable prescriptions from today */}
+        {/* ============================================================ */}
+        <View style={styles.currentVisitSection}>
+          <View style={styles.sectionHeaderRow}>
+            <Ionicons name="create-outline" size={20} color="#0070D6" />
+            <Text style={styles.sectionHeaderText}>Current Visit</Text>
+            <View style={styles.editableBadge}>
+              <Text style={styles.editableBadgeText}>Editable</Text>
+            </View>
+          </View>
+
+          {/* Add Prescription Button */}
+          <View style={styles.prescriptionActionsContainer}>
+            {!(prefillMode && initialTab === "prescription") && (
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => createNewPrescription(false)}
+              >
+                <Ionicons name="add-circle" size={24} color="#0070D6" />
+                <Text style={styles.addButtonText}>Add Prescription</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Current Visit Medications (today's prescriptions) */}
+          {currentVisitMedications.length === 0 ? (
+            <View style={styles.emptyCurrentVisitContainer}>
+              <Ionicons name="medical-outline" size={32} color="#CBD5E0" />
+              <Text style={styles.emptyCurrentVisitText}>
+                No medications added for today
+              </Text>
+              <Text style={styles.emptyCurrentVisitSubtext}>
+                Click "Add Prescription" to prescribe medications
+              </Text>
+            </View>
+          ) : (
+            groupMedicationsByDate()
+              .filter((group) => isDateToday(group.date))
+              .map((group, groupIndex) => (
+                <MedicationGroupCard
+                  key={`current-${group.date}`}
+                  date={group.date}
+                  medications={group.medications}
+                  updateMedication={updateMedication}
+                  removeMedication={removeMedication}
+                  allMedications={medications}
+                  expandedGroups={expandedGroups}
+                  toggleExpandGroup={toggleExpandGroup}
+                  isNewPrescription={group.medications.some((med) =>
+                    newPrescriptionIndices.includes(medications.indexOf(med))
+                  )}
+                  newPrescriptionIndices={newPrescriptionIndices}
+                  setMedications={setMedications}
+                  onEditMedication={handleEditMedication}
+                  onAddMedicationToGroup={handleAddMedicationToGroup}
+                  patient={{
+                    ...patientData,
+                    patientId: patient?.patientId || "New Patient",
+                    setPrescriptionModalVisible,
+                    setCurrentPrescriptionDate,
+                    setCurrentPrescriptionMeds,
+                  }}
+                />
+              ))
           )}
         </View>
 
-        {medications.length === 0 && (
-          <View style={styles.emptyPrescriptionContainer}>
-            <Ionicons name="medical-outline" size={40} color="#CBD5E0" />
-            <Text style={styles.emptyPrescriptionText}>
-              No medications added yet
-            </Text>
-            <Text style={styles.emptyPrescriptionSubText}>
-              Click "New Prescription" to add medications
-            </Text>
-            <TouchableOpacity
-              style={styles.emptyPrescriptionButton}
-              onPress={() => createNewPrescription(false)}
-            >
-              <Ionicons name="add-circle" size={20} color="#FFFFFF" />
-              <Text style={styles.emptyPrescriptionButtonText}>
-                Add New Prescription
-              </Text>
-            </TouchableOpacity>
+        {/* ============================================================ */}
+        {/* PAST RECORDS SECTION - Read-only prescriptions from earlier */}
+        {/* Only show for follow-up visits with past medications */}
+        {/* ============================================================ */}
+        {!isFirstVisit && pastMedications.length > 0 && (
+          <View style={styles.pastRecordsSection}>
+            <View style={styles.sectionHeaderRow}>
+              <Ionicons name="archive-outline" size={20} color="#718096" />
+              <Text style={styles.pastSectionHeaderText}>Previous Prescriptions</Text>
+              <View style={styles.readOnlyBadge}>
+                <Text style={styles.readOnlyBadgeText}>Read-only</Text>
+              </View>
+            </View>
+
+            {/* Past Medications (grouped by date, strictly read-only) */}
+            {groupMedicationsByDate()
+              .filter((group) => !isDateToday(group.date))
+              .map((group, groupIndex) => (
+                <MedicationGroupCard
+                  key={`past-${group.date}`}
+                  date={group.date}
+                  medications={group.medications}
+                  updateMedication={updateMedication}
+                  removeMedication={removeMedication}
+                  allMedications={medications}
+                  expandedGroups={expandedGroups}
+                  toggleExpandGroup={toggleExpandGroup}
+                  isNewPrescription={false}
+                  newPrescriptionIndices={newPrescriptionIndices}
+                  setMedications={setMedications}
+                  onEditMedication={handleEditMedication}
+                  onAddMedicationToGroup={handleAddMedicationToGroup}
+                  // IMPORTANT: Past prescriptions are strictly read-only
+                  // Doctor details from saved prescription are preserved (not replaced by current user)
+                  isReadOnly={true}
+                  patient={{
+                    ...patientData,
+                    patientId: patient?.patientId || "New Patient",
+                    setPrescriptionModalVisible,
+                    setCurrentPrescriptionDate,
+                    setCurrentPrescriptionMeds,
+                  }}
+                />
+              ))}
           </View>
         )}
 
-        {groupMedicationsByDate().map((group, groupIndex) => (
-          <MedicationGroupCard
-            key={group.date}
-            date={group.date}
-            medications={group.medications}
-            updateMedication={updateMedication}
-            removeMedication={removeMedication}
-            allMedications={medications}
-            expandedGroups={expandedGroups}
-            toggleExpandGroup={toggleExpandGroup}
-            isNewPrescription={group.medications.some((med) =>
-              newPrescriptionIndices.includes(medications.indexOf(med))
-            )}
-            newPrescriptionIndices={newPrescriptionIndices}
-            setMedications={setMedications}
-            onEditMedication={handleEditMedication}
-            onAddMedicationToGroup={handleAddMedicationToGroup}
-            patient={{
-              ...patientData,
-              patientId: patient?.patientId || "New Patient",
-              setPrescriptionModalVisible,
-              setCurrentPrescriptionDate,
-              setCurrentPrescriptionMeds,
-            }}
-          />
-        ))}
+        {/* First visit notice when in prefill mode but no past prescriptions */}
+        {isFirstVisit && prefillMode && (
+          <View style={styles.firstVisitNotice}>
+            <Ionicons name="information-circle-outline" size={18} color="#718096" />
+            <Text style={styles.firstVisitNoticeText}>
+              This is the patient's first visit — no previous prescriptions
+            </Text>
+          </View>
+        )}
 
+        {/* New Prescription button for follow-up visits */}
         {medications.length > 0 && (
           <View style={styles.generateButtonContainer}>
             {prefillMode && initialTab === "prescription" && (
@@ -2558,17 +3295,16 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                             ? "Edit medication details"
                             : "Add medication to this prescription"}
                       </Text>
-                      <Dropdown
-                        label="Medication Name"
-                        options={commonMedications}
-                        selectedValue={newPrescriptionData.name}
+                      <MedicineAutocomplete
+                        value={newPrescriptionData.name}
                         onSelect={(value) =>
                           setNewPrescriptionData((prev) => ({
                             ...prev,
                             name: value,
                           }))
                         }
-                        placeholder="Select medication"
+                        medications={commonMedications}
+                        placeholder="Type medicine name..."
                       />
                       <TimingSelector
                         timings={timingOptions}
@@ -3630,6 +4366,466 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: "#E2E8F0",
     marginTop: 12,
+  },
+
+  // ============================================================================
+  // CONTEXT SUMMARY STYLES
+  // ============================================================================
+  contextSummaryContainer: {
+    marginBottom: 20,
+    backgroundColor: "#F0F7FF",
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#E1ECFF",
+  },
+  contextSectionHeader: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 12,
+  },
+  contextSectionSubHeader: {
+    fontSize: 13,
+    fontWeight: "400",
+    color: "#718096",
+  },
+  contextHeaderTouchable: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  contextHeaderLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  contextHeaderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  contextCollapsedHints: {
+    fontSize: 13,
+    color: "#718096",
+    marginLeft: 4,
+  },
+  contextExpandedLabel: {
+    fontSize: 13,
+    color: "#718096",
+    fontStyle: "italic",
+  },
+  contextItemCountBadge: {
+    backgroundColor: "#BEE3F8",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  contextItemCountText: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#2B6CB0",
+  },
+  contextCardsContainer: {
+    marginTop: 4,
+  },
+  collapseButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 12,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+  },
+  collapseButtonText: {
+    fontSize: 14,
+    color: "#718096",
+    marginLeft: 6,
+    fontWeight: "500",
+  },
+  contextCard: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  contextCardHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 4,
+  },
+  contextCardTitle: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#2D3748",
+    marginLeft: 8,
+    flex: 1,
+  },
+  contextCardChevron: {
+    marginLeft: "auto",
+  },
+  contextCardPreview: {
+    fontSize: 13,
+    color: "#4A5568",
+    marginLeft: 28,
+    lineHeight: 18,
+  },
+  contextCardEmpty: {
+    fontSize: 13,
+    color: "#A0AEC0",
+    fontStyle: "italic",
+    marginLeft: 28,
+  },
+  firstVisitBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#E6FFFA",
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+    marginTop: 8,
+  },
+  firstVisitBadgeText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#319795",
+    marginLeft: 4,
+  },
+
+  // ============================================================================
+  // SECTION HEADER STYLES (Current Visit / Past Records)
+  // ============================================================================
+  currentVisitSection: {
+    marginBottom: 16,
+  },
+  pastRecordsSection: {
+    marginTop: 24,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: "#E2E8F0",
+    backgroundColor: "#FAFBFC",
+    marginHorizontal: -16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+  },
+  sectionHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  sectionHeaderText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginLeft: 8,
+    flex: 1,
+  },
+  pastSectionHeaderText: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: "#718096",
+    marginLeft: 8,
+    flex: 1,
+  },
+  editableBadge: {
+    backgroundColor: "#E6FFFA",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  editableBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#319795",
+  },
+  readOnlyBadge: {
+    backgroundColor: "#EDF2F7",
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  readOnlyBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#718096",
+  },
+
+  // ============================================================================
+  // EMPTY STATE STYLES
+  // ============================================================================
+  emptyCurrentVisitContainer: {
+    alignItems: "center",
+    paddingVertical: 24,
+    backgroundColor: "#F9FAFB",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderStyle: "dashed",
+  },
+  emptyCurrentVisitText: {
+    fontSize: 14,
+    color: "#4A5568",
+    marginTop: 8,
+  },
+  emptyCurrentVisitSubtext: {
+    fontSize: 12,
+    color: "#A0AEC0",
+    marginTop: 4,
+  },
+  firstVisitNotice: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7FAFC",
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  firstVisitNoticeText: {
+    fontSize: 13,
+    color: "#718096",
+    marginLeft: 8,
+    flex: 1,
+  },
+
+  // ============================================================================
+  // REPORT PREVIEW STYLES
+  // ============================================================================
+  viewOnlyHeaderBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EDF2F7",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  viewOnlyHeaderBadgeText: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#718096",
+    marginLeft: 4,
+  },
+  reportFileRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F7FAFC",
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+  },
+  reportFileInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  reportFileName: {
+    fontSize: 14,
+    fontWeight: "500",
+    color: "#2D3748",
+  },
+  reportFileCategory: {
+    fontSize: 12,
+    color: "#718096",
+    marginTop: 2,
+  },
+  previewBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EBF8FF",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  previewBadgeText: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#0070D6",
+    marginRight: 4,
+  },
+
+  // Image Preview Modal Styles
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.95)",
+  },
+  imagePreviewHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingTop: 50,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+  },
+  imagePreviewHeaderLeft: {
+    flex: 1,
+  },
+  imagePreviewTitle: {
+    flex: 2,
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#FFFFFF",
+    textAlign: "center",
+  },
+  imagePreviewCloseButton: {
+    flex: 1,
+    alignItems: "flex-end",
+  },
+  imagePreviewContainer: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageLoadingContainer: {
+    position: "absolute",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  imageLoadingText: {
+    color: "#FFFFFF",
+    marginTop: 12,
+    fontSize: 14,
+  },
+  previewImage: {
+    width: "100%",
+    height: "100%",
+  },
+
+  // ============================================================================
+  // READ-ONLY CARD STYLES (for past prescriptions)
+  // ============================================================================
+  readOnlyCard: {
+    backgroundColor: "#FAFBFC",
+    opacity: 0.95,
+  },
+  readOnlyCardOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(248, 250, 252, 0.5)",
+  },
+
+  // ============================================================================
+  // MEDICINE AUTOCOMPLETE STYLES
+  // ============================================================================
+  autocompleteContainer: {
+    position: "relative",
+    zIndex: 100,
+  },
+  autocompleteInputContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  autocompleteInputFocused: {
+    borderColor: "#0070D6",
+    borderWidth: 2,
+  },
+  autocompleteTextInput: {
+    flex: 1,
+    fontSize: 15,
+    color: "#2D3748",
+    paddingVertical: 0,
+  },
+  autocompleteInput: {
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  autocompleteInputDisabled: {
+    backgroundColor: "#F7FAFC",
+  },
+  autocompleteInputText: {
+    fontSize: 15,
+    color: "#2D3748",
+  },
+  suggestionsContainer: {
+    position: "absolute",
+    top: "100%",
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
+    borderRadius: 8,
+    marginTop: 4,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 4,
+    maxHeight: 250,
+    zIndex: 1000,
+  },
+  suggestionsList: {
+    maxHeight: 200,
+  },
+  suggestionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F0F4F8",
+    gap: 8,
+  },
+  suggestionText: {
+    fontSize: 14,
+    color: "#2D3748",
+    flex: 1,
+  },
+  suggestionHighlight: {
+    fontWeight: "700",
+    color: "#0070D6",
+  },
+  noMatchContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  noMatchText: {
+    fontSize: 13,
+    color: "#718096",
+    fontStyle: "italic",
+  },
+  addCustomItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: "#F0FFF4",
+    borderTopWidth: 1,
+    borderTopColor: "#C6F6D5",
+    gap: 8,
+  },
+  addCustomText: {
+    fontSize: 14,
+    color: "#276749",
+  },
+  addCustomHighlight: {
+    fontWeight: "600",
+    color: "#38A169",
   },
 });
 
