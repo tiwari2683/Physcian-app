@@ -425,7 +425,8 @@ async function deletePatientFile(requestData) {
 
 export const handler = async (event, context) => {
     try {
-        console.log("📥 Lambda invoked");
+        console.log("� RAW EVENT:", JSON.stringify(event));
+        console.log("�📥 Lambda invoked");
         context.callbackWaitsForEmptyEventLoop = false;
 
         // Handle CORS preflight
@@ -451,6 +452,8 @@ export const handler = async (event, context) => {
         } else {
             requestData = event;
         }
+
+        console.log("🧾 requestData:", requestData);
 
         const action = requestData.action;
         console.log(`🎯 Action: ${action}`);
@@ -490,8 +493,14 @@ export const handler = async (event, context) => {
             case 'searchPatients':
                 return await searchPatients(requestData);
 
-            case 'deletePatient':
-                return await deletePatient(requestData);
+            case "deleteDraft":
+                return await deleteDraft(requestData);
+
+            // MEDICINE MASTER APIS
+            case "searchMedicines":
+                return await searchMedicines(requestData);
+            case "addMedicine":
+                return await addMedicine(requestData);
 
             default:
                 // Handle legacy create/update operations
@@ -1143,5 +1152,119 @@ async function processPatientData(requestData) {
     } catch (error) {
         console.error('❌ Error creating patient:', error);
         return formatErrorResponse(`Failed to create patient: ${error.message}`);
+    }
+}
+
+
+// ============================================
+// DYNAMIC MEDICINE MASTER LOGIC
+// ============================================
+
+/**
+ * Normalizes medicine name for consistent storage and search
+ * TRIMS whitespace -> COLLAPSES multiple spaces -> UPPERCASE
+ * Example: "  para   500 " -> "PARA 500"
+ */
+function normalizeMedicineName(name) {
+    if (!name) return "";
+    return name
+        .trim()
+        .replace(/\s+/g, ' ') // Collapse multiple spaces to single
+        .toUpperCase();
+}
+
+/**
+ * Searches for medicines using prefix search
+ * Input: { query: "par" }
+ * Output: ["PARA 500", "PARACETAMOL"]
+ */
+async function searchMedicines(requestData) {
+    try {
+        const { query } = requestData;
+        if (!query || query.length < 1) { // Relaxed check
+            return {
+                statusCode: 200,
+                body: JSON.stringify({ medicines: [] })
+            };
+        }
+
+        const normalizedQuery = normalizeMedicineName(query);
+        console.log(`🔍 Searching medicines with prefix: ${normalizedQuery}`);
+
+        const command = new QueryCommand({
+            TableName: "Medicines", // Constant table name
+            KeyConditionExpression: "PK = :pk AND begins_with(SK, :sk)",
+            ExpressionAttributeValues: {
+                ":pk": "MEDICINE",
+                ":sk": normalizedQuery
+            },
+            Limit: 20 // Performance limit
+        });
+
+        const result = await dynamodb.send(command);
+
+        // Extract just the display name
+        const medicines = (result.Items || []).map(item => item.name);
+
+        return formatSuccessResponse({
+            success: true,
+            medicines: medicines
+        });
+
+    } catch (error) {
+        console.error("❌ Error searching medicines:", error);
+        return formatSuccessResponse({ success: false, error: error.message }); // Return 200 with error to avoid 500 crash
+    }
+}
+
+/**
+ * Adds a new medicine to the master database
+ * Input: { name: "Azithral 500" }
+ * Output: Success
+ */
+async function addMedicine(requestData) {
+    try {
+        const { name } = requestData;
+        if (!name) return formatErrorResponse("Medicine name is required");
+
+        const normalizedSK = normalizeMedicineName(name);
+        const displayName = name.trim().replace(/\s+/g, ' ');
+
+        const params = {
+            TableName: "Medicines",
+            Item: {
+                PK: "MEDICINE",
+                SK: normalizedSK,
+                name: displayName,
+                createdAt: new Date().toISOString()
+            },
+            ConditionExpression: "attribute_not_exists(SK)" // Prevent overwrite
+        };
+
+        try {
+            await dynamodb.send(new PutCommand(params));
+            console.log(`✅ Added new medicine: ${normalizedSK}`);
+
+            return formatSuccessResponse({
+                success: true,
+                medicine: { name: displayName }
+            });
+
+        } catch (dbError) {
+            if (dbError.name === "ConditionalCheckFailedException") {
+                console.log(`ℹ️ Medicine already exists: ${normalizedSK}`);
+                return formatSuccessResponse({
+                    success: true,
+                    message: "Medicine already exists",
+                    medicine: { name: displayName }
+                });
+            }
+            console.error("❌ DynamoDB error:", dbError);
+            throw dbError; // Rethrow so main catch handles it
+        }
+
+    } catch (error) {
+        console.error("❌ Error adding medicine:", error);
+        return formatErrorResponse(`Add failed: ${error.message}`);
     }
 }
