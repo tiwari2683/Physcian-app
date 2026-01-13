@@ -39,120 +39,32 @@ const { width } = Dimensions.get("window");
 const API_BASE_URL =
   API_ENDPOINTS.PATIENT_PROCESSOR;
 
-interface Patient {
-  name: string;
-  age: number;
-  sex: string;
-  patientId: string;
-  diagnosis: string;
-  treatment: string;
-  prescription: string;
-  advisedInvestigations: string;
-  medications: Array<{
-    name: string;
-    dosage: string;
-    frequency: string;
-    duration: string;
-    datePrescribed?: string;
-    timing?: string;
-    unit?: string;
-    timingValues?: string;
-  }>;
-  reportFiles: Array<{
-    name: string;
-    url: string;
-    type: string;
-  }>;
-  createdAt: string;
-  updatedAt: string;
-  reports: string;
-  medicalHistory?: string;
-  generatedPrescription?: string;
-}
+// Import type definitions
+import type {
+  Patient,
+  DiagnosisHistoryEntry,
+  InvestigationsHistoryEntry,
+  FitnessCertificateProps,
+  FormData,
+  OpinionType,
+} from "./Types/FitnessCertificateTypes";
+// Import utility functions
+import {
+  generatePrescriptionFromMedications,
+  getAndroidAPILevel,
+  checkDependencies as checkDependenciesUtil,
+} from "./Utils/CertificateUtils";
+// Import data fetching service
+import {
+  fetchPatientData as fetchPatientDataService,
+  fetchDiagnosisHistory as fetchDiagnosisHistoryService,
+  fetchInvestigationsHistory as fetchInvestigationsHistoryService,
+} from "./Services/FitnessCertificateDataService";
 
-interface DiagnosisHistoryEntry {
-  patientId: string;
-  entryId: string;
-  timestamp: number;
-  date: string;
-  diagnosis: string;
-  advisedInvestigations: string;
-  formattedDate?: string;
-  formattedTime?: string;
-}
 
-interface InvestigationsHistoryEntry {
-  patientId: string;
-  entryId: string;
-  timestamp: number;
-  date: string;
-  advisedInvestigations: string;
-  formattedDate?: string;
-  formattedTime?: string;
-}
 
-interface FitnessCertificateProps {
-  navigation: any;
-  route: {
-    params: {
-      patient: Patient;
-    };
-  };
-}
-
-interface FormData {
-  // Patient basic info
-  patientName: string;
-  patientAge: string;
-  patientSex: string;
-  patientId: string;
-
-  // Medical Opinion - Modified section
-  opinion: string;
-  selectedOpinionType:
-  | "surgery_fitness"
-  | "medication_modification"
-  | "fitness_reserved"
-  | null;
-  surgeryFitnessOption: string;
-  medicationModificationText: string; // Changed from option to text
-  fitnessReservedText: string; // Changed from option to text
-
-  // Clinical Assessment
-  pastHistory: string;
-  cardioRespiratorySymptoms: string;
-
-  // Vitals
-  bloodPressure: string;
-  heartRate: string;
-  temperature: string;
-  respiratoryRate: string;
-  oxygenSaturation: string;
-
-  // Investigations
-  ecgFindings: string;
-  echoFindings: string;
-  cxrFindings: string;
-  labValues: string;
-
-  // Additional Notes
-  recommendations: string;
-  followUpRequired: boolean;
-  validityPeriod: string;
-
-  // New fields added
-  preOpEvaluationForm: string;
-  referredForPreOp: string;
-  cardioRespiratoryFunction: string;
-  syE: string;
-  ecgField: string;
-  echoField: string;
-  cxrField: string;
-
-  // Latest prescription and investigations
-  latestPrescription: string;
-  latestInvestigations: string;
-}
+// Import backend persistence service
+import { saveFitnessCertificateToBackend } from "./Services/FitnessCertificateBackendService";
 
 const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
   navigation,
@@ -249,189 +161,64 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     surgery: false,
   });
 
-  // API Functions with improved error handling
-  const fetchPatientData = async (patientId: string) => {
-    try {
-      console.log(`📡 Fetching patient data for ID: ${patientId}`);
-      setDataLoadingStatus((prev) => ({ ...prev, patient: true }));
+  // Handle template data loading from History (Phase 3: Copy-to-New)
+  useEffect(() => {
+    if (route.params?.templateData) {
+      console.log("📋 Loading certificate template...");
+      const { templateData } = route.params;
 
-      const response = await fetch(API_BASE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "getPatient",
-          patientId: patientId,
-        }),
-      });
+      // Destructure to remove ID and timestamps to ensure new record creation
+      const { certificateId, createdAt, ...cleanTemplate } = templateData as any;
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
+      setFormData((prev) => ({
+        ...prev,
+        ...cleanTemplate,
+        // Crucial: Restore current patient details to match current context
+        patientName: patient?.name || prev.patientName,
+        patientAge: patient?.age?.toString() || prev.patientAge,
+        patientSex: patient?.sex || prev.patientSex,
+        patientId: patient?.patientId || prev.patientId,
+      }));
 
-      const result = await response.json();
-      console.log(
-        "📋 Full patient data response:",
-        JSON.stringify(result, null, 2).substring(0, 500)
+      Alert.alert(
+        "Template Loaded",
+        "Certificate data has been copied from history. Please review details before generating."
       );
 
-      // Fix: Parse the body if it's a string
-      let parsedData = result;
-      if (typeof result.body === "string") {
-        try {
-          parsedData = JSON.parse(result.body);
-          console.log("📋 Parsed response body successfully");
-        } catch (parseError) {
-          console.error("📋 Error parsing response body:", parseError);
-          return null;
-        }
-      }
-
-      console.log("📋 Patient data response received:", {
-        success: parsedData.success,
-        hasPatient: !!parsedData.patient,
-        patientName: parsedData.patient?.name,
-        responseKeys: Object.keys(parsedData),
-      });
-
-      if (parsedData.success && parsedData.patient) {
-        setPatientData(parsedData.patient);
-        setDataLoadingStatus((prev) => ({ ...prev, patient: false }));
-        console.log("✅ Patient data loaded successfully");
-        return parsedData.patient;
-      } else {
-        console.warn("⚠️ Patient data not found or invalid response");
-        setDataLoadingStatus((prev) => ({ ...prev, patient: false }));
-        return null;
-      }
-    } catch (error) {
-      console.error("❌ Error fetching patient data:", error);
-      setDataLoadingStatus((prev) => ({ ...prev, patient: false }));
-      return null;
+      // Clear parameter to avoid reloading on re-renders
+      navigation.setParams({ templateData: undefined });
     }
+  }, [route.params?.templateData, patient, navigation]);
+
+  // API Functions - wrappers that call service and manage state
+  const fetchPatientData = async (patientId: string) => {
+    setDataLoadingStatus((prev) => ({ ...prev, patient: true }));
+    const result = await fetchPatientDataService(API_BASE_URL, patientId);
+    if (result) {
+      setPatientData(result);
+    }
+    setDataLoadingStatus((prev) => ({ ...prev, patient: false }));
+    return result;
   };
 
   const fetchDiagnosisHistory = async (patientId: string) => {
-    try {
-      console.log(`📡 Fetching diagnosis history for ID: ${patientId}`);
-      setDataLoadingStatus((prev) => ({ ...prev, diagnosis: true }));
-
-      const response = await fetch(API_BASE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "getDiagnosisHistory",
-          patientId: patientId,
-          includeAll: true,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      // Fix: Parse the body if it's a string
-      let parsedData = result;
-      if (typeof result.body === "string") {
-        try {
-          parsedData = JSON.parse(result.body);
-        } catch (parseError) {
-          console.error(
-            "📋 Error parsing diagnosis history response body:",
-            parseError
-          );
-          return [];
-        }
-      }
-
-      console.log("📋 Diagnosis history response received:", {
-        success: parsedData.success,
-        entriesCount: parsedData.diagnosisHistory?.length || 0,
-      });
-
-      if (parsedData.success && parsedData.diagnosisHistory) {
-        setDiagnosisHistory(parsedData.diagnosisHistory);
-        setDataLoadingStatus((prev) => ({ ...prev, diagnosis: false }));
-        console.log(
-          `✅ Diagnosis history loaded: ${parsedData.diagnosisHistory.length} entries`
-        );
-        return parsedData.diagnosisHistory;
-      } else {
-        console.warn("⚠️ Diagnosis history not found or invalid response");
-        setDataLoadingStatus((prev) => ({ ...prev, diagnosis: false }));
-        return [];
-      }
-    } catch (error) {
-      console.error("❌ Error fetching diagnosis history:", error);
-      setDataLoadingStatus((prev) => ({ ...prev, diagnosis: false }));
-      return [];
+    setDataLoadingStatus((prev) => ({ ...prev, diagnosis: true }));
+    const result = await fetchDiagnosisHistoryService(API_BASE_URL, patientId);
+    if (result.length > 0) {
+      setDiagnosisHistory(result);
     }
+    setDataLoadingStatus((prev) => ({ ...prev, diagnosis: false }));
+    return result;
   };
 
   const fetchInvestigationsHistory = async (patientId: string) => {
-    try {
-      console.log(`📡 Fetching investigations history for ID: ${patientId}`);
-      setDataLoadingStatus((prev) => ({ ...prev, investigations: true }));
-
-      const response = await fetch(API_BASE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          action: "getInvestigationsHistory",
-          patientId: patientId,
-          includeAll: true,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
-      const result = await response.json();
-
-      // Fix: Parse the body if it's a string
-      let parsedData = result;
-      if (typeof result.body === "string") {
-        try {
-          parsedData = JSON.parse(result.body);
-        } catch (parseError) {
-          console.error(
-            "📋 Error parsing investigations history response body:",
-            parseError
-          );
-          return [];
-        }
-      }
-
-      console.log("📋 Investigations history response received:", {
-        success: parsedData.success,
-        entriesCount: parsedData.investigationsHistory?.length || 0,
-      });
-
-      if (parsedData.success && parsedData.investigationsHistory) {
-        setInvestigationsHistory(parsedData.investigationsHistory);
-        setDataLoadingStatus((prev) => ({ ...prev, investigations: false }));
-        console.log(
-          `✅ Investigations history loaded: ${parsedData.investigationsHistory.length} entries`
-        );
-        return parsedData.investigationsHistory;
-      } else {
-        console.warn("⚠️ Investigations history not found or invalid response");
-        setDataLoadingStatus((prev) => ({ ...prev, investigations: false }));
-        return [];
-      }
-    } catch (error) {
-      console.error("❌ Error fetching investigations history:", error);
-      setDataLoadingStatus((prev) => ({ ...prev, investigations: false }));
-      return [];
+    setDataLoadingStatus((prev) => ({ ...prev, investigations: true }));
+    const result = await fetchInvestigationsHistoryService(API_BASE_URL, patientId);
+    if (result.length > 0) {
+      setInvestigationsHistory(result);
     }
+    setDataLoadingStatus((prev) => ({ ...prev, investigations: false }));
+    return result;
   };
 
   // Update loadPatientDataAndHistory function
@@ -533,54 +320,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     }
   };
 
-  // Helper function to generate prescription text from medications
-  const generatePrescriptionFromMedications = (medications: any[]) => {
-    if (!medications || medications.length === 0) return "";
 
-    return medications
-      .map((med, index) => {
-        let prescriptionLine = `${index + 1}. ${med.name || "Medication"}`;
-
-        // Process timing values
-        if (med.timingValues) {
-          try {
-            const timingValuesObj =
-              typeof med.timingValues === "string"
-                ? JSON.parse(med.timingValues)
-                : med.timingValues;
-
-            const timingInstructions = Object.entries(timingValuesObj)
-              .map(([time, value]) => {
-                const timingLabel =
-                  time.charAt(0).toUpperCase() + time.slice(1);
-                return `${timingLabel}: ${value}`;
-              })
-              .join(", ");
-
-            if (timingInstructions) {
-              prescriptionLine += ` - ${timingInstructions}`;
-            }
-          } catch (e: any) {
-            console.warn(
-              `Error parsing timing values for med ${index + 1}: ${e?.message || String(e)}`
-            );
-          }
-        }
-
-        // Add duration if available
-        if (med.duration) {
-          prescriptionLine += ` for ${med.duration}`;
-        }
-
-        // Add special instructions if present
-        if (med.specialInstructions && med.specialInstructions.trim() !== "") {
-          prescriptionLine += `\n   Special Instructions: ${med.specialInstructions}`;
-        }
-
-        return prescriptionLine;
-      })
-      .join("\n\n");
-  };
 
   // Effect to load data when component mounts
   useEffect(() => {
@@ -628,45 +368,9 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     });
   };
 
-  // Check if dependencies are available
+  // Wrapper for checkDependencies that passes module references
   const checkDependencies = (): boolean => {
-    console.log("🔍 Checking dependencies...");
-
-    if (!FileSystem) {
-      console.log("❌ expo-file-system not available");
-      Alert.alert(
-        "Missing Dependency",
-        "expo-file-system is required. Please install it:\nnpm install expo-file-system"
-      );
-      return false;
-    }
-
-    if (!MediaLibrary) {
-      console.log("❌ expo-media-library not available");
-      Alert.alert(
-        "Missing Dependency",
-        "expo-media-library is required. Please install it:\nnpm install expo-media-library"
-      );
-      return false;
-    }
-
-    if (!captureRef) {
-      console.log("❌ react-native-view-shot not available");
-      Alert.alert(
-        "Missing Dependency",
-        "react-native-view-shot is required. Please install it:\nnpm install react-native-view-shot"
-      );
-      return false;
-    }
-
-    console.log("✅ All dependencies available");
-    return true;
-  };
-
-  // Get Android API level
-  const getAndroidAPILevel = () => {
-    if (Platform.OS !== "android") return 0;
-    return Platform.Version;
+    return checkDependenciesUtil(FileSystem, MediaLibrary, captureRef);
   };
 
   // Request permissions with timeout and better error handling
@@ -971,6 +675,15 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       }
 
       if (saveSuccessful) {
+        // Phase 2: Non-blocking Backend Save (Fire & Forget)
+        // We do typically NOT await this to prevent blocking the UI
+        console.log("☁️ Triggering background cloud sync...");
+        saveFitnessCertificateToBackend(
+          API_BASE_URL,
+          patient.patientId,
+          { ...formData, type: 'fitness_certificate' }
+        ).catch(err => console.error("❌ Cloud sync hook error:", err));
+
         const platformSpecificMessage =
           Platform.OS === "android"
             ? "Certificate saved successfully! 📁\n\nYou can find it in:\n• App documents folder\n• Downloads (if accessible)\n• Gallery/Photos app"
@@ -1171,39 +884,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     }
   };
 
-  // Test function to check if everything is working
-  const testCapture = async () => {
-    try {
-      console.log("🧪 Testing capture functionality...");
 
-      if (!viewShotRef.current) {
-        console.log("❌ Test: View reference not found");
-        Alert.alert("Test Failed", "View reference not found");
-        return;
-      }
-
-      if (!captureRef) {
-        console.log("❌ Test: captureRef not available");
-        Alert.alert("Test Failed", "captureRef not available");
-        return;
-      }
-
-      const uri = await captureRef(viewShotRef.current, {
-        format: "png",
-        quality: 0.5,
-        result: "tmpfile",
-      });
-
-      console.log("✅ Test capture successful:", uri);
-      Alert.alert(
-        "Test Result",
-        `Capture test successful!\nURI: ${uri.substring(0, 50)}...`
-      );
-    } catch (error: any) {
-      console.error("❌ Test capture failed:", error);
-      Alert.alert("Test Failed", `Capture test failed: ${error?.message || String(error)}`);
-    }
-  };
 
   const getSelectedOptionText = () => {
     switch (formData.selectedOpinionType) {
@@ -1253,8 +934,12 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 color="#FFFFFF"
               />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.testButton} onPress={testCapture}>
-              <Ionicons name="bug-outline" size={20} color="#FFFFFF" />
+
+            <TouchableOpacity
+              style={styles.historyButton}
+              onPress={() => navigation.navigate("FitnessCertificateHistory", { patient })}
+            >
+              <Ionicons name="time-outline" size={24} color="#FFFFFF" />
             </TouchableOpacity>
           </View>
         </View>
@@ -1930,588 +1615,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#F5F7FA",
-  },
-  headerGradient: {
-    paddingTop: Platform.OS === "ios" ? 0 : 10,
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  headerButtons: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  refreshButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  testButton: {
-    padding: 8,
-  },
-  loadingOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1000,
-  },
-  loadingText: {
-    color: "#FFFFFF",
-    marginTop: 16,
-    fontSize: 16,
-    fontWeight: "500",
-  },
-  loadingDetails: {
-    marginTop: 12,
-    alignItems: "center",
-  },
-  loadingDetailText: {
-    color: "#FFFFFF",
-    fontSize: 12,
-    opacity: 0.8,
-    marginVertical: 2,
-  },
-  scrollContainer: {
-    flex: 1,
-  },
-
-  // Certificate Styles
-  certificateContainer: {
-    backgroundColor: "#FFFFFF",
-    margin: 16,
-    borderRadius: 12,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 0, 0, 0.1)",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.8,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  certificateHeader: {
-    alignItems: "center",
-    paddingVertical: 20,
-    paddingHorizontal: 16,
-    borderBottomWidth: 2,
-    borderBottomColor: "#0070D6",
-  },
-  certificateTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#0070D6",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  doctorName: {
-    fontSize: 18,
-    fontWeight: "600",
-    color: "#2D3748",
-    marginBottom: 4,
-  },
-  doctorCredentials: {
-    fontSize: 14,
-    color: "#4A5568",
-    marginBottom: 2,
-  },
-  clinicDetails: {
-    fontSize: 12,
-    color: "#718096",
-  },
-  certificateBody: {
-    padding: 16,
-  },
-
-  // Patient Info Section
-  patientInfoSection: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    fontSize: 14,
-    fontWeight: "bold",
-    color: "#0070D6",
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#E2E8F0",
-    paddingBottom: 4,
-  },
-  infoGrid: {
-    gap: 4,
-  },
-  infoRow: {
-    flexDirection: "row",
-    paddingVertical: 2,
-  },
-  infoLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4A5568",
-    width: 80,
-  },
-  infoValue: {
-    fontSize: 12,
-    color: "#2D3748",
-    flex: 1,
-  },
-
-  // New PreOp Section
-  preOpSection: {
-    marginBottom: 16,
-  },
-  preOpContent: {
-    gap: 6,
-  },
-  preOpText: {
-    fontSize: 12,
-    color: "#2D3748",
-    lineHeight: 16,
-  },
-  underlineText: {
-    textDecorationLine: "underline",
-    fontWeight: "600",
-    color: "#0070D6",
-  },
-
-  // Modified Medical Opinion Section
-  opinionSection: {
-    marginBottom: 16,
-  },
-  opinionContent: {
-    gap: 8,
-  },
-  opinionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 4,
-  },
-  opinionLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4A5568",
-    marginRight: 8,
-  },
-  opinionUnderline: {
-    fontSize: 12,
-    color: "#2D3748",
-    textDecorationLine: "underline",
-    flex: 1,
-    minHeight: 16,
-  },
-  selectedOptionSection: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  selectedOptionLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#0070D6",
-    marginBottom: 4,
-  },
-  selectedOptionValue: {
-    fontSize: 12,
-    color: "#2D3748",
-    lineHeight: 16,
-  },
-
-  // Assessment Section
-  assessmentSection: {
-    marginBottom: 16,
-  },
-  assessmentGrid: {
-    gap: 4,
-  },
-  assessmentRow: {
-    flexDirection: "row",
-    paddingVertical: 2,
-  },
-  assessmentLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4A5568",
-    width: 120,
-  },
-  assessmentValue: {
-    fontSize: 12,
-    color: "#2D3748",
-    flex: 1,
-  },
-
-  // New Investigations Section
-  investigationsSection: {
-    marginBottom: 16,
-  },
-  investigationsGrid: {
-    gap: 4,
-  },
-  investigationRow: {
-    flexDirection: "row",
-    paddingVertical: 2,
-  },
-  investigationLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4A5568",
-    width: 60,
-  },
-  investigationValue: {
-    fontSize: 12,
-    color: "#2D3748",
-    flex: 1,
-  },
-
-  // Vitals Section
-  vitalsSection: {
-    marginBottom: 16,
-  },
-  vitalsGrid: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-  },
-  vitalsColumn: {
-    flex: 1,
-    gap: 4,
-  },
-  vitalsLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#4A5568",
-  },
-  vitalsValue: {
-    fontWeight: "normal",
-    color: "#2D3748",
-  },
-
-  // Recommendations Section
-  recommendationsSection: {
-    marginBottom: 16,
-  },
-  recommendationsText: {
-    fontSize: 12,
-    color: "#2D3748",
-    lineHeight: 16,
-  },
-
-  // Certificate Footer
-  certificateFooter: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-end",
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  signatureSection: {
-    alignItems: "center",
-  },
-  signatureLine: {
-    width: 120,
-    height: 1,
-    backgroundColor: "#4A5568",
-    marginBottom: 4,
-  },
-  signatureText: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#2D3748",
-  },
-  signatureTitle: {
-    fontSize: 10,
-    color: "#718096",
-  },
-  signatureDate: {
-    fontSize: 10,
-    color: "#718096",
-    marginTop: 2,
-  },
-  validitySection: {
-    alignItems: "flex-end",
-  },
-  validityText: {
-    fontSize: 11,
-    color: "#4A5568",
-    fontWeight: "500",
-  },
-  certificateId: {
-    fontSize: 10,
-    color: "#718096",
-    marginTop: 2,
-  },
-
-  // Form Styles
-  formContainer: {
-    backgroundColor: "#FFFFFF",
-    margin: 16,
-    marginTop: 8,
-    borderRadius: 12,
-    padding: 16,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 0, 0, 0.1)",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.8,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  formTitle: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#2D3748",
-    marginBottom: 16,
-  },
-  formSection: {
-    marginBottom: 16,
-  },
-  formLabel: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#4A5568",
-    marginBottom: 8,
-  },
-  textInput: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#2D3748",
-    backgroundColor: "#FAFAFA",
-    textAlignVertical: "top",
-  },
-  multilineTextInput: {
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#2D3748",
-    backgroundColor: "#FAFAFA",
-    textAlignVertical: "top",
-    minHeight: 80,
-  },
-
-  // Radio and Text Field Styles
-  radioContainer: {
-    marginBottom: 16,
-    position: "relative",
-  },
-  radioOption: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: "#CBD5E0",
-    marginRight: 8,
-  },
-  radioSelected: {
-    borderColor: "#0070D6",
-    backgroundColor: "#0070D6",
-  },
-  radioLabel: {
-    fontSize: 14,
-    color: "#2D3748",
-  },
-  dropdownToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: "#FAFAFA",
-    marginLeft: 28,
-    marginBottom: 4,
-    minHeight: 44,
-  },
-  dropdownToggleText: {
-    fontSize: 14,
-    color: "#2D3748",
-    flex: 1,
-    marginRight: 8,
-    lineHeight: 18,
-  },
-  dropdown: {
-    marginLeft: 28,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    backgroundColor: "#FFFFFF",
-    maxHeight: 180,
-    minHeight: 80,
-    zIndex: 1000,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 0, 0, 0.15)",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.8,
-        shadowRadius: 6,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
-  },
-  dropdownScrollView: {
-    maxHeight: 180,
-  },
-  dropdownOption: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
-    minHeight: 44,
-    justifyContent: "center",
-  },
-  lastDropdownOption: {
-    borderBottomWidth: 0,
-  },
-  dropdownOptionText: {
-    fontSize: 14,
-    color: "#2D3748",
-    lineHeight: 18,
-    flexWrap: "wrap",
-    textAlign: "left",
-  },
-
-  // New Text Field Container Styles
-  textFieldContainer: {
-    marginLeft: 28,
-    marginTop: 8,
-  },
-  textFieldLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#0070D6",
-    marginBottom: 6,
-  },
-
-  // Vitals Input
-  vitalsInputGrid: {
-    flexDirection: "row",
-    gap: 12,
-  },
-  vitalInput: {
-    flex: 1,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 14,
-    color: "#2D3748",
-    backgroundColor: "#FAFAFA",
-  },
-
-  // Validity Options
-  validityOptions: {
-    flexDirection: "row",
-    gap: 8,
-    flexWrap: "wrap",
-  },
-  validityOption: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: "#CBD5E0",
-    backgroundColor: "#FFFFFF",
-  },
-  validitySelected: {
-    borderColor: "#0070D6",
-    backgroundColor: "#EBF8FF",
-  },
-  validityOptionText: {
-    fontSize: 12,
-    color: "#4A5568",
-  },
-  validitySelectedText: {
-    color: "#0070D6",
-    fontWeight: "600",
-  },
-
-  // Generate Button
-  buttonContainer: {
-    padding: 16,
-    paddingBottom: Platform.OS === "ios" ? 34 : 16,
-  },
-  generateButton: {
-    borderRadius: 12,
-    overflow: "hidden",
-  },
-  generatingButton: {
-    opacity: 0.7,
-  },
-  generateButtonGradient: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-  },
-  buttonContent: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  generatingContent: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  generateButtonText: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#FFFFFF",
-    marginLeft: 8,
-  },
-  autoFillButton: {
-    backgroundColor: "#EBF8FF",
-    borderWidth: 1,
-    borderColor: "#0070D6",
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    marginTop: 8,
-    alignItems: "center",
-  },
-  autoFillButtonText: {
-    color: "#0070D6",
-    fontSize: 12,
-    fontWeight: "500",
-  },
-});
+// Import styles
+import { styles } from "./Styles/FitnessCertificateStyles";
 
 export default FitnessCertificate;

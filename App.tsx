@@ -43,6 +43,7 @@ import NewAppointmentModal from "./Components/Appointments/NewAppointmentModal";
 import PatientsData from "./Components/PatientsData/PatientsData";
 import PatientDetails from "./Components/PatientsData/PatientDetails";
 import FitnessCertificate from "./Components/FitnessCertificate/FitnessCertificate";
+import FitnessCertificateHistory from "./Components/FitnessCertificate/FitnessCertificateHistory";
 import Profile from "./Components/Profile/Profile";
 
 // Navigation stack type
@@ -693,6 +694,13 @@ export default function App(): React.JSX.Element {
               component={FitnessCertificate as any}
               options={{
                 // Removed contentStyle
+                gestureEnabled: true,
+              }}
+            />
+            <Stack.Screen
+              name="FitnessCertificateHistory"
+              component={FitnessCertificateHistory as any}
+              options={{
                 gestureEnabled: true,
               }}
             />

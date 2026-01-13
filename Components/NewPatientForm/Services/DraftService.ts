@@ -25,7 +25,7 @@ export const DraftService = {
      * Generates a temporary ID for a new patient draft
      */
     generateDraftId: (): string => {
-        return `draft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        return `draft_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
     },
 
     /**

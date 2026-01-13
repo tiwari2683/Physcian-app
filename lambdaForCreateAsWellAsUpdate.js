@@ -496,6 +496,12 @@ export const handler = async (event, context) => {
             case "deleteDraft":
                 return await deleteDraft(requestData);
 
+            // FITNESS CERTIFICATE APIS
+            case "saveFitnessCertificate":
+                return await saveFitnessCertificate(requestData);
+            case "getFitnessCertificates":
+                return await getFitnessCertificates(requestData.patientId);
+
             // MEDICINE MASTER APIS
             case "searchMedicines":
                 return await searchMedicines(requestData);
@@ -1155,6 +1161,100 @@ async function processPatientData(requestData) {
     }
 }
 
+
+
+// ============================================
+// FITNESS CERTIFICATE OPERATIONS
+// ============================================
+
+async function saveFitnessCertificate(requestData) {
+    try {
+        const { patientId, data } = requestData;
+
+        if (!patientId || !data || !data.certificateId) {
+            return formatErrorResponse("Missing required fields: patientId, data.certificateId");
+        }
+
+        console.log(`💾 Saving fitness certificate for patient: ${patientId}, ID: ${data.certificateId}`);
+
+        // Get current patient to append to list
+        const patientResult = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId }
+        }));
+
+        if (!patientResult.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        const currentCertificates = patientResult.Item.fitnessCertificates || [];
+
+        // Check if certificate exists (by ID) to support updates vs inserts
+        const exists = currentCertificates.some(cert => cert.certificateId === data.certificateId);
+
+        let updatedCertificates;
+        if (exists) {
+            console.log(`⚠️ Certificate ${data.certificateId} already exists, updating it.`);
+            updatedCertificates = currentCertificates.map(cert =>
+                cert.certificateId === data.certificateId ? { ...data, updatedAt: new Date().toISOString() } : cert
+            );
+        } else {
+            // Prepend new certificate to keep latest first
+            updatedCertificates = [data, ...currentCertificates];
+        }
+
+        // Update Patient Record
+        await dynamodb.send(new UpdateCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            UpdateExpression: "SET fitnessCertificates = :certs, updatedAt = :updatedAt",
+            ExpressionAttributeValues: {
+                ":certs": updatedCertificates,
+                ":updatedAt": new Date().toISOString()
+            }
+        }));
+
+        console.log(`✅ Fitness Certificate saved successfully. Total count: ${updatedCertificates.length}`);
+
+        return formatSuccessResponse({
+            success: true,
+            certificateId: data.certificateId,
+            message: "Certificate saved successfully"
+        });
+
+    } catch (error) {
+        console.error('❌ Error saving fitness certificate:', error);
+        return formatErrorResponse(`Failed to save certificate: ${error.message}`);
+    }
+}
+
+async function getFitnessCertificates(patientId) {
+    try {
+        console.log(`📜 Fetching fitness certificates for: ${patientId}`);
+
+        const result = await dynamodb.send(new GetCommand({
+            TableName: PATIENTS_TABLE,
+            Key: { patientId },
+            ProjectionExpression: "fitnessCertificates" // Only fetch certificates
+        }));
+
+        if (!result.Item) {
+            return formatErrorResponse("Patient not found");
+        }
+
+        const certificates = result.Item.fitnessCertificates || [];
+        console.log(`✅ Found ${certificates.length} fitness certificates`);
+
+        return formatSuccessResponse({
+            success: true,
+            certificates: certificates
+        });
+
+    } catch (error) {
+        console.error('❌ Error fetching fitness certificates:', error);
+        return formatErrorResponse(`Failed to fetch certificates: ${error.message}`);
+    }
+}
 
 // ============================================
 // DYNAMIC MEDICINE MASTER LOGIC
