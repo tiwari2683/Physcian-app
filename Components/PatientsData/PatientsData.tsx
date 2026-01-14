@@ -395,6 +395,18 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
         </Text>
       </View>
       <View style={styles.patientCardBody}>
+        {item.reportFiles && item.reportFiles.length > 0 && (
+          <View style={[styles.reportsIndicator, { marginBottom: 8 }]}>
+            <Ionicons
+              name="document-attach-outline"
+              size={16}
+              color="#4CAF50"
+            />
+            <Text style={styles.reportsCount}>
+              {item.reportFiles.length} reports
+            </Text>
+          </View>
+        )}
         <View style={styles.infoRow}>
           <Ionicons name="medical" size={16} color="#718096" />
           <Text style={styles.diagnosisText} numberOfLines={1}>
@@ -437,6 +449,18 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
         </TouchableOpacity>
 
         <TouchableOpacity
+          style={styles.cardButton}
+          onPress={(e) => {
+            e.stopPropagation();
+            navigation.navigate("FitnessCertificate", { patient: item });
+          }}
+          accessibilityLabel={`Certificate for ${item.name}`}
+        >
+          <Ionicons name="ribbon-outline" size={16} color="#0070D6" />
+          <Text style={styles.cardButtonText}>Certificate</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
           style={[styles.cardButton, styles.deleteButton]}
           onPress={(e) => {
             e.stopPropagation();
@@ -455,18 +479,6 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
           </Text>
         </TouchableOpacity>
 
-        {item.reportFiles && item.reportFiles.length > 0 && (
-          <View style={styles.reportsIndicator}>
-            <Ionicons
-              name="document-attach-outline"
-              size={16}
-              color="#4CAF50"
-            />
-            <Text style={styles.reportsCount}>
-              {item.reportFiles.length} reports
-            </Text>
-          </View>
-        )}
       </View>
     </TouchableOpacity>
   );

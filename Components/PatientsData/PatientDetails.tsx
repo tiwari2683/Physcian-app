@@ -58,6 +58,10 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
         });
     };
 
+    const handleCertificate = () => {
+        navigation.navigate("FitnessCertificate", { patient });
+    };
+
     // Image Viewer Handler
     const handleViewImage = (file: any) => {
         // Try multiple possible URL properties
@@ -192,10 +196,19 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
                             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
                         </TouchableOpacity>
                         <Text style={styles.headerTitle}>Patient Profile</Text>
-                        <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-                            <Ionicons name="create" size={18} color="#0070D6" />
-                            <Text style={styles.editButtonText}>Edit</Text>
-                        </TouchableOpacity>
+                        <View style={{ flexDirection: "row", alignItems: "center" }}>
+                            <TouchableOpacity
+                                style={[styles.editButton, { marginRight: 8 }]}
+                                onPress={handleCertificate}
+                            >
+                                <Ionicons name="ribbon-outline" size={18} color="#0070D6" />
+                                <Text style={styles.editButtonText}>Certificate</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
+                                <Ionicons name="create" size={18} color="#0070D6" />
+                                <Text style={styles.editButtonText}>Edit</Text>
+                            </TouchableOpacity>
+                        </View>
                     </View>
                 </SafeAreaView>
             </LinearGradient>
