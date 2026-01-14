@@ -16,6 +16,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { API_ENDPOINTS } from "../../Config";
 import { getFitnessCertificateHistory } from "./Services/FitnessCertificateBackendService";
+import GenerateCertificatePdf from "./GenerateCertificatePdf";
+import { FormData, OpinionType } from "./Types/FitnessCertificateTypes";
 
 // Prop Types
 interface FitnessCertificateHistoryProps {
@@ -37,6 +39,10 @@ const FitnessCertificateHistory: React.FC<FitnessCertificateHistoryProps> = ({ n
     const [history, setHistory] = useState<HistoryItem[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isRefreshing, setIsRefreshing] = useState(false);
+
+    // PDF Generation State
+    const [showPdfModal, setShowPdfModal] = useState(false);
+    const [selectedCertificate, setSelectedCertificate] = useState<Partial<FormData>>({});
 
     const loadHistory = useCallback(async () => {
         if (!patient?.patientId) return;
@@ -69,6 +75,26 @@ const FitnessCertificateHistory: React.FC<FitnessCertificateHistoryProps> = ({ n
     const handleRefresh = () => {
         setIsRefreshing(true);
         loadHistory();
+    };
+
+    const handleDownloadPdf = (item: HistoryItem) => {
+        // Map HistoryItem to FormData structure
+        const certData: Partial<FormData> = {
+            // Map standard fields
+            ...item,
+            // Explicitly map potentially deeper fields if needed, 
+            // but spread covers most since they share structure.
+            // Ensure metadata is present for the PDF
+            certificateId: item.certificateId,
+            createdAt: item.createdAt,
+            patientName: item.patientName,
+            patientAge: patient?.age?.toString(),
+            patientSex: patient?.sex,
+            selectedOpinionType: item.selectedOpinionType as OpinionType,
+        };
+
+        setSelectedCertificate(certData);
+        setShowPdfModal(true);
     };
 
     const handleCertificatePress = (item: HistoryItem) => {
@@ -121,8 +147,20 @@ const FitnessCertificateHistory: React.FC<FitnessCertificateHistoryProps> = ({ n
             </View>
 
             <View style={styles.cardFooter}>
-                <Text style={styles.actionText}>Tap to Use as Template</Text>
-                <Ionicons name="arrow-forward" size={16} color="#4c669f" />
+                <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => handleDownloadPdf(item)}
+                >
+                    <Ionicons name="download-outline" size={16} color="#0070D6" />
+                    <Text style={[styles.actionText, { color: "#0070D6" }]}>PDF</Text>
+                </TouchableOpacity>
+
+                <View style={styles.divider} />
+
+                <View style={styles.actionButton}>
+                    <Text style={styles.actionText}>Tap to Copy</Text>
+                    <Ionicons name="arrow-forward" size={16} color="#4c669f" />
+                </View>
             </View>
         </TouchableOpacity>
     );
@@ -174,6 +212,13 @@ const FitnessCertificateHistory: React.FC<FitnessCertificateHistoryProps> = ({ n
                     }
                 />
             )}
+
+            {/* Read-Only PDF Generator */}
+            <GenerateCertificatePdf
+                visible={showPdfModal}
+                onClose={() => setShowPdfModal(false)}
+                formData={selectedCertificate}
+            />
         </SafeAreaView>
     );
 };
@@ -291,11 +336,23 @@ const styles = StyleSheet.create({
     },
     cardFooter: {
         flexDirection: "row",
-        justifyContent: "space-between",
         alignItems: "center",
         borderTopWidth: 1,
         borderTopColor: "#E2E8F0",
-        paddingTop: 8,
+        marginTop: 8,
+    },
+    actionButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 10,
+        gap: 6,
+        flex: 1,
+    },
+    divider: {
+        width: 1,
+        height: 20,
+        backgroundColor: "#E2E8F0",
     },
     actionText: {
         fontSize: 12,

@@ -1256,6 +1256,243 @@ async function getFitnessCertificates(patientId) {
     }
 }
 
+/**
+ * Generate PDF certificate on-the-fly from certificate data
+ * Returns base64-encoded PDF (NO S3 storage - stateless)
+ * 
+ * IMPORTANT: Requires Puppeteer dependencies in Lambda layer:
+ * - chrome-aws-lambda@10.1.0
+ * - puppeteer-core@10.1.0
+ */
+async function generateCertificatePdf(certificateData) {
+    try {
+        console.log('📄 Generating PDF for certificate:', certificateData.certificateId);
+
+        // 1. Validate required fields
+        if (!certificateData || !certificateData.patientName || !certificateData.selectedOpinionType) {
+            return formatErrorResponse("Missing required certificate fields: patientName, selectedOpinionType");
+        }
+
+        // 2. Generate HTML from certificate data
+        const html = generateCertificateHtml(certificateData);
+
+        // 3. Convert HTML → PDF using Puppeteer
+        // NOTE: This requires chrome-aws-lambda and puppeteer-core to be installed in Lambda layer
+        // For now, this is a placeholder - actual Puppeteer code will be added after dependency setup
+
+        // PLACEHOLDER: Simulated PDF generation
+        // TODO: Replace with actual Puppeteer implementation after Lambda layer is configured
+        const pdfBuffer = await generatePdfWithPuppeteer(html);
+
+        // 4. Convert to base64
+        const pdfBase64 = pdfBuffer.toString('base64');
+
+        console.log('✅ PDF generated successfully, size:', pdfBuffer.length, 'bytes');
+
+        // 5. Return PDF (NO S3 UPLOAD - stateless)
+        return formatSuccessResponse({
+            success: true,
+            certificateId: certificateData.certificateId,
+            pdfBase64: pdfBase64,
+            metadata: {
+                generatedAt: new Date().toISOString(),
+                patientId: certificateData.patientId,
+                fileSize: pdfBuffer.length
+            }
+        });
+
+    } catch (error) {
+        console.error('❌ Error generating PDF:', error);
+        return formatErrorResponse(`Failed to generate PDF: ${error.message}`);
+    }
+}
+
+/**
+ * Generate HTML content from certificate data using template
+ */
+function generateCertificateHtml(data) {
+    // Read template (in production, this would be loaded from file system or embedded)
+    // For now, using inline template
+
+    const currentDate = new Date().toLocaleDateString('en-IN', {
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+    });
+
+    // Determine opinion label and text based on selected type
+    let opinionTypeLabel = '';
+    let opinionText = '';
+
+    switch (data.selectedOpinionType) {
+        case 'surgery_fitness':
+            opinionTypeLabel = 'Fitness for Surgery';
+            opinionText = data.surgeryFitnessOption || 'Not specified';
+            break;
+        case 'medication_modification':
+            opinionTypeLabel = 'Medication Modification';
+            opinionText = data.medicationModificationText || 'Not specified';
+            break;
+        case 'fitness_reserved':
+            opinionTypeLabel = 'Fitness Reserved For';
+            opinionText = data.fitnessReservedText || 'Not specified';
+            break;
+        default:
+            opinionTypeLabel = 'Medical Opinion';
+            opinionText = 'Not specified';
+    }
+
+    // Simple template replacement (production would use a proper template engine)
+    const html = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 20mm 15mm; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 12pt; line-height: 1.4; color: #2D3748; }
+        .certificate { max-width: 210mm; margin: 0 auto; padding: 10mm; }
+        .header { text-align: center; border-bottom: 3px solid #0070D6; padding-bottom: 15px; margin-bottom: 20px; }
+        .header h1 { font-size: 20pt; font-weight: bold; color: #0070D6; margin-bottom: 10px; }
+        .header .doctor-name { font-size: 16pt; font-weight: 600; color: #2D3748; margin-bottom: 5px; }
+        .header .credentials { font-size: 12pt; color: #4A5568; }
+        .section { margin-bottom: 15px; }
+        .section-title { font-size: 11pt; font-weight: bold; color: #0070D6; border-bottom: 1px solid #E2E8F0; padding-bottom: 4px; margin-bottom: 8px; text-transform: uppercase; }
+        .info-row { margin-bottom: 5px; }
+        .info-label { font-weight: 600; color: #4A5568; display: inline-block; width: 120px; }
+        .info-value { color: #2D3748; }
+        .footer { margin-top: 30px; padding-top: 15px; border-top: 1px solid #E2E8F0; display: flex; justify-content: space-between; }
+        .signature-text { font-weight: 600; }
+        @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style>
+</head>
+<body>
+    <div class="certificate">
+        <div class="header">
+            <h1>MEDICAL FITNESS CERTIFICATE</h1>
+            <div class="doctor-name">Dr. Diapk Gawli</div>
+            <div class="credentials">MBBS, DNB General Medicine</div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">Patient Information</div>
+            <div class="info-row"><span class="info-label">Name:</span> <span class="info-value">${data.patientName || 'N/A'}</span></div>
+            <div class="info-row"><span class="info-label">Age/Sex:</span> <span class="info-value">${data.patientAge || 'N/A'} years / ${data.patientSex || 'N/A'}</span></div>
+            <div class="info-row"><span class="info-label">Date:</span> <span class="info-value">${currentDate}</span></div>
+        </div>
+        
+        ${data.preOpEvaluationForm ? `
+        <div class="section">
+            <div class="section-title">Pre-Operative Evaluation</div>
+            <p>PreOp evaluation / Fitness: <strong>${data.preOpEvaluationForm}</strong> form</p>
+            ${data.referredForPreOp ? `<p>Thanks for your reference. Referred for PreOp evaluation posted for Dr. <strong>${data.referredForPreOp}</strong></p>` : ''}
+        </div>
+        ` : ''}
+        
+        <div class="section">
+            <div class="section-title">Clinical Assessment</div>
+            <div class="info-row"><span class="info-label">Past History:</span> <span class="info-value">${data.pastHistory || 'No significant history'}</span></div>
+            <div class="info-row"><span class="info-label">Cardio Respiratory:</span> <span class="info-value">${data.cardioRespiratoryFunction || 'Normal'}</span></div>
+            <div class="info-row"><span class="info-label">Sy/E:</span> <span class="info-value">${data.syE || 'Normal'}</span></div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">Investigations</div>
+            <div class="info-row"><span class="info-label">ECG:</span> <span class="info-value">${data.ecgField || 'Normal'}</span></div>
+            <div class="info-row"><span class="info-label">Echo:</span> <span class="info-value">${data.echoField || 'Normal'}</span></div>
+            <div class="info-row"><span class="info-label">CXR:</span> <span class="info-value">${data.cxrField || 'Normal'}</span></div>
+        </div>
+        
+        <div class="section">
+            <div class="section-title">Medical Opinion</div>
+            <p><strong>${opinionTypeLabel}:</strong></p>
+            <p style="margin-top: 5px; white-space: pre-wrap;">${opinionText}</p>
+        </div>
+        
+        ${data.recommendations ? `
+        <div class="section">
+            <div class="section-title">Recommendations</div>
+            <p style="white-space: pre-wrap;">${data.recommendations}</p>
+        </div>
+        ` : ''}
+        
+        <div class="footer">
+            <div>
+                <div style="border-top: 1px solid #4A5568; width: 150px; margin-bottom: 5px;"></div>
+                <div class="signature-text">Dr. Diapk Gawli</div>
+                <div style="font-size: 9pt; color: #718096;">MBBS, DNB General Medicine</div>
+            </div>
+            <div style="text-align: right;">
+                <div>Valid for: ${data.validityPeriod || '30 days'}</div>
+                <div style="font-size: 8pt; color: #718096; margin-top: 3px;">Certificate ID: ${data.certificateId}</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+    `.trim();
+
+    return html;
+}
+
+/**
+ * Generate PDF using Puppeteer
+ * NOTE: This requires chrome-aws-lambda and puppeteer-core in Lambda layer
+ * 
+ * DEPLOYMENT INSTRUCTIONS:
+ * 1. Create Lambda layer with:
+ *    - chrome-aws-lambda@10.1.0
+ *    - puppeteer-core@10.1.0
+ * 2. Attach layer to this Lambda function
+ * 3. Increase Lambda timeout to 30 seconds
+ * 4. Increase Lambda memory to 1024MB (for Chromium)
+ */
+async function generatePdfWithPuppeteer(html) {
+    // IMPORTANT: This is a placeholder implementation
+    // The actual Puppeteer code requires the Lambda layer to be configured first
+
+    try {
+        // Uncomment this code after Lambda layer is configured:
+        /*
+        const chromium = require('chrome-aws-lambda');
+        
+        const browser = await chromium.puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath,
+            headless: chromium.headless,
+        });
+        
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+        
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '20mm', right: '15mm', bottom: '20mm', left: '15mm' }
+        });
+        
+        await browser.close();
+        
+        return pdfBuffer;
+        */
+
+        // TEMPORARY: Return a minimal PDF for testing
+        // This will be replaced with actual Puppeteer implementation
+        const minimalPdf = Buffer.from(
+            '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R/Resources<<>>>>endobj\nxref\n0 4\n0000000000 65535 f\n0000000009 00000 n\n0000000056 00000 n\n0000000115 00000 n\ntrailer<</Size 4/Root 1 0 R>>\nstartxref\n210\n%%EOF',
+            'utf-8'
+        );
+
+        console.log('⚠️ Using placeholder PDF - Puppeteer layer not yet configured');
+        return minimalPdf;
+
+    } catch (error) {
+        console.error('❌ Puppeteer error:', error);
+        throw new Error(`PDF generation failed: ${error.message}`);
+    }
+}
 
 // ============================================
 // DYNAMIC MEDICINE MASTER LOGIC

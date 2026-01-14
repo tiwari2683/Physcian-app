@@ -544,36 +544,41 @@ export const styles = StyleSheet.create({
         fontWeight: "600",
     },
 
-    // Generate Button
-    buttonContainer: {
+    // Generate Buttons
+    actionButtonsContainer: {
         padding: 16,
-        paddingBottom: Platform.OS === "ios" ? 34 : 16,
+        gap: 12,
+        marginBottom: 20,
     },
     generateButton: {
-        borderRadius: 12,
-        overflow: "hidden",
-    },
-    generatingButton: {
-        opacity: 0.7,
-    },
-    generateButtonGradient: {
-        paddingVertical: 16,
-        paddingHorizontal: 24,
-    },
-    buttonContent: {
+        backgroundColor: "#0070D6",
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "center",
-    },
-    generatingContent: {
-        alignItems: "center",
-        justifyContent: "center",
+        paddingVertical: 16,
+        borderRadius: 8,
+        gap: 8,
     },
     generateButtonText: {
-        fontSize: 16,
-        fontWeight: "600",
         color: "#FFFFFF",
-        marginLeft: 8,
+        fontSize: 16,
+        fontWeight: "bold",
+    },
+    secondaryButton: {
+        backgroundColor: "#EBF8FF",
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 12,
+        borderRadius: 8,
+        gap: 8,
+        borderWidth: 1,
+        borderColor: "#BEE3F8",
+    },
+    secondaryButtonText: {
+        color: "#0070D6",
+        fontSize: 14,
+        fontWeight: "600",
     },
     autoFillButton: {
         backgroundColor: "#EBF8FF",

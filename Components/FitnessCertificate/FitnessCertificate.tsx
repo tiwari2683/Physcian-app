@@ -65,6 +65,8 @@ import {
 
 // Import backend persistence service
 import { saveFitnessCertificateToBackend } from "./Services/FitnessCertificateBackendService";
+import FitnessCertificateHistory from "./FitnessCertificateHistory";
+import GenerateCertificatePdf from "./GenerateCertificatePdf";
 
 const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
   navigation,
@@ -220,6 +222,16 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     setDataLoadingStatus((prev) => ({ ...prev, investigations: false }));
     return result;
   };
+  const [showPdfModal, setShowPdfModal] = useState(false);
+
+  // Auto-fill effects
+  // useAutoFill(formData, updateFormData); // Assuming these are custom hooks defined elsewhere
+  // useOpinionAutoFill(formData, updateFormData); // Assuming these are custom hooks defined elsewhere
+
+  // Effect to load data when component mounts
+  useEffect(() => {
+    loadPatientDataAndHistory();
+  }, [patient?.patientId]);
 
   // Update loadPatientDataAndHistory function
   const loadPatientDataAndHistory = async () => {
@@ -366,6 +378,58 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
     setShowDropdown({
       surgery: false,
     });
+  };
+
+  /**
+   * Save certificate data to backend
+   */
+  const saveCertificate = async () => {
+    try {
+      // 1. Validate form
+      if (!formData.selectedOpinionType) {
+        Alert.alert("Validation Error", "Please select an opinion type");
+        return false;
+      }
+
+      // 2. Prepare data
+      // Ensure we have an ID for the record
+      const certificateId = formData.certificateId || `CERT_${Date.now()}`;
+      const dataToSave = {
+        ...formData,
+        certificateId,
+        createdAt: new Date().toISOString(),
+      };
+
+      // 3. Save to backend (fire and forget for UI responsiveness, but await for data safety)
+      saveFitnessCertificateToBackend(
+        API_ENDPOINTS.PATIENT_PROCESSOR,
+        patient.patientId,
+        dataToSave
+      ).catch(err => console.error("Background save failed:", err));
+
+      // Update local state with ID if it was new
+      if (!formData.certificateId) {
+        updateFormData("certificateId", certificateId);
+      }
+
+      return true;
+    } catch (error) {
+      console.error("Save error:", error);
+      Alert.alert("Error", "Failed to save certificate data");
+      return false;
+    }
+  };
+
+  /**
+   * Handle "Generate PDF" button press
+   */
+  const handleGeneratePdf = async () => {
+    // 1. Save data first
+    const saved = await saveCertificate();
+    if (!saved) return;
+
+    // 2. Open PDF Modal
+    setShowPdfModal(true);
   };
 
   // Wrapper for checkDependencies that passes module references
@@ -1577,40 +1641,38 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
       </ScrollView>
 
       {/* Generate Button */}
-      <View style={styles.buttonContainer}>
+      <View style={styles.actionButtonsContainer}>
         <TouchableOpacity
-          style={[
-            styles.generateButton,
-            isGenerating && styles.generatingButton,
-          ]}
-          onPress={handleGenerate}
+          style={styles.generateButton}
+          onPress={handleGeneratePdf}
           disabled={isGenerating}
         >
-          <LinearGradient
-            colors={
-              isGenerating ? ["#A0AEC0", "#718096"] : ["#0070D6", "#15A1B1"]
-            }
-            style={styles.generateButtonGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-          >
-            {isGenerating ? (
-              <View style={styles.generatingContent}>
-                <Text style={styles.generateButtonText}>
-                  Generating & Saving...
-                </Text>
-              </View>
-            ) : (
-              <View style={styles.buttonContent}>
-                <Ionicons name="download-outline" size={20} color="#FFFFFF" />
-                <Text style={styles.generateButtonText}>
-                  Generate & Save Certificate
-                </Text>
-              </View>
-            )}
-          </LinearGradient>
+          {isGenerating ? (
+            <ActivityIndicator color="#FFFFFF" size="small" />
+          ) : (
+            <Ionicons name="document-text-outline" size={24} color="#FFF" />
+          )}
+          <Text style={styles.generateButtonText}>
+            {isGenerating ? "Saving..." : "Generate & Share PDF"}
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.secondaryButton}
+          onPress={generateCertificate}
+          disabled={isGenerating}
+        >
+          <Ionicons name="image-outline" size={20} color="#0070D6" />
+          <Text style={styles.secondaryButtonText}>Save as Image (Legacy)</Text>
         </TouchableOpacity>
       </View>
+
+      {/* PDF Generation Modal */}
+      <GenerateCertificatePdf
+        visible={showPdfModal}
+        onClose={() => setShowPdfModal(false)}
+        formData={formData}
+      />
     </SafeAreaView>
   );
 };

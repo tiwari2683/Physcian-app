@@ -133,4 +133,8 @@ export interface FormData {
     // Latest prescription and investigations
     latestPrescription: string;
     latestInvestigations: string;
+
+    // Certificate metadata (for storage and PDF)
+    certificateId?: string;
+    createdAt?: string;
 }
