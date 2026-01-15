@@ -1,0 +1,161 @@
+[33mcommit 93354f0243e450152a203dfeeb1ed778555928f5[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Jan 14 15:53:59 2026 +0530
+
+    button to generate fitness certificate on all the pages
+
+[33mcommit 811a3fc97d355763ee494e70700ea0d0d99cc77a[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Jan 14 14:09:11 2026 +0530
+
+    pdf generating for fitness certificate
+
+[33mcommit e02b1eba49c0af36aab289345b17a15c4dfa89bb[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Tue Jan 13 15:48:21 2026 +0530
+
+    FitnessCertificateworking and saving to local storage as png file but not sharable from the app
+
+[33mcommit 1b1f8567d8566d7be01a130d1f6b2aa731380fcd[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Fri Jan 9 19:13:41 2026 +0530
+
+    added medicine adding functionality
+
+[33mcommit a4e8165895c3cc9bf01e7d71e16e81bb48ac34a3[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Fri Jan 9 15:21:37 2026 +0530
+
+    project documentation added
+
+[33mcommit 7ca4fcb5408dd3bc588214e4d192531db88f8bc1[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Fri Jan 9 14:55:04 2026 +0530
+
+    fixed the search and the prescription section
+
+[33mcommit 2d475811451c8dde78a1a52ed91bd72b1c0a905b[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Thu Jan 8 17:11:10 2026 +0530
+
+    prevoius+allfunctionsin lambda
+
+[33mcommit 92ae12dc8d8aca203545587728f9213ada409ada[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Thu Jan 8 17:01:14 2026 +0530
+
+    fixed-added-features-to-appointments
+
+[33mcommit 052a95499103bdee3417e43ec363776080d50d9d[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Jan 7 14:40:16 2026 +0530
+
+    working file uploads now only those upload which is in current visit not previous all are loading as well in the doctors homescreen
+
+[33mcommit d187bfbf173d42870b04b1891346889f46453ec6[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Jan 7 12:58:21 2026 +0530
+
+    Wroking uploading and fetching report with signed url without any extra data with s3 key
+
+[33mcommit 23199008033031dc14a76b3ff9e8ff6752f9e813[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Tue Jan 6 22:30:48 2026 +0530
+
+    fixed the appointmentment logical flaws
+
+[33mcommit 38670a64db32767641d2da24b2aaec40a3362c72[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Mon Jan 5 11:28:28 2026 +0530
+
+    all the report loading working correctly
+
+[33mcommit d1c6da43e65edd0e4618db32505d9761ddac94f2[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Mon Jan 5 11:18:58 2026 +0530
+
+    loading report at 2 places 1 remaining
+
+[33mcommit c55ad89fa4d484ca0f3f790b3c9aa2493338e420[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Sat Jan 3 22:55:35 2026 +0530
+
+    optimized lambdaupdaefile
+
+[33mcommit 56d3bc43ce6e34a3422b236f03e7201a5d752c68[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Sat Jan 3 12:35:52 2026 +0530
+
+    upload to s3 working
+
+[33mcommit 2bca1e29352b829137df5e20e2ec15248475122e[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Fri Jan 2 22:15:53 2026 +0530
+
+    fixed draft not report upload
+
+[33mcommit 5b417d7b0840311e55e9e84870550b90921c2c27[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 20:03:11 2025 +0530
+
+    fixed typescript errors_completely
+
+[33mcommit b535e89ebebae09e35f484ef4ac51a7ef6cfcb75[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 19:50:40 2025 +0530
+
+    fixed typescript errors
+
+[33mcommit 79a0000c86d6c292115f96faf85108e24fff8150[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 18:43:52 2025 +0530
+
+    fixed bugs of drafts-multipledrafft for single pateient
+
+[33mcommit fedd44061d43c9df422aa57a59188da2baaca041[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 18:24:48 2025 +0530
+
+    fixed complete draft issue
+
+[33mcommit b32633460d18ad870d38833aab69fc0259cb6cb3[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 18:09:51 2025 +0530
+
+    fixed-draft-logic-little
+
+[33mcommit f0d7052b23fae5e4f306cc2eb4ec2dbc260415cb[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Wed Dec 31 10:32:54 2025 +0530
+
+    fixed-login-ui-added-view-patent-component
+
+[33mcommit e5884e594c2bee4330e0f4b3a89816b382a0c75b[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Tue Dec 30 13:22:12 2025 +0530
+
+    working-report-upload-with-other-functionality
+
+[33mcommit 56dd065c5d7fe535456be04e10afa05637d0bb55[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Mon Dec 29 17:58:50 2025 +0530
+
+    Working Features of adding patients
+
+[33mcommit fd9a7a02c9914bcecde562e05c0d2c4b14b94470[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Sat Dec 27 13:06:52 2025 +0530
+
+    fixed-backend-dynamodb-lambdafunction-introduced
+
+[33mcommit 8e07344c141a4137ef56247ef2a40435b85b7a59[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Sat Dec 27 13:02:39 2025 +0530
+
+    Fixed-backend-introduced-dynamodb-lambda-function-for-appointments
+
+[33mcommit 5f257052fe1702f1af210018aaa6ff945c1fade0[m
+Author: prashant <prashant.tiwari24@spit.ac.in>
+Date:   Fri Dec 26 19:45:01 2025 +0530
+
+    Initial commit

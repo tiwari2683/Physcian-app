@@ -291,6 +291,7 @@ const TimingSelector = ({
                 value={timingValues[timing.id] || ""}
                 onChangeText={(text) => onTimingValueChange(timing.id, text)}
                 placeholder="Qty"
+                placeholderTextColor="#C8C8C8"
                 keyboardType="numeric"
               />
             )}
@@ -623,6 +624,7 @@ const MedicationCard: React.FC<MedicationCardProps> = ({
           value={med.duration}
           onChangeText={(text) => updateMedication(index, "duration", text)}
           placeholder="e.g., 7 days"
+          placeholderTextColor="#C8C8C8"
         />
       </View>
 
@@ -636,6 +638,7 @@ const MedicationCard: React.FC<MedicationCardProps> = ({
             updateMedication(index, "specialInstructions", text)
           }
           placeholder="Enter specific instructions for this medication"
+          placeholderTextColor="#C8C8C8"
           multiline
           numberOfLines={3}
           textAlignVertical="top"
@@ -3145,6 +3148,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                             }))
                           }
                           placeholder="e.g., 7 days"
+                          placeholderTextColor="#C8C8C8"
                         />
                       </View>
                       <View style={styles.inputWrapper}>
@@ -3161,6 +3165,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                             }))
                           }
                           placeholder="Enter specific instructions for this medication"
+                          placeholderTextColor="#C8C8C8"
                           multiline
                           numberOfLines={3}
                           textAlignVertical="top"

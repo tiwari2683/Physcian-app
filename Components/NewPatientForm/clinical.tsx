@@ -373,8 +373,6 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         // Use memory-conscious settings to prevent app crashes
         const result = await ImagePicker.launchCameraAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [4, 3],
           quality: 0.8,
           base64: false,
           exif: false,
@@ -513,7 +511,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           uniqueId: uniqueId,
           width: selectedImage.width,
           height: selectedImage.height,
-          isCropped: true, // Mark as cropped since allowsEditing was true
+          isCropped: false, // Full image preserved
         };
 
         console.log("📄 Prepared camera file object:", {
@@ -684,8 +682,6 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
         // Use memory-conscious settings and updated API
         const result = await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ImagePicker.MediaTypeOptions.Images,
-          allowsEditing: true,
-          aspect: [4, 3],
           quality: 0.8, // Memory-conscious quality setting
           base64: false,
           exif: false, // Disable EXIF to reduce memory usage
@@ -820,7 +816,7 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
           uniqueId: uniqueId,
           width: selectedImage.width,
           height: selectedImage.height,
-          isCropped: true, // Mark as cropped since allowsEditing was true
+          isCropped: false, // Full image preserved
         };
 
         console.log("ðŸ“„ Prepared gallery file object:", {

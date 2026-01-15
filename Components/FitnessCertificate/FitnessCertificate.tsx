@@ -1173,52 +1173,68 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               </View>
             </View>
 
-            {/* Vitals & Lab Values */}
-            <View style={styles.vitalsSection}>
-              <Text style={styles.sectionTitle}>VITALS & LAB VALUES</Text>
-              <View style={styles.vitalsGrid}>
-                <View style={styles.vitalsColumn}>
-                  <Text style={styles.vitalsLabel}>
-                    BP:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.bloodPressure || "Normal"}
-                    </Text>
-                  </Text>
-                  <Text style={styles.vitalsLabel}>
-                    HR:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.heartRate || "Normal"}
-                    </Text>
-                  </Text>
-                  <Text style={styles.vitalsLabel}>
-                    Temp:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.temperature || "Normal"}
-                    </Text>
-                  </Text>
+
+            {/* Vitals & Lab Values - Only show if at least one vital is entered */}
+            {(formData.bloodPressure || formData.heartRate || formData.temperature ||
+              formData.oxygenSaturation || formData.respiratoryRate || formData.labValues) && (
+                <View style={styles.vitalsSection}>
+                  <Text style={styles.sectionTitle}>VITALS & LAB VALUES</Text>
+                  <View style={styles.vitalsGrid}>
+                    <View style={styles.vitalsColumn}>
+                      {formData.bloodPressure && (
+                        <Text style={styles.vitalsLabel}>
+                          BP:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.bloodPressure}
+                          </Text>
+                        </Text>
+                      )}
+                      {formData.heartRate && (
+                        <Text style={styles.vitalsLabel}>
+                          HR:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.heartRate}
+                          </Text>
+                        </Text>
+                      )}
+                      {formData.temperature && (
+                        <Text style={styles.vitalsLabel}>
+                          Temp:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.temperature}
+                          </Text>
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.vitalsColumn}>
+                      {formData.oxygenSaturation && (
+                        <Text style={styles.vitalsLabel}>
+                          SpO2:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.oxygenSaturation}
+                          </Text>
+                        </Text>
+                      )}
+                      {formData.respiratoryRate && (
+                        <Text style={styles.vitalsLabel}>
+                          RR:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.respiratoryRate}
+                          </Text>
+                        </Text>
+                      )}
+                      {formData.labValues && (
+                        <Text style={styles.vitalsLabel}>
+                          Lab:{" "}
+                          <Text style={styles.vitalsValue}>
+                            {formData.labValues}
+                          </Text>
+                        </Text>
+                      )}
+                    </View>
+                  </View>
                 </View>
-                <View style={styles.vitalsColumn}>
-                  <Text style={styles.vitalsLabel}>
-                    SpO2:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.oxygenSaturation || "Normal"}
-                    </Text>
-                  </Text>
-                  <Text style={styles.vitalsLabel}>
-                    RR:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.respiratoryRate || "Normal"}
-                    </Text>
-                  </Text>
-                  <Text style={styles.vitalsLabel}>
-                    Lab:{" "}
-                    <Text style={styles.vitalsValue}>
-                      {formData.labValues || "WNL"}
-                    </Text>
-                  </Text>
-                </View>
-              </View>
-            </View>
+              )}
 
             {/* Recommendations */}
             {formData.recommendations && (
@@ -1558,12 +1574,14 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 value={formData.bloodPressure}
                 onChangeText={(text) => updateFormData("bloodPressure", text)}
                 placeholder="BP (mmHg)"
+                placeholderTextColor="#C8C8C8"
               />
               <TextInput
                 style={styles.vitalInput}
                 value={formData.heartRate}
                 onChangeText={(text) => updateFormData("heartRate", text)}
                 placeholder="Heart Rate"
+                placeholderTextColor="#C8C8C8"
               />
             </View>
             <View style={[styles.vitalsInputGrid, { marginTop: 8 }]}>
@@ -1572,6 +1590,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 value={formData.temperature}
                 onChangeText={(text) => updateFormData("temperature", text)}
                 placeholder="Temperature (°F)"
+                placeholderTextColor="#C8C8C8"
               />
               <TextInput
                 style={styles.vitalInput}
@@ -1580,6 +1599,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                   updateFormData("oxygenSaturation", text)
                 }
                 placeholder="SpO2 (%)"
+                placeholderTextColor="#C8C8C8"
               />
             </View>
             <View style={[styles.vitalsInputGrid, { marginTop: 8 }]}>
@@ -1588,12 +1608,14 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 value={formData.respiratoryRate}
                 onChangeText={(text) => updateFormData("respiratoryRate", text)}
                 placeholder="Respiratory Rate"
+                placeholderTextColor="#C8C8C8"
               />
               <TextInput
                 style={styles.vitalInput}
                 value={formData.labValues}
                 onChangeText={(text) => updateFormData("labValues", text)}
                 placeholder="Lab Values"
+                placeholderTextColor="#C8C8C8"
               />
             </View>
           </View>
@@ -1606,6 +1628,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.recommendations}
               onChangeText={(text) => updateFormData("recommendations", text)}
               placeholder="Additional recommendations or precautions"
+              placeholderTextColor="#C8C8C8"
               multiline
             />
           </View>
