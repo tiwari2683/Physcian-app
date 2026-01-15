@@ -94,6 +94,7 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
   );
   const [isImageLoading, setIsImageLoading] = useState<boolean>(false);
   const [imageError, setImageError] = useState<boolean>(false);
+  const [sortModalVisible, setSortModalVisible] = useState<boolean>(false);
 
   // Fade animation for modals
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -889,6 +890,114 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
         </View>
       </Modal>
 
+      {/* Sort Modal */}
+      <Modal
+        visible={sortModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setSortModalVisible(false)}
+      >
+        <View style={styles.sortModalOverlay}>
+          <View style={styles.sortModalContent}>
+            <View style={styles.sortModalHeader}>
+              <Text style={styles.sortModalTitle}>Sort By</Text>
+              <TouchableOpacity
+                style={styles.sortModalCloseButton}
+                onPress={() => setSortModalVisible(false)}
+                accessibilityLabel="Close sort options"
+              >
+                <Ionicons name="close" size={24} color="#718096" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.sortOptionsContainer}>
+              <TouchableOpacity
+                style={[
+                  styles.sortOption,
+                  sortBy === "newest" && styles.sortOptionSelected,
+                ]}
+                onPress={() => {
+                  setSortBy("newest");
+                  setSortModalVisible(false);
+                }}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={20}
+                  color={sortBy === "newest" ? "#0070D6" : "#718096"}
+                />
+                <Text
+                  style={[
+                    styles.sortOptionText,
+                    sortBy === "newest" && styles.sortOptionTextSelected,
+                  ]}
+                >
+                  Newest First
+                </Text>
+                {sortBy === "newest" && (
+                  <Ionicons name="checkmark" size={20} color="#0070D6" />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sortOption,
+                  sortBy === "oldest" && styles.sortOptionSelected,
+                ]}
+                onPress={() => {
+                  setSortBy("oldest");
+                  setSortModalVisible(false);
+                }}
+              >
+                <Ionicons
+                  name="time-outline"
+                  size={20}
+                  color={sortBy === "oldest" ? "#0070D6" : "#718096"}
+                />
+                <Text
+                  style={[
+                    styles.sortOptionText,
+                    sortBy === "oldest" && styles.sortOptionTextSelected,
+                  ]}
+                >
+                  Oldest First
+                </Text>
+                {sortBy === "oldest" && (
+                  <Ionicons name="checkmark" size={20} color="#0070D6" />
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.sortOption,
+                  sortBy === "name" && styles.sortOptionSelected,
+                ]}
+                onPress={() => {
+                  setSortBy("name");
+                  setSortModalVisible(false);
+                }}
+              >
+                <Ionicons
+                  name="text-outline"
+                  size={20}
+                  color={sortBy === "name" ? "#0070D6" : "#718096"}
+                />
+                <Text
+                  style={[
+                    styles.sortOptionText,
+                    sortBy === "name" && styles.sortOptionTextSelected,
+                  ]}
+                >
+                  Name (A-Z)
+                </Text>
+                {sortBy === "name" && (
+                  <Ionicons name="checkmark" size={20} color="#0070D6" />
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Header */}
       <LinearGradient
         colors={["#0070D6", "#15A1B1"]}
@@ -969,14 +1078,7 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
         <View style={styles.sortContainer}>
           <TouchableOpacity
             style={styles.sortButton}
-            onPress={() => {
-              Alert.alert("Sort By", "Select a sorting option", [
-                { text: "Newest First", onPress: () => setSortBy("newest") },
-                { text: "Oldest First", onPress: () => setSortBy("oldest") },
-                { text: "Name (A-Z)", onPress: () => setSortBy("name") },
-                { text: "Cancel", style: "cancel" },
-              ]);
-            }}
+            onPress={() => setSortModalVisible(true)}
             accessibilityLabel="Sort patients"
           >
             <Ionicons name="funnel-outline" size={20} color="#0070D6" />
@@ -1467,6 +1569,68 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 14,
     fontWeight: "500",
+  },
+  sortModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.5)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  sortModalContent: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    width: width * 0.85,
+    maxWidth: 400,
+    padding: 20,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  sortModalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#E2E8F0",
+  },
+  sortModalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    color: "#2D3748",
+  },
+  sortModalCloseButton: {
+    padding: 4,
+  },
+  sortOptionsContainer: {
+    gap: 12,
+  },
+  sortOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 16,
+    borderRadius: 12,
+    backgroundColor: "#F7FAFC",
+    borderWidth: 2,
+    borderColor: "transparent",
+    gap: 12,
+  },
+  sortOptionSelected: {
+    backgroundColor: "#EBF8FF",
+    borderColor: "#0070D6",
+  },
+  sortOptionText: {
+    flex: 1,
+    fontSize: 16,
+    color: "#4A5568",
+    fontWeight: "500",
+  },
+  sortOptionTextSelected: {
+    color: "#0070D6",
+    fontWeight: "600",
   },
 });
 
