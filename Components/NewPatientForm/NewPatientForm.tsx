@@ -212,7 +212,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     } else {
       // If on the last section, go to Doctor Dashboard
       console.log("🏁 On last section, navigating to Doctor Dashboard");
-      navigation.navigate("DoctorDashboard");
+      navigation.navigate("DoctorDashboard", { isAuthenticated: true });
     }
 
     console.log("-----------------------------------------------------------");
@@ -511,7 +511,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           {
             text: "OK",
             onPress: () => {
-              navigation.navigate("DoctorDashboard");
+              navigation.navigate("DoctorDashboard", { isAuthenticated: true });
             }
           }
         ]);
