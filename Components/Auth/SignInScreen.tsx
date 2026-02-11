@@ -51,24 +51,10 @@ import {
 const awsConfig = {
   Auth: {
     Cognito: {
-      userPoolId: "us-east-1_nxn7JWpsM",
-      userPoolClientId: "1p6homv71i3l5mdog70c5t41jk",
-      region: "us-east-1",
+      userPoolId: "us-east-2_xS1ceU5jz",
+      userPoolClientId: "5b2d4nvfcmji7n8rhc74pj6t1g",
+      region: "us-east-2",
       signUpVerificationMethod: "code" as const,
-      loginWith: {
-        oauth: {
-          domain: "us-east-12donwwm43.auth.us-east-1.amazoncognito.com",
-          scopes: [
-            "email",
-            "profile",
-            "openid",
-            "aws.cognito.signin.user.admin",
-          ],
-          redirectSignIn: ["https://localhost:3000/"],
-          redirectSignOut: ["https://localhost:3000/"],
-          responseType: "code" as const,
-        },
-      },
     },
   },
 };
