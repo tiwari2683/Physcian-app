@@ -625,11 +625,14 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
 
       // Fetch data again
       fetch(API_URL, {
+        method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "Cache-Control": "no-cache, no-store, must-revalidate",
           Pragma: "no-cache",
           Expires: "0",
         },
+        body: JSON.stringify({ action: "getAllPatients" }),
       })
         .then((response) => {
           if (!response.ok) {

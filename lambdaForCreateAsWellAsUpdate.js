@@ -5,14 +5,14 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
 
 // Initialize AWS clients
-const dynamoClient = new DynamoDBClient({ region: "ap-southeast-2" });
+const dynamoClient = new DynamoDBClient({ region: "us-east-2" });
 const dynamodb = DynamoDBDocumentClient.from(dynamoClient, {
     marshallOptions: {
         removeUndefinedValues: true
     }
 });
 const s3 = new S3Client({
-    region: "ap-southeast-2",
+    region: "us-east-2",
     forcePathStyle: true
 });
 
@@ -22,7 +22,7 @@ const CLINICAL_HISTORY_TABLE = 'ClinicalParametersHistory';
 const MEDICAL_HISTORY_TABLE = 'MedicalHistoryEntries';
 const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
-const REPORTS_BUCKET = 'dr-gawli-patient-files';
+const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
 
 // ============================================
 // PRESIGNED URL GENERATION FOR UPLOADS
@@ -729,11 +729,11 @@ async function fetchClinicalHistory(patientId) {
         }));
 
         console.log(`✅ Found ${result.Items?.length || 0} clinical history entries`);
-        return { success: true, clinicalHistory: result.Items || [] };
+        return formatSuccessResponse({ success: true, clinicalHistory: result.Items || [] });
     } catch (error) {
         console.error(`❌ Clinical history fetch error:`, error.message);
         // Return empty on error - non-blocking
-        return { success: false, clinicalHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
     }
 }
 
@@ -750,10 +750,10 @@ async function fetchMedicalHistory(patientId) {
         }));
 
         console.log(`✅ Found ${result.Items?.length || 0} medical history entries`);
-        return { success: true, medicalHistory: result.Items || [] };
+        return formatSuccessResponse({ success: true, medicalHistory: result.Items || [] });
     } catch (error) {
         console.error(`❌ Medical history fetch error:`, error.message);
-        return { success: false, medicalHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
     }
 }
 
@@ -770,10 +770,10 @@ async function fetchDiagnosisHistory(patientId) {
         }));
 
         console.log(`✅ Found ${result.Items?.length || 0} diagnosis history entries`);
-        return { success: true, diagnosisHistory: result.Items || [] };
+        return formatSuccessResponse({ success: true, diagnosisHistory: result.Items || [] });
     } catch (error) {
         console.error(`❌ Diagnosis history fetch error:`, error.message);
-        return { success: false, diagnosisHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
     }
 }
 
@@ -790,10 +790,10 @@ async function fetchInvestigationsHistory(patientId) {
         }));
 
         console.log(`✅ Found ${result.Items?.length || 0} investigations history entries`);
-        return { success: true, investigationsHistory: result.Items || [] };
+        return formatSuccessResponse({ success: true, investigationsHistory: result.Items || [] });
     } catch (error) {
         console.error(`❌ Investigations history fetch error:`, error.message);
-        return { success: false, investigationsHistory: [], error: error.message };
+        return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
     }
 }
 
@@ -932,7 +932,7 @@ async function deletePatient(requestData) {
         TableName: PATIENTS_TABLE,
         Key: { patientId: requestData.patientId }
     }));
-    return { success: true };
+    return formatSuccessResponse({ success: true });
 }
 
 async function updatePatientData(requestData) {

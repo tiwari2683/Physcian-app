@@ -15,6 +15,8 @@ import {
   AlertButton,
   Linking,
   Image,
+  LayoutAnimation,
+  UIManager,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,6 +26,15 @@ import {
 } from "./generateprescription";
 import KeyboardAwareScrollView from "./KeyboardAwareScrollView";
 import MedicineAutocomplete from "./MedicineAutocomplete";
+
+// Enable LayoutAnimation for Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 
 // Type definitions
 interface Medication {
@@ -61,12 +72,164 @@ interface MedicationGroupProps {
   setMedications: (meds: Medication[]) => void;
   onEditMedication: (medication: Medication, index: number) => void;
   onAddMedicationToGroup: (date: string | Date) => void;
-  patient: any;
   // NEW: Explicit read-only flag for past prescriptions
   // When true, ALL edit actions are disabled (no edit icons, delete buttons, swipe, long-press)
   // Doctor details from saved prescription are preserved and never replaced
+  onGeneratePrescription: (
+    date: string | Date,
+    medications: Medication[]
+  ) => void;
+  // Individual setters instead of full patient object
+  setPrescriptionModalVisible: (visible: boolean) => void;
+  setCurrentPrescriptionDate: (date: string) => void;
+  setCurrentPrescriptionMeds: (meds: Medication[]) => void;
   isReadOnly?: boolean;
 }
+
+// NEW: Memoized Current Visit Section Component
+// This component manages the "Current Visit" section and only re-renders when relevant props change.
+// Crucially, it does NOT depend on the full patientData object, preventing flickering when diagnosis changes.
+interface CurrentVisitSectionProps {
+  currentVisitMedications: Medication[];
+  medications: Medication[];
+  prefillMode: boolean;
+  initialTab: string;
+  createPrescription: (copy: boolean) => void;
+  updateMedication: (index: number, field: string, value: string) => void;
+  removeMedication: (index: number) => void;
+  expandedGroups: string[];
+  toggleExpandGroup: (date: string) => void;
+  newPrescriptionIndices: number[];
+  setMedications: (medications: Medication[]) => void;
+  onEditMedication: (medication: Medication, index: number) => void;
+  onAddMedicationToGroup: (date: any) => void;
+  onGeneratePrescription: (
+    date: string | Date,
+    medications: Medication[]
+  ) => void;
+  setPrescriptionModalVisible: (visible: boolean) => void;
+  setCurrentPrescriptionDate: (date: string) => void;
+  setCurrentPrescriptionMeds: (meds: Medication[]) => void;
+}
+
+const CurrentVisitSection = React.memo(
+  ({
+    currentVisitMedications,
+    medications,
+    prefillMode,
+    initialTab,
+    createPrescription,
+    updateMedication,
+    removeMedication,
+    expandedGroups,
+    toggleExpandGroup,
+    newPrescriptionIndices,
+    setMedications,
+    onEditMedication,
+    onAddMedicationToGroup,
+    onGeneratePrescription,
+    setPrescriptionModalVisible,
+    setCurrentPrescriptionDate,
+    setCurrentPrescriptionMeds,
+  }: CurrentVisitSectionProps) => {
+    // Helper to check if a date string represents today
+    const isDateToday = (dateString: string): boolean => {
+      try {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const date = new Date(dateString);
+        date.setHours(0, 0, 0, 0);
+        return date.getTime() === today.getTime();
+      } catch {
+        return false;
+      }
+    };
+
+    // Memoize grouping logic
+    const groupedMedications = useMemo(() => {
+      const groups: Record<string, Medication[]> = {};
+      medications.forEach((med) => {
+        if (!med.datePrescribed) return;
+        const dateObj = new Date(med.datePrescribed as string | number | Date);
+        const dateString = dateObj.toISOString().split("T")[0];
+        if (!groups[dateString]) {
+          groups[dateString] = [];
+        }
+        groups[dateString].push(med);
+      });
+      return Object.entries(groups)
+        .sort(
+          ([dateA], [dateB]) =>
+            new Date(dateB).getTime() - new Date(dateA).getTime()
+        )
+        .map(([date, meds]) => ({ date, medications: meds }));
+    }, [medications]);
+
+    return (
+      <View style={styles.currentVisitSection}>
+        <View style={styles.sectionHeaderRow}>
+          <Ionicons name="create-outline" size={20} color="#0070D6" />
+          <Text style={styles.sectionHeaderText}>Current Visit</Text>
+          <View style={styles.editableBadge}>
+            <Text style={styles.editableBadgeText}>Editable</Text>
+          </View>
+        </View>
+
+        {/* Add Prescription Button */}
+        <View style={styles.prescriptionActionsContainer}>
+          {!(prefillMode && initialTab === "prescription") && (
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() => createPrescription(false)}
+            >
+              <Ionicons name="add-circle" size={24} color="#0070D6" />
+              <Text style={styles.addButtonText}>Add Prescription</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Current Visit Medications (today's prescriptions) */}
+        {currentVisitMedications.length === 0 ? (
+          <View style={styles.emptyCurrentVisitContainer}>
+            <Ionicons name="medical-outline" size={32} color="#CBD5E0" />
+            <Text style={styles.emptyCurrentVisitText}>
+              No medications added for today
+            </Text>
+            <Text style={styles.emptyCurrentVisitSubtext}>
+              Click "Add Prescription" to prescribe medications
+            </Text>
+          </View>
+        ) : (
+          groupedMedications
+            .filter((group) => isDateToday(group.date))
+            .map((group) => (
+              <MedicationGroupCard
+                key={`current-${group.date}`}
+                date={group.date}
+                medications={group.medications}
+                updateMedication={updateMedication}
+                removeMedication={removeMedication}
+                allMedications={medications}
+                expandedGroups={expandedGroups}
+                toggleExpandGroup={toggleExpandGroup}
+                isNewPrescription={group.medications.some((med) =>
+                  newPrescriptionIndices.includes(medications.indexOf(med))
+                )}
+                newPrescriptionIndices={newPrescriptionIndices}
+                setMedications={setMedications}
+                onEditMedication={onEditMedication}
+                onAddMedicationToGroup={onAddMedicationToGroup}
+                onGeneratePrescription={onGeneratePrescription}
+                setPrescriptionModalVisible={setPrescriptionModalVisible}
+                setCurrentPrescriptionDate={setCurrentPrescriptionDate}
+                setCurrentPrescriptionMeds={setCurrentPrescriptionMeds}
+              />
+            ))
+        )}
+      </View>
+    );
+  }
+);
 
 interface PrescriptionTabProps {
   patientData: any;
@@ -401,6 +564,7 @@ const MedicationCard: React.FC<MedicationCardProps> = ({
       ? selectedTimings.filter((t) => t !== id)
       : [...selectedTimings, id];
 
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setSelectedTimings(newTimings);
 
     // Update the medication object with comma-separated timing values
@@ -671,44 +835,56 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
   setMedications,
   onEditMedication, // New prop for handling edit medication
   onAddMedicationToGroup, // New prop for handling add to this prescription
-  patient, // Added patient data for prescription generation
-  isReadOnly = false, // NEW: Explicit read-only flag for past prescriptions
+  onGeneratePrescription,
+  setPrescriptionModalVisible,
+  setCurrentPrescriptionDate,
+  setCurrentPrescriptionMeds,
+  isReadOnly = false,
 }) => {
-  // Format the date to display in a readable format
-  const formatDate = (dateString: string | Date): string => {
-    if (!dateString) return "Not specified";
+  // Calculate if this group contains any new prescriptions
+  const isAnyMedicationNew = useMemo(() => {
+    return medications.some((med) =>
+      newPrescriptionIndices.includes(allMedications.indexOf(med))
+    );
+  }, [medications, newPrescriptionIndices, allMedications]);
 
+  // Check if prescription is from today
+  const isPrescriptionFromToday = useMemo(() => {
     try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-IN", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      });
-    } catch (e) {
-      return "Invalid date";
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const groupDate = new Date(date as string | Date);
+      groupDate.setHours(0, 0, 0, 0);
+      return groupDate.getTime() === today.getTime();
+    } catch {
+      return false;
     }
+  }, [date]);
+
+  // Check if user can edit this prescription group
+  // Editable if it's from today AND not in read-only mode
+  const canEdit = isPrescriptionFromToday && !isReadOnly;
+
+  // Format date for display
+  const formattedDate = useMemo(() => {
+    try {
+      return new Date(date as string | Date).toLocaleDateString("en-US", {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
+    } catch {
+      return String(date);
+    }
+  }, [date]);
+
+  // Handle generation using parent callback
+  const handleGroupGeneratePrescription = () => {
+    onGeneratePrescription(date, medications);
   };
 
-  const formattedDate = formatDate(date);
   const isExpanded = expandedGroups.includes(typeof date === 'string' ? date : date.toISOString().split('T')[0]);
-
-  // Add this check to determine if this prescription group is from today
-  const isPrescriptionFromToday = isDateToday(date);
-
-  // ============================================================================
-  // EDIT CONTROL: canEdit determines if this prescription group can be modified
-  // ============================================================================
-  // IMPORTANT: Past prescriptions are IMMUTABLE (legal medical records)
-  // - isReadOnly is explicit flag from parent for past prescription groups
-  // - isPrescriptionFromToday is implicit check based on date
-  // - Both must be satisfied for edit actions to be enabled
-  const canEdit = !isReadOnly && isPrescriptionFromToday;
-
-  // Determine if any medication in this group is a new prescription
-  const isAnyMedicationNew = medications.some((med) =>
-    newPrescriptionIndices.includes(allMedications.indexOf(med))
-  );
 
   // Calculate expiration status for a single medication
   const calculateMedicationExpiration = (prescriptionDate: string | Date, duration: string): {
@@ -779,183 +955,6 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
         year: "numeric",
       }),
     };
-  };
-
-  // New function to handle generating prescription for this group
-  const handleGroupGeneratePrescription = async () => {
-    if (medications.length === 0) {
-      Alert.alert(
-        "No Medications",
-        "There are no medications for this date to generate a prescription."
-      );
-      return;
-    }
-
-    // Set up the file name
-    const fileName = `Prescription_${patient.name.replace(
-      /\s+/g,
-      "_"
-    )}_${new Date(date)
-      .toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "short",
-        day: "numeric",
-      })
-      .replace(/,/g, "")
-      .replace(/\s+/g, "_")}`;
-
-    // Check if diagnosis or advised investigations exist
-    const hasDiagnosis =
-      patient.diagnosis && patient.diagnosis.trim().length > 0;
-    const hasAdvisedInvestigations =
-      patient.advisedInvestigations &&
-      patient.advisedInvestigations.trim().length > 0;
-
-    // If neither exists, just generate the prescription with medications only
-    if (!hasDiagnosis && !hasAdvisedInvestigations) {
-      generateGroupPrescriptionWithOptions(
-        medications,
-        date,
-        false,
-        false,
-        fileName
-      );
-      return;
-    }
-
-    // Create options for selection
-    const options: AlertButton[] = [];
-
-    if (hasDiagnosis && hasAdvisedInvestigations) {
-      options.push(
-        {
-          text: "Include Both",
-          onPress: () =>
-            generateGroupPrescriptionWithOptions(
-              medications,
-              date,
-              true,
-              true,
-              fileName
-            ),
-        },
-        {
-          text: "Diagnosis Only",
-          onPress: () =>
-            generateGroupPrescriptionWithOptions(
-              medications,
-              date,
-              true,
-              false,
-              fileName
-            ),
-        },
-        {
-          text: "Investigations Only",
-          onPress: () =>
-            generateGroupPrescriptionWithOptions(
-              medications,
-              date,
-              false,
-              true,
-              fileName
-            ),
-        }
-      );
-    } else if (hasDiagnosis) {
-      options.push({
-        text: "Include Diagnosis",
-        onPress: () =>
-          generateGroupPrescriptionWithOptions(
-            medications,
-            date,
-            true,
-            false,
-            fileName
-          ),
-      });
-    } else if (hasAdvisedInvestigations) {
-      options.push({
-        text: "Include Investigations",
-        onPress: () =>
-          generateGroupPrescriptionWithOptions(
-            medications,
-            date,
-            false,
-            true,
-            fileName
-          ),
-      });
-    }
-
-    // Always add the medications-only option
-    options.push({
-      text: "Medications Only",
-      onPress: () =>
-        generateGroupPrescriptionWithOptions(
-          medications,
-          date,
-          false,
-          false,
-          fileName
-        ),
-    });
-
-    // Add cancel option
-    options.push({ text: "Cancel", style: "cancel" });
-
-    // Show the alert with options
-    Alert.alert(
-      "Generate Prescription",
-      "Select what information to include in the prescription:",
-      options
-    );
-  };
-
-  // Function to generate group prescription with selected options
-  const generateGroupPrescriptionWithOptions = async (
-    meds: Medication[],
-    prescriptionDate: string | Date,
-    includeDiagnosis: boolean,
-    includeInvestigations: boolean,
-    fileName: string
-  ) => {
-    try {
-      // Create a copy of the patient data
-      const prescriptionPatient = {
-        ...patient,
-        name: patient.name,
-        age: patient.age,
-        sex: patient.sex,
-        patientId: patient?.patientId || "New Patient",
-        // Only include diagnosis if selected
-        diagnosis: includeDiagnosis ? patient.diagnosis : "",
-        // Only include advised investigations if selected
-        advisedInvestigations: includeInvestigations
-          ? patient.advisedInvestigations
-          : "",
-      };
-
-      // Generate the prescription
-      const result = await generatePrescriptionDirectly(
-        prescriptionPatient,
-        meds,
-        typeof prescriptionDate === 'string' ? prescriptionDate : prescriptionDate.toISOString(),
-        undefined, // Use default doctor info
-        patient.prescription, // Use prescription text as additional notes
-        fileName
-      );
-
-      if (!result.success) {
-        Alert.alert("Error", result.error || "Failed to generate prescription");
-      }
-    } catch (error) {
-      console.error("Error generating prescription:", error);
-      Alert.alert(
-        "Error",
-        "An unexpected error occurred while generating the prescription."
-      );
-    }
   };
 
   // If showing in compressed mode
@@ -1848,208 +1847,262 @@ interface VisitContextSummaryProps {
 // - Collapsed: One row with key hints (reports, diagnosis, etc.)
 // - Expanded: Full context cards with details
 // ============================================================================
-const VisitContextSummary: React.FC<VisitContextSummaryProps> = ({
-  patientData,
-  reportFiles,
-  isFirstVisit,
-  onExpandReports,
-  onExpandHistory,
-  onExpandDiagnosis,
-}) => {
-  // Collapsed by default for cleaner UI
-  const [isExpanded, setIsExpanded] = useState(false);
+// ============================================================================
+// VISIT CONTEXT SUMMARY - Collapsible by default
+// ============================================================================
+// Shows compact summary when collapsed, full cards when expanded
+// - Collapsed: One row with key hints (reports, diagnosis, etc.)
+// - Expanded: Full context cards with details
+// ============================================================================
+const VisitContextSummary = React.memo(
+  ({
+    patientData,
+    reportFiles,
+    isFirstVisit,
+    onExpandReports,
+    onExpandHistory,
+    onExpandDiagnosis,
+  }: VisitContextSummaryProps) => {
+    // Collapsed by default for cleaner UI
+    const [isExpanded, setIsExpanded] = useState(false);
 
-  // Helper to get reports summary text
-  const getReportsSummary = (): string | null => {
-    const count = reportFiles.length;
-    if (count === 0) return null;
-    return `${count} file${count > 1 ? "s" : ""} uploaded`;
-  };
+    // Helper to get reports summary text
+    const getReportsSummary = (): string | null => {
+      const count = reportFiles.length;
+      if (count === 0) return null;
+      return `${count} file${count > 1 ? "s" : ""} uploaded`;
+    };
 
-  // Helper to get history summary (first line preview)
-  const getHistorySummary = (): string | null => {
-    if (!patientData.medicalHistory) return null;
-    const lines = patientData.medicalHistory
-      .split("\n")
-      .filter((l: string) => l.trim() && !l.startsWith("---"));
-    if (lines.length === 0) return null;
-    const firstLine = lines[0].trim();
-    return firstLine.length > 50 ? firstLine.substring(0, 50) + "..." : firstLine;
-  };
+    // Helper to get history summary (first line preview)
+    const getHistorySummary = (): string | null => {
+      if (!patientData.medicalHistory) return null;
+      const lines = patientData.medicalHistory
+        .split("\n")
+        .filter((l: string) => l.trim() && !l.startsWith("---"));
+      if (lines.length === 0) return null;
+      const firstLine = lines[0].trim();
+      return firstLine.length > 50
+        ? firstLine.substring(0, 50) + "..."
+        : firstLine;
+    };
 
-  // Helper to get diagnosis summary
-  const getDiagnosisSummary = (): string | null => {
-    if (!patientData.diagnosis) return null;
-    const text = patientData.diagnosis.trim();
-    return text.length > 60 ? text.substring(0, 60) + "..." : text;
-  };
+    // Helper to get diagnosis summary
+    const getDiagnosisSummary = (): string | null => {
+      if (!patientData.diagnosis) return null;
+      const text = patientData.diagnosis.trim();
+      return text.length > 60 ? text.substring(0, 60) + "..." : text;
+    };
 
-  // Helper to get advised investigations summary
-  const getInvestigationsSummary = (): string | null => {
-    if (!patientData.advisedInvestigations) return null;
-    const text = patientData.advisedInvestigations.trim();
-    return text.length > 60 ? text.substring(0, 60) + "..." : text;
-  };
+    // Helper to get advised investigations summary
+    const getInvestigationsSummary = (): string | null => {
+      if (!patientData.advisedInvestigations) return null;
+      const text = patientData.advisedInvestigations.trim();
+      return text.length > 60 ? text.substring(0, 60) + "..." : text;
+    };
 
-  // Count how many context items have data
-  const contextItemsCount = [
-    getReportsSummary(),
-    getHistorySummary(),
-    getDiagnosisSummary(),
-    getInvestigationsSummary(),
-  ].filter(Boolean).length;
+    // Count how many context items have data
+    const contextItemsCount = [
+      getReportsSummary(),
+      getHistorySummary(),
+      getDiagnosisSummary(),
+      getInvestigationsSummary(),
+    ].filter(Boolean).length;
 
-  // Build collapsed hint text (e.g., "1 report • Diagnosis added")
-  const getCollapsedHints = (): string[] => {
-    const hints: string[] = [];
-    const reportCount = reportFiles.length;
-    if (reportCount > 0) {
-      hints.push(`${reportCount} report${reportCount > 1 ? "s" : ""}`);
-    }
-    if (patientData.diagnosis?.trim()) {
-      hints.push("Diagnosis");
-    }
-    if (patientData.advisedInvestigations?.trim()) {
-      hints.push("Investigations");
-    }
-    if (patientData.medicalHistory?.trim() && hints.length < 3) {
-      hints.push("History");
-    }
-    return hints;
-  };
+    // Build collapsed hint text (e.g., "1 report • Diagnosis added")
+    const getCollapsedHints = (): string[] => {
+      const hints: string[] = [];
+      const reportCount = reportFiles.length;
+      if (reportCount > 0) {
+        hints.push(`${reportCount} report${reportCount > 1 ? "s" : ""}`);
+      }
+      if (patientData.diagnosis?.trim()) {
+        hints.push("Diagnosis");
+      }
+      if (patientData.advisedInvestigations?.trim()) {
+        hints.push("Investigations");
+      }
+      if (patientData.medicalHistory?.trim() && hints.length < 3) {
+        hints.push("History");
+      }
+      return hints;
+    };
 
-  const collapsedHints = getCollapsedHints();
+    const collapsedHints = getCollapsedHints();
 
-  return (
-    <View style={styles.contextSummaryContainer}>
-      {/* Tappable Header - Entire row toggles expand/collapse */}
-      <TouchableOpacity
-        style={styles.contextHeaderTouchable}
-        onPress={() => setIsExpanded(!isExpanded)}
-        activeOpacity={0.7}
-      >
-        <View style={styles.contextHeaderLeft}>
-          <Text style={styles.contextSectionHeader}>
-            📋 Current Visit Context
-          </Text>
-          {/* Key hints in collapsed view */}
-          {!isExpanded && collapsedHints.length > 0 && (
-            <Text style={styles.contextCollapsedHints}>
-              {" • " + collapsedHints.join(" • ")}
+    return (
+      <View style={styles.contextSummaryContainer}>
+        {/* Tappable Header - Entire row toggles expand/collapse */}
+        <TouchableOpacity
+          style={styles.contextHeaderTouchable}
+          onPress={() => {
+            LayoutAnimation.configureNext(
+              LayoutAnimation.Presets.easeInEaseOut
+            );
+            setIsExpanded(!isExpanded);
+          }}
+          activeOpacity={0.7}
+        >
+          <View style={styles.contextHeaderLeft}>
+            <Text style={styles.contextSectionHeader}>
+              📋 Current Visit Context
             </Text>
-          )}
-          {isExpanded && (
-            <Text style={styles.contextExpandedLabel}> – Full Details</Text>
-          )}
-        </View>
-        <View style={styles.contextHeaderRight}>
-          {contextItemsCount > 0 && !isExpanded && (
-            <View style={styles.contextItemCountBadge}>
-              <Text style={styles.contextItemCountText}>{contextItemsCount}</Text>
-            </View>
-          )}
-          <Ionicons
-            name={isExpanded ? "chevron-up" : "chevron-down"}
-            size={20}
-            color="#718096"
-          />
-        </View>
-      </TouchableOpacity>
-
-      {/* First visit indicator - always visible */}
-      {isFirstVisit && (
-        <View style={styles.firstVisitBadge}>
-          <Ionicons name="person-add-outline" size={14} color="#319795" />
-          <Text style={styles.firstVisitBadgeText}>First Visit</Text>
-        </View>
-      )}
-
-      {/* Expanded Content - Full context cards */}
-      {isExpanded && (
-        <View style={styles.contextCardsContainer}>
-          {/* Reports Card */}
-          <TouchableOpacity style={styles.contextCard} onPress={onExpandReports}>
-            <View style={styles.contextCardHeader}>
-              <Ionicons name="document-text-outline" size={20} color="#0070D6" />
-              <Text style={styles.contextCardTitle}>Reports</Text>
-              <Ionicons
-                name="chevron-forward"
-                size={16}
-                color="#A0AEC0"
-                style={styles.contextCardChevron}
-              />
-            </View>
-            {getReportsSummary() ? (
-              <Text style={styles.contextCardPreview}>{getReportsSummary()}</Text>
-            ) : (
-              <Text style={styles.contextCardEmpty}>No reports uploaded</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* History Card */}
-          <TouchableOpacity style={styles.contextCard} onPress={onExpandHistory}>
-            <View style={styles.contextCardHeader}>
-              <Ionicons name="time-outline" size={20} color="#0070D6" />
-              <Text style={styles.contextCardTitle}>Medical History</Text>
-              <Ionicons
-                name="chevron-forward"
-                size={16}
-                color="#A0AEC0"
-                style={styles.contextCardChevron}
-              />
-            </View>
-            {getHistorySummary() ? (
-              <Text style={styles.contextCardPreview}>{getHistorySummary()}</Text>
-            ) : (
-              <Text style={styles.contextCardEmpty}>No history recorded</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Diagnosis Card */}
-          <TouchableOpacity style={styles.contextCard} onPress={onExpandDiagnosis}>
-            <View style={styles.contextCardHeader}>
-              <Ionicons name="pulse-outline" size={20} color="#0070D6" />
-              <Text style={styles.contextCardTitle}>Current Diagnosis</Text>
-              <Ionicons
-                name="chevron-forward"
-                size={16}
-                color="#A0AEC0"
-                style={styles.contextCardChevron}
-              />
-            </View>
-            {getDiagnosisSummary() ? (
-              <Text style={styles.contextCardPreview}>{getDiagnosisSummary()}</Text>
-            ) : (
-              <Text style={styles.contextCardEmpty}>No diagnosis entered</Text>
-            )}
-          </TouchableOpacity>
-
-          {/* Advised Investigations Card - only show if data exists */}
-          {patientData.advisedInvestigations && (
-            <View style={styles.contextCard}>
-              <View style={styles.contextCardHeader}>
-                <Ionicons name="flask-outline" size={20} color="#0070D6" />
-                <Text style={styles.contextCardTitle}>Advised Investigations</Text>
-              </View>
-              <Text style={styles.contextCardPreview}>
-                {getInvestigationsSummary()}
+            {/* Key hints in collapsed view */}
+            {!isExpanded && collapsedHints.length > 0 && (
+              <Text style={styles.contextCollapsedHints}>
+                {" • " + collapsedHints.join(" • ")}
               </Text>
-            </View>
-          )}
+            )}
+            {isExpanded && (
+              <Text style={styles.contextExpandedLabel}> – Full Details</Text>
+            )}
+          </View>
+          <View style={styles.contextHeaderRight}>
+            {contextItemsCount > 0 && !isExpanded && (
+              <View style={styles.contextItemCountBadge}>
+                <Text style={styles.contextItemCountText}>
+                  {contextItemsCount}
+                </Text>
+              </View>
+            )}
+            <Ionicons
+              name={isExpanded ? "chevron-up" : "chevron-down"}
+              size={20}
+              color="#718096"
+            />
+          </View>
+        </TouchableOpacity>
 
-          {/* Collapse button at bottom */}
-          <TouchableOpacity
-            style={styles.collapseButton}
-            onPress={() => setIsExpanded(false)}
-          >
-            <Ionicons name="chevron-up" size={16} color="#718096" />
-            <Text style={styles.collapseButtonText}>Collapse</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-    </View>
-  );
-};
+        {/* First visit indicator - always visible */}
+        {isFirstVisit && (
+          <View style={styles.firstVisitBadge}>
+            <Ionicons name="person-add-outline" size={14} color="#319795" />
+            <Text style={styles.firstVisitBadgeText}>First Visit</Text>
+          </View>
+        )}
+
+        {/* Expanded Content - Full context cards */}
+        {isExpanded && (
+          <View style={styles.contextCardsContainer}>
+            {/* Reports Card */}
+            <TouchableOpacity
+              style={styles.contextCard}
+              onPress={onExpandReports}
+            >
+              <View style={styles.contextCardHeader}>
+                <Ionicons
+                  name="document-text-outline"
+                  size={20}
+                  color="#0070D6"
+                />
+                <Text style={styles.contextCardTitle}>Reports</Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color="#A0AEC0"
+                  style={styles.contextCardChevron}
+                />
+              </View>
+              {getReportsSummary() ? (
+                <Text style={styles.contextCardPreview}>
+                  {getReportsSummary()}
+                </Text>
+              ) : (
+                <Text style={styles.contextCardEmpty}>No reports uploaded</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* History Card */}
+            <TouchableOpacity
+              style={styles.contextCard}
+              onPress={onExpandHistory}
+            >
+              <View style={styles.contextCardHeader}>
+                <Ionicons name="time-outline" size={20} color="#0070D6" />
+                <Text style={styles.contextCardTitle}>Medical History</Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color="#A0AEC0"
+                  style={styles.contextCardChevron}
+                />
+              </View>
+              {getHistorySummary() ? (
+                <Text style={styles.contextCardPreview}>
+                  {getHistorySummary()}
+                </Text>
+              ) : (
+                <Text style={styles.contextCardEmpty}>No history recorded</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Diagnosis Card */}
+            <TouchableOpacity
+              style={styles.contextCard}
+              onPress={onExpandDiagnosis}
+            >
+              <View style={styles.contextCardHeader}>
+                <Ionicons name="pulse-outline" size={20} color="#0070D6" />
+                <Text style={styles.contextCardTitle}>Current Diagnosis</Text>
+                <Ionicons
+                  name="chevron-forward"
+                  size={16}
+                  color="#A0AEC0"
+                  style={styles.contextCardChevron}
+                />
+              </View>
+              {getDiagnosisSummary() ? (
+                <Text style={styles.contextCardPreview}>
+                  {getDiagnosisSummary()}
+                </Text>
+              ) : (
+                <Text style={styles.contextCardEmpty}>
+                  No diagnosis entered
+                </Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Advised Investigations Card - only show if data exists */}
+            {patientData.advisedInvestigations && (
+              <View style={styles.contextCard}>
+                <View style={styles.contextCardHeader}>
+                  <Ionicons name="flask-outline" size={20} color="#0070D6" />
+                  <Text style={styles.contextCardTitle}>
+                    Advised Investigations
+                  </Text>
+                </View>
+                <Text style={styles.contextCardPreview}>
+                  {getInvestigationsSummary()}
+                </Text>
+              </View>
+            )}
+
+            {/* Collapse button at bottom */}
+            <TouchableOpacity
+              style={styles.collapseButton}
+              onPress={() => setIsExpanded(false)}
+            >
+              <Ionicons name="chevron-up" size={16} color="#718096" />
+              <Text style={styles.collapseButtonText}>Collapse</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      </View>
+    );
+  },
+  (prevProps, nextProps) => {
+    // Return true if props are equal (do NOT re-render)
+    return (
+      prevProps.isFirstVisit === nextProps.isFirstVisit &&
+      prevProps.patientData?.reports === nextProps.patientData?.reports &&
+      prevProps.patientData?.medicalHistory ===
+      nextProps.patientData?.medicalHistory &&
+      prevProps.patientData?.diagnosis === nextProps.patientData?.diagnosis &&
+      prevProps.patientData?.advisedInvestigations ===
+      nextProps.patientData?.advisedInvestigations &&
+      prevProps.reportFiles === nextProps.reportFiles
+    );
+  }
+);
 
 const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   patientData,
@@ -2416,6 +2469,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
   // Function to toggle medication card expansion
   const toggleMedicationExpand = (index: number) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedMedications((prev) => {
       if (prev.includes(index)) {
         return prev.filter((i) => i !== index);
@@ -2427,6 +2481,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
 
   // Function to toggle medication group expansion
   const toggleExpandGroup = (date: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setExpandedGroups((prev) => {
       if (prev.includes(date)) {
         return prev.filter((d) => d !== date);
@@ -2866,6 +2921,115 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
     }
   };
 
+  // Function to generate prescription for a group - logic lifted from MedicationGroupCard
+  const handleGroupGeneratePrescription = (
+    date: string | Date,
+    meds: Medication[]
+  ) => {
+    // Set up the file name
+    const fileName = `Prescription_${patientData.name.replace(
+      /\s+/g,
+      "_"
+    )}_${new Date(date)
+      .toLocaleDateString("en-US", {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+      .replace(/,/g, "")
+      .replace(/\s+/g, "_")}`;
+
+    // Check if diagnosis or advised investigations exist
+    const hasDiagnosis =
+      patientData.diagnosis && patientData.diagnosis.trim().length > 0;
+    const hasAdvisedInvestigations =
+      patientData.advisedInvestigations &&
+      patientData.advisedInvestigations.trim().length > 0;
+
+    // Helper to generate with specific options
+    const generateGroupPrescriptionWithOptions = async (
+      includeDiagnosis: boolean,
+      includeInvestigations: boolean
+    ) => {
+      try {
+        const prescriptionPatient = {
+          ...patientData,
+          name: patientData.name,
+          age: patientData.age,
+          sex: patientData.sex,
+          patientId: patient?.patientId || "New Patient",
+          diagnosis: includeDiagnosis ? patientData.diagnosis : "",
+          advisedInvestigations: includeInvestigations
+            ? patientData.advisedInvestigations
+            : "",
+        };
+
+        const result = await generatePrescriptionDirectly(
+          prescriptionPatient,
+          meds,
+          typeof date === "string" ? date : date.toISOString(),
+          undefined,
+          patientData.prescription,
+          fileName
+        );
+
+        if (!result.success) {
+          Alert.alert("Error", result.error || "Failed to generate prescription");
+        }
+      } catch (error) {
+        console.error("Error generating prescription:", error);
+        Alert.alert("Error", "An unexpected error occurred.");
+      }
+    };
+
+    // If neither exists, just generate
+    if (!hasDiagnosis && !hasAdvisedInvestigations) {
+      generateGroupPrescriptionWithOptions(false, false);
+      return;
+    }
+
+    // Options
+    const options: AlertButton[] = [];
+    if (hasDiagnosis && hasAdvisedInvestigations) {
+      options.push(
+        {
+          text: "Include Both",
+          onPress: () => generateGroupPrescriptionWithOptions(true, true),
+        },
+        {
+          text: "Diagnosis Only",
+          onPress: () => generateGroupPrescriptionWithOptions(true, false),
+        },
+        {
+          text: "Investigations Only",
+          onPress: () => generateGroupPrescriptionWithOptions(false, true),
+        }
+      );
+    } else if (hasDiagnosis) {
+      options.push({
+        text: "Include Diagnosis",
+        onPress: () => generateGroupPrescriptionWithOptions(true, false),
+      });
+    } else if (hasAdvisedInvestigations) {
+      options.push({
+        text: "Include Investigations",
+        onPress: () => generateGroupPrescriptionWithOptions(false, true),
+      });
+    }
+
+    options.push({
+      text: "Medications Only",
+      onPress: () => generateGroupPrescriptionWithOptions(false, false),
+    });
+    options.push({ text: "Cancel", style: "cancel" });
+
+    Alert.alert(
+      "Generate Prescription",
+      "Select what information to include in the prescription:",
+      options
+    );
+  };
+
   return (
     <KeyboardAwareScrollView>
       <View style={styles.formSection}>
@@ -2884,70 +3048,26 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
         {/* ============================================================ */}
         {/* CURRENT VISIT SECTION - Editable prescriptions from today */}
         {/* ============================================================ */}
-        <View style={styles.currentVisitSection}>
-          <View style={styles.sectionHeaderRow}>
-            <Ionicons name="create-outline" size={20} color="#0070D6" />
-            <Text style={styles.sectionHeaderText}>Current Visit</Text>
-            <View style={styles.editableBadge}>
-              <Text style={styles.editableBadgeText}>Editable</Text>
-            </View>
-          </View>
 
-          {/* Add Prescription Button */}
-          <View style={styles.prescriptionActionsContainer}>
-            {!(prefillMode && initialTab === "prescription") && (
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => createNewPrescription(false)}
-              >
-                <Ionicons name="add-circle" size={24} color="#0070D6" />
-                <Text style={styles.addButtonText}>Add Prescription</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Current Visit Medications (today's prescriptions) */}
-          {currentVisitMedications.length === 0 ? (
-            <View style={styles.emptyCurrentVisitContainer}>
-              <Ionicons name="medical-outline" size={32} color="#CBD5E0" />
-              <Text style={styles.emptyCurrentVisitText}>
-                No medications added for today
-              </Text>
-              <Text style={styles.emptyCurrentVisitSubtext}>
-                Click "Add Prescription" to prescribe medications
-              </Text>
-            </View>
-          ) : (
-            groupMedicationsByDate()
-              .filter((group) => isDateToday(group.date))
-              .map((group, groupIndex) => (
-                <MedicationGroupCard
-                  key={`current-${group.date}`}
-                  date={group.date}
-                  medications={group.medications}
-                  updateMedication={updateMedication}
-                  removeMedication={removeMedication}
-                  allMedications={medications}
-                  expandedGroups={expandedGroups}
-                  toggleExpandGroup={toggleExpandGroup}
-                  isNewPrescription={group.medications.some((med) =>
-                    newPrescriptionIndices.includes(medications.indexOf(med))
-                  )}
-                  newPrescriptionIndices={newPrescriptionIndices}
-                  setMedications={setMedications}
-                  onEditMedication={handleEditMedication}
-                  onAddMedicationToGroup={handleAddMedicationToGroup}
-                  patient={{
-                    ...patientData,
-                    patientId: patient?.patientId || "New Patient",
-                    setPrescriptionModalVisible,
-                    setCurrentPrescriptionDate,
-                    setCurrentPrescriptionMeds,
-                  }}
-                />
-              ))
-          )}
-        </View>
+        <CurrentVisitSection
+          currentVisitMedications={currentVisitMedications}
+          medications={medications}
+          prefillMode={prefillMode}
+          initialTab={initialTab}
+          createPrescription={(copy) => createNewPrescription(copy)}
+          updateMedication={updateMedication}
+          removeMedication={removeMedication}
+          expandedGroups={expandedGroups}
+          toggleExpandGroup={toggleExpandGroup}
+          newPrescriptionIndices={newPrescriptionIndices}
+          setMedications={setMedications}
+          onEditMedication={handleEditMedication}
+          onAddMedicationToGroup={handleAddMedicationToGroup}
+          onGeneratePrescription={handleGroupGeneratePrescription}
+          setPrescriptionModalVisible={setPrescriptionModalVisible}
+          setCurrentPrescriptionDate={setCurrentPrescriptionDate}
+          setCurrentPrescriptionMeds={setCurrentPrescriptionMeds}
+        />
 
         {/* ============================================================ */}
         {/* PAST RECORDS SECTION - Read-only prescriptions from earlier */}
@@ -2984,13 +3104,10 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
                   // IMPORTANT: Past prescriptions are strictly read-only
                   // Doctor details from saved prescription are preserved (not replaced by current user)
                   isReadOnly={true}
-                  patient={{
-                    ...patientData,
-                    patientId: patient?.patientId || "New Patient",
-                    setPrescriptionModalVisible,
-                    setCurrentPrescriptionDate,
-                    setCurrentPrescriptionMeds,
-                  }}
+                  onGeneratePrescription={handleGroupGeneratePrescription}
+                  setPrescriptionModalVisible={setPrescriptionModalVisible}
+                  setCurrentPrescriptionDate={setCurrentPrescriptionDate}
+                  setCurrentPrescriptionMeds={setCurrentPrescriptionMeds}
                 />
               ))}
           </View>

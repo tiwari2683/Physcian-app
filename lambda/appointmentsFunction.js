@@ -2,7 +2,7 @@ const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
 const { DynamoDBDocumentClient, PutCommand, GetCommand, ScanCommand, DeleteCommand, UpdateCommand } = require("@aws-sdk/lib-dynamodb");
 
 // Initialize AWS Client
-const client = new DynamoDBClient({});
+const client = new DynamoDBClient({ region: "us-east-2" });
 const dynamodb = DynamoDBDocumentClient.from(client);
 
 // Table Name
