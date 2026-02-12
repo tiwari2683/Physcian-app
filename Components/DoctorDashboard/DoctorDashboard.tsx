@@ -25,7 +25,7 @@ import { handleApiError } from "../../Utils/ApiErrorHandler";
 import { useFocusEffect } from "@react-navigation/native";
 import { DraftService, DraftPatient } from "../NewPatientForm/Services/DraftService";
 
-const { width } = Dimensions.get("window");
+const { width, height } = Dimensions.get("window");
 const API_URL = API_ENDPOINTS.DOCTOR_DASHBOARD;
 
 // Polling interval (in milliseconds) - Optimized to 30 seconds
@@ -1355,7 +1355,8 @@ const styles = StyleSheet.create({
   },
   // Modal styles
   modalContainer: {
-    flex: 1,
+    width: width,
+    height: height,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "rgba(0, 0, 0, 0.9)",
@@ -1368,13 +1369,13 @@ const styles = StyleSheet.create({
   },
   imageContainer: {
     width: width,
-    height: width,
+    height: height,
     justifyContent: "center",
     alignItems: "center",
   },
   fullImage: {
     width: width,
-    height: width,
+    height: height,
   },
   zoomHintContainer: {
     position: "absolute",
