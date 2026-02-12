@@ -93,7 +93,7 @@ interface CurrentVisitSectionProps {
   currentVisitMedications: Medication[];
   medications: Medication[];
   prefillMode: boolean;
-  initialTab: string;
+  initialTab?: string;
   createPrescription: (copy: boolean) => void;
   updateMedication: (index: number, field: string, value: string) => void;
   removeMedication: (index: number) => void;
@@ -1645,9 +1645,27 @@ const EnhancedDiagnosisModal: React.FC<EnhancedDiagnosisModalProps> = ({
                   </Text>
                   <View style={styles.quickAccessDataContainer}>
                     {diagnosisData.advisedInvestigations ? (
-                      <Text style={styles.quickAccessDataText}>
-                        {diagnosisData.advisedInvestigations}
-                      </Text>
+                      <View>
+                        {diagnosisData.advisedInvestigations
+                          .split(/[\n,]/)
+                          .map((item) => item.trim())
+                          .filter((item) => item.length > 0)
+                          .map((item, index) => (
+                            <View
+                              key={index}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                paddingVertical: 8,
+                                borderBottomWidth: 1,
+                                borderBottomColor: '#EDF2F7'
+                              }}
+                            >
+                              <Ionicons name="flask-outline" size={18} color="#0070D6" style={{ marginRight: 8 }} />
+                              <Text style={[styles.quickAccessDataText, { flex: 1 }]}>{item}</Text>
+                            </View>
+                          ))}
+                      </View>
                     ) : (
                       <Text style={styles.quickAccessEmptyText}>
                         No advised investigations available
@@ -1827,9 +1845,10 @@ const formatHistoryDisplay = (text: string | null | undefined) => {
 // ============================================================================
 // VISIT CONTEXT SUMMARY COMPONENT
 // ============================================================================
-// Shows a summary of clinical context from earlier tabs (Reports, History, Diagnosis)
-// This is draft state - data entered before final save, NOT committed to database.
-// Uses local device timezone consistently for date comparisons.
+// Shows a compact, always-visible summary of clinical context from earlier tabs.
+// Each item is a tappable chip that opens its detailed modal directly.
+// NO React.memo (was blocking re-renders & causing stale data).
+// NO LayoutAnimation (was causing flickering & scroll blocking).
 
 interface VisitContextSummaryProps {
   patientData: any;
@@ -1840,269 +1859,189 @@ interface VisitContextSummaryProps {
   onExpandDiagnosis: () => void;
 }
 
-// ============================================================================
-// VISIT CONTEXT SUMMARY - Collapsible by default
-// ============================================================================
-// Shows compact summary when collapsed, full cards when expanded
-// - Collapsed: One row with key hints (reports, diagnosis, etc.)
-// - Expanded: Full context cards with details
-// ============================================================================
-// ============================================================================
-// VISIT CONTEXT SUMMARY - Collapsible by default
-// ============================================================================
-// Shows compact summary when collapsed, full cards when expanded
-// - Collapsed: One row with key hints (reports, diagnosis, etc.)
-// - Expanded: Full context cards with details
-// ============================================================================
-const VisitContextSummary = React.memo(
-  ({
-    patientData,
-    reportFiles,
-    isFirstVisit,
-    onExpandReports,
-    onExpandHistory,
-    onExpandDiagnosis,
-  }: VisitContextSummaryProps) => {
-    // Collapsed by default for cleaner UI
-    const [isExpanded, setIsExpanded] = useState(false);
+const VisitContextSummary = ({
+  patientData,
+  reportFiles,
+  isFirstVisit,
+  onExpandReports,
+  onExpandHistory,
+  onExpandDiagnosis,
+}: VisitContextSummaryProps) => {
+  // Data checks
+  const reportCount = reportFiles.length;
+  const hasDiagnosis = !!patientData.diagnosis?.trim();
+  const diagnosisPreview = hasDiagnosis
+    ? patientData.diagnosis.trim().length > 40
+      ? patientData.diagnosis.trim().substring(0, 40) + "…"
+      : patientData.diagnosis.trim()
+    : null;
+  const hasHistory = !!patientData.medicalHistory?.trim();
+  const hasInvestigations = !!patientData.advisedInvestigations?.trim();
+  // investigationsPreview removed as we now render pills directly
 
-    // Helper to get reports summary text
-    const getReportsSummary = (): string | null => {
-      const count = reportFiles.length;
-      if (count === 0) return null;
-      return `${count} file${count > 1 ? "s" : ""} uploaded`;
-    };
-
-    // Helper to get history summary (first line preview)
-    const getHistorySummary = (): string | null => {
-      if (!patientData.medicalHistory) return null;
-      const lines = patientData.medicalHistory
-        .split("\n")
-        .filter((l: string) => l.trim() && !l.startsWith("---"));
-      if (lines.length === 0) return null;
-      const firstLine = lines[0].trim();
-      return firstLine.length > 50
-        ? firstLine.substring(0, 50) + "..."
-        : firstLine;
-    };
-
-    // Helper to get diagnosis summary
-    const getDiagnosisSummary = (): string | null => {
-      if (!patientData.diagnosis) return null;
-      const text = patientData.diagnosis.trim();
-      return text.length > 60 ? text.substring(0, 60) + "..." : text;
-    };
-
-    // Helper to get advised investigations summary
-    const getInvestigationsSummary = (): string | null => {
-      if (!patientData.advisedInvestigations) return null;
-      const text = patientData.advisedInvestigations.trim();
-      return text.length > 60 ? text.substring(0, 60) + "..." : text;
-    };
-
-    // Count how many context items have data
-    const contextItemsCount = [
-      getReportsSummary(),
-      getHistorySummary(),
-      getDiagnosisSummary(),
-      getInvestigationsSummary(),
-    ].filter(Boolean).length;
-
-    // Build collapsed hint text (e.g., "1 report • Diagnosis added")
-    const getCollapsedHints = (): string[] => {
-      const hints: string[] = [];
-      const reportCount = reportFiles.length;
-      if (reportCount > 0) {
-        hints.push(`${reportCount} report${reportCount > 1 ? "s" : ""}`);
-      }
-      if (patientData.diagnosis?.trim()) {
-        hints.push("Diagnosis");
-      }
-      if (patientData.advisedInvestigations?.trim()) {
-        hints.push("Investigations");
-      }
-      if (patientData.medicalHistory?.trim() && hints.length < 3) {
-        hints.push("History");
-      }
-      return hints;
-    };
-
-    const collapsedHints = getCollapsedHints();
-
-    return (
-      <View style={styles.contextSummaryContainer}>
-        {/* Tappable Header - Entire row toggles expand/collapse */}
-        <TouchableOpacity
-          style={styles.contextHeaderTouchable}
-          onPress={() => {
-            LayoutAnimation.configureNext(
-              LayoutAnimation.Presets.easeInEaseOut
-            );
-            setIsExpanded(!isExpanded);
-          }}
-          activeOpacity={0.7}
-        >
-          <View style={styles.contextHeaderLeft}>
-            <Text style={styles.contextSectionHeader}>
-              📋 Current Visit Context
-            </Text>
-            {/* Key hints in collapsed view */}
-            {!isExpanded && collapsedHints.length > 0 && (
-              <Text style={styles.contextCollapsedHints}>
-                {" • " + collapsedHints.join(" • ")}
-              </Text>
-            )}
-            {isExpanded && (
-              <Text style={styles.contextExpandedLabel}> – Full Details</Text>
-            )}
-          </View>
-          <View style={styles.contextHeaderRight}>
-            {contextItemsCount > 0 && !isExpanded && (
-              <View style={styles.contextItemCountBadge}>
-                <Text style={styles.contextItemCountText}>
-                  {contextItemsCount}
-                </Text>
-              </View>
-            )}
-            <Ionicons
-              name={isExpanded ? "chevron-up" : "chevron-down"}
-              size={20}
-              color="#718096"
-            />
-          </View>
-        </TouchableOpacity>
-
-        {/* First visit indicator - always visible */}
+  return (
+    <View style={styles.contextSummaryContainer}>
+      {/* Header row */}
+      <View style={styles.contextHeaderRow}>
+        <Text style={styles.contextSectionHeader}>
+          📋 Visit Context
+        </Text>
         {isFirstVisit && (
-          <View style={styles.firstVisitBadge}>
-            <Ionicons name="person-add-outline" size={14} color="#319795" />
-            <Text style={styles.firstVisitBadgeText}>First Visit</Text>
-          </View>
-        )}
-
-        {/* Expanded Content - Full context cards */}
-        {isExpanded && (
-          <View style={styles.contextCardsContainer}>
-            {/* Reports Card */}
-            <TouchableOpacity
-              style={styles.contextCard}
-              onPress={onExpandReports}
-            >
-              <View style={styles.contextCardHeader}>
-                <Ionicons
-                  name="document-text-outline"
-                  size={20}
-                  color="#0070D6"
-                />
-                <Text style={styles.contextCardTitle}>Reports</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={16}
-                  color="#A0AEC0"
-                  style={styles.contextCardChevron}
-                />
-              </View>
-              {getReportsSummary() ? (
-                <Text style={styles.contextCardPreview}>
-                  {getReportsSummary()}
-                </Text>
-              ) : (
-                <Text style={styles.contextCardEmpty}>No reports uploaded</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* History Card */}
-            <TouchableOpacity
-              style={styles.contextCard}
-              onPress={onExpandHistory}
-            >
-              <View style={styles.contextCardHeader}>
-                <Ionicons name="time-outline" size={20} color="#0070D6" />
-                <Text style={styles.contextCardTitle}>Medical History</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={16}
-                  color="#A0AEC0"
-                  style={styles.contextCardChevron}
-                />
-              </View>
-              {getHistorySummary() ? (
-                <Text style={styles.contextCardPreview}>
-                  {getHistorySummary()}
-                </Text>
-              ) : (
-                <Text style={styles.contextCardEmpty}>No history recorded</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Diagnosis Card */}
-            <TouchableOpacity
-              style={styles.contextCard}
-              onPress={onExpandDiagnosis}
-            >
-              <View style={styles.contextCardHeader}>
-                <Ionicons name="pulse-outline" size={20} color="#0070D6" />
-                <Text style={styles.contextCardTitle}>Current Diagnosis</Text>
-                <Ionicons
-                  name="chevron-forward"
-                  size={16}
-                  color="#A0AEC0"
-                  style={styles.contextCardChevron}
-                />
-              </View>
-              {getDiagnosisSummary() ? (
-                <Text style={styles.contextCardPreview}>
-                  {getDiagnosisSummary()}
-                </Text>
-              ) : (
-                <Text style={styles.contextCardEmpty}>
-                  No diagnosis entered
-                </Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Advised Investigations Card - only show if data exists */}
-            {patientData.advisedInvestigations && (
-              <View style={styles.contextCard}>
-                <View style={styles.contextCardHeader}>
-                  <Ionicons name="flask-outline" size={20} color="#0070D6" />
-                  <Text style={styles.contextCardTitle}>
-                    Advised Investigations
-                  </Text>
-                </View>
-                <Text style={styles.contextCardPreview}>
-                  {getInvestigationsSummary()}
-                </Text>
-              </View>
-            )}
-
-            {/* Collapse button at bottom */}
-            <TouchableOpacity
-              style={styles.collapseButton}
-              onPress={() => setIsExpanded(false)}
-            >
-              <Ionicons name="chevron-up" size={16} color="#718096" />
-              <Text style={styles.collapseButtonText}>Collapse</Text>
-            </TouchableOpacity>
+          <View style={styles.firstVisitChip}>
+            <Ionicons name="person-add-outline" size={12} color="#319795" />
+            <Text style={styles.firstVisitChipText}>First Visit</Text>
           </View>
         )}
       </View>
-    );
-  },
-  (prevProps, nextProps) => {
-    // Return true if props are equal (do NOT re-render)
-    return (
-      prevProps.isFirstVisit === nextProps.isFirstVisit &&
-      prevProps.patientData?.reports === nextProps.patientData?.reports &&
-      prevProps.patientData?.medicalHistory ===
-      nextProps.patientData?.medicalHistory &&
-      prevProps.patientData?.diagnosis === nextProps.patientData?.diagnosis &&
-      prevProps.patientData?.advisedInvestigations ===
-      nextProps.patientData?.advisedInvestigations &&
-      prevProps.reportFiles === nextProps.reportFiles
-    );
-  }
-);
+
+      {/* Chips row — always visible, compact, tappable */}
+      <View style={styles.contextChipsRow}>
+        {/* Reports chip */}
+        <TouchableOpacity
+          style={[
+            styles.contextChip,
+            reportCount > 0 ? styles.contextChipActive : styles.contextChipEmpty,
+          ]}
+          onPress={onExpandReports}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="document-text-outline"
+            size={14}
+            color={reportCount > 0 ? "#0070D6" : "#A0AEC0"}
+          />
+          <Text
+            style={[
+              styles.contextChipText,
+              reportCount > 0 ? styles.contextChipTextActive : styles.contextChipTextEmpty,
+            ]}
+          >
+            {reportCount > 0 ? `${reportCount} Report${reportCount > 1 ? "s" : ""}` : "Reports"}
+          </Text>
+          <Ionicons name="chevron-forward" size={12} color="#A0AEC0" />
+        </TouchableOpacity>
+
+        {/* History chip */}
+        <TouchableOpacity
+          style={[
+            styles.contextChip,
+            hasHistory ? styles.contextChipActive : styles.contextChipEmpty,
+          ]}
+          onPress={onExpandHistory}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="time-outline"
+            size={14}
+            color={hasHistory ? "#0070D6" : "#A0AEC0"}
+          />
+          <Text
+            style={[
+              styles.contextChipText,
+              hasHistory ? styles.contextChipTextActive : styles.contextChipTextEmpty,
+            ]}
+          >
+            History
+          </Text>
+          <Ionicons name="chevron-forward" size={12} color="#A0AEC0" />
+        </TouchableOpacity>
+      </View>
+
+      {/* Diagnosis preview — inline, tappable */}
+      <TouchableOpacity
+        style={[
+          styles.contextInlinePreview,
+          hasDiagnosis ? styles.contextInlinePreviewActive : styles.contextInlinePreviewEmpty,
+        ]}
+        onPress={onExpandDiagnosis}
+        activeOpacity={0.7}
+      >
+        <View style={styles.contextInlineLeft}>
+          <Ionicons
+            name="pulse-outline"
+            size={14}
+            color={hasDiagnosis ? "#0070D6" : "#A0AEC0"}
+          />
+          <Text
+            style={[
+              styles.contextInlineLabel,
+              hasDiagnosis && styles.contextInlineLabelActive,
+            ]}
+          >
+            Diagnosis:
+          </Text>
+          <Text
+            style={[
+              styles.contextInlineValue,
+              !hasDiagnosis && styles.contextInlineValueEmpty,
+            ]}
+            numberOfLines={1}
+          >
+            {diagnosisPreview || "Not entered"}
+          </Text>
+        </View>
+        <Ionicons name="chevron-forward" size={14} color="#A0AEC0" />
+      </TouchableOpacity>
+
+      {/* Investigations preview — only show if data exists */}
+      {/* Investigations preview — with pills */}
+      {hasInvestigations && (
+        <TouchableOpacity
+          style={[
+            styles.contextInlinePreview,
+            styles.contextInlinePreviewActive,
+            { flexDirection: "column", alignItems: "flex-start", paddingVertical: 10 }
+          ]}
+          onPress={onExpandDiagnosis}
+          activeOpacity={0.7}
+        >
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 8 }}>
+            <Ionicons name="flask-outline" size={14} color="#0070D6" style={{ marginRight: 6 }} />
+            <Text style={[styles.contextInlineLabel, styles.contextInlineLabelActive]}>
+              Investigations:
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {patientData.advisedInvestigations
+              .split(/[\n,]/)
+              .map((i: string) => i.trim())
+              .filter((i: string) => i.length > 0)
+              .slice(0, 5) // Show top 5
+              .map((item: string, index: number) => (
+                <View
+                  key={index}
+                  style={{
+                    backgroundColor: "#EBF8FF",
+                    borderColor: "#BEE3F8",
+                    borderWidth: 1,
+                    borderRadius: 12,
+                    paddingHorizontal: 8,
+                    paddingVertical: 2,
+                  }}
+                >
+                  <Text style={{ color: "#2C5282", fontSize: 11, fontWeight: "500" }}>
+                    {item}
+                  </Text>
+                </View>
+              ))}
+            {patientData.advisedInvestigations
+              .split(/[\n,]/)
+              .filter((i: string) => i.trim().length > 0).length > 5 && (
+                <Text style={{ fontSize: 11, color: "#718096", alignSelf: "center", fontStyle: 'italic' }}>
+                  + more
+                </Text>
+              )}
+          </View>
+          {/* Add a subtle hint to tap for more details */}
+          <View style={{ position: 'absolute', right: 8, top: 12 }}>
+            <Ionicons name="chevron-forward" size={14} color="#A0AEC0" />
+          </View>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+};
 
 const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   patientData,
@@ -2163,7 +2102,7 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   const [prescriptionGeneratorVisible, setPrescriptionGeneratorVisible] =
     useState(false);
   const [currentPrescriptionDate, setCurrentPrescriptionDate] = useState("");
-  const [currentPrescriptionMeds, setCurrentPrescriptionMeds] = useState([]);
+  const [currentPrescriptionMeds, setCurrentPrescriptionMeds] = useState<Medication[]>([]);
 
   // ============================================================================
   // FIRST VISIT DETECTION & MEDICATION SEPARATION
@@ -3379,7 +3318,11 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
         <EnhancedDiagnosisModal
           visible={diagnosisModalVisible}
           setVisible={setDiagnosisModalVisible}
-          diagnosisData={diagnosisData}
+          diagnosisData={{
+            ...diagnosisData,
+            currentDiagnosis: patientData.diagnosis || diagnosisData.currentDiagnosis,
+            advisedInvestigations: patientData.advisedInvestigations || diagnosisData.advisedInvestigations
+          }}
           isLoading={isDiagnosisLoading}
         />
 
@@ -4282,133 +4225,115 @@ const styles = StyleSheet.create({
   },
 
   // ============================================================================
-  // CONTEXT SUMMARY STYLES
+  // CONTEXT SUMMARY STYLES — Compact chip-based layout
   // ============================================================================
   contextSummaryContainer: {
-    marginBottom: 20,
-    backgroundColor: "#F0F7FF",
-    borderRadius: 12,
-    padding: 16,
+    marginBottom: 16,
+    backgroundColor: "#F7FAFF",
+    borderRadius: 10,
+    padding: 12,
     borderWidth: 1,
     borderColor: "#E1ECFF",
   },
-  contextSectionHeader: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#2D3748",
-    marginBottom: 12,
-  },
-  contextSectionSubHeader: {
-    fontSize: 13,
-    fontWeight: "400",
-    color: "#718096",
-  },
-  contextHeaderTouchable: {
+  contextHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
-  },
-  contextHeaderLeft: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  contextHeaderRight: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  contextCollapsedHints: {
-    fontSize: 13,
-    color: "#718096",
-    marginLeft: 4,
-  },
-  contextExpandedLabel: {
-    fontSize: 13,
-    color: "#718096",
-    fontStyle: "italic",
-  },
-  contextItemCountBadge: {
-    backgroundColor: "#BEE3F8",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  contextItemCountText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#2B6CB0",
-  },
-  contextCardsContainer: {
-    marginTop: 4,
-  },
-  collapseButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 12,
-    marginTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: "#E2E8F0",
-  },
-  collapseButtonText: {
-    fontSize: 14,
-    color: "#718096",
-    marginLeft: 6,
-    fontWeight: "500",
-  },
-  contextCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 8,
-    padding: 12,
     marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#E2E8F0",
   },
-  contextCardHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 4,
-  },
-  contextCardTitle: {
+  contextSectionHeader: {
     fontSize: 14,
-    fontWeight: "500",
+    fontWeight: "600",
     color: "#2D3748",
-    marginLeft: 8,
-    flex: 1,
   },
-  contextCardChevron: {
-    marginLeft: "auto",
-  },
-  contextCardPreview: {
-    fontSize: 13,
-    color: "#4A5568",
-    marginLeft: 28,
-    lineHeight: 18,
-  },
-  contextCardEmpty: {
-    fontSize: 13,
-    color: "#A0AEC0",
-    fontStyle: "italic",
-    marginLeft: 28,
-  },
-  firstVisitBadge: {
+  firstVisitChip: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#E6FFFA",
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    alignSelf: "flex-start",
-    marginTop: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
-  firstVisitBadgeText: {
-    fontSize: 12,
+  firstVisitChipText: {
+    fontSize: 11,
     fontWeight: "600",
     color: "#319795",
-    marginLeft: 4,
+    marginLeft: 3,
+  },
+  contextChipsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 8,
+  },
+  contextChip: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 5,
+  },
+  contextChipActive: {
+    backgroundColor: "#EBF8FF",
+    borderColor: "#BEE3F8",
+  },
+  contextChipEmpty: {
+    backgroundColor: "#F9FAFB",
+    borderColor: "#E2E8F0",
+  },
+  contextChipText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  contextChipTextActive: {
+    color: "#0070D6",
+  },
+  contextChipTextEmpty: {
+    color: "#A0AEC0",
+  },
+  contextInlinePreview: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 6,
+  },
+  contextInlinePreviewActive: {
+    backgroundColor: "#EBF8FF",
+    borderColor: "#BEE3F8",
+  },
+  contextInlinePreviewEmpty: {
+    backgroundColor: "#F9FAFB",
+    borderColor: "#E2E8F0",
+  },
+  contextInlineLeft: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  contextInlineLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    color: "#A0AEC0",
+  },
+  contextInlineLabelActive: {
+    color: "#4A5568",
+  },
+  contextInlineValue: {
+    flex: 1,
+    fontSize: 12,
+    color: "#2D3748",
+  },
+  contextInlineValueEmpty: {
+    color: "#A0AEC0",
+    fontStyle: "italic",
   },
 
   // ============================================================================
