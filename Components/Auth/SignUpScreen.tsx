@@ -3,7 +3,6 @@ import React, {
   useRef,
   useEffect,
   useCallback,
-  useMemo,
 } from "react";
 import {
   StyleSheet,
@@ -18,9 +17,9 @@ import {
   Dimensions,
   KeyboardAvoidingView,
   Keyboard,
-  TouchableWithoutFeedback,
   Animated,
   StatusBar,
+  UIManager,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -31,110 +30,375 @@ import {
   EyeOff,
   AlertCircle,
   Check,
-  ChevronDown,
-  ChevronUp,
   Stethoscope,
+  ShieldCheck,
+  User,
+  Phone,
+  Mail,
+  Lock,
 } from "lucide-react-native";
 
-// Import AWS Amplify Auth - UPDATED FOR V6+
+// AWS Amplify Auth
 import { signUp } from "@aws-amplify/auth";
+import { API_ENDPOINTS } from "../../Config";
 
-const { width, height } = Dimensions.get("window");
-
-// Types
-interface SignUpFormData {
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  password: string;
-  confirmPassword: string;
-  acceptTerms: boolean;
+// Enable LayoutAnimation for Android
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-interface ValidationErrors {
-  firstName?: string;
-  lastName?: string;
-  email?: string;
-  phone?: string;
-  password?: string;
-  confirmPassword?: string;
-  acceptTerms?: string;
+const { width } = Dimensions.get("window");
+
+// ==========================================
+// THEME CONSTANTS
+// ==========================================
+const COLORS = {
+  primary: "#0070D6",
+  primaryDark: "#005BB5",
+  secondary: "#15A1B1",
+  background: "#F5F7FA",
+  card: "#FFFFFF",
+  text: "#2D3748",
+  textMuted: "#718096",
+  textLight: "#A0AEC0",
+  border: "#E2E8F0",
+  error: "#E53E3E",
+  success: "#38A169",
+  warning: "#D69E2E",
+  inputBg: "#F8FAFC",
+  focusRing: "rgba(0, 112, 214, 0.15)",
+};
+
+const SPACING = {
+  xs: 4,
+  s: 8,
+  m: 16,
+  l: 24,
+  xl: 32,
+};
+
+const BORDER_RADIUS = {
+  s: 8,
+  m: 12,
+  l: 16,
+  xl: 24,
+};
+
+// ==========================================
+// VALIDATION HELPERS
+// ==========================================
+const validateEmail = (email: string): string | null => {
+  if (!email) return "Email is required";
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) return "Invalid email address";
+  return null;
+};
+
+const validateName = (name: string, field: string): string | null => {
+  if (!name) return `${field} is required`;
+  if (name.length < 2) return `${field} must be at least 2 characters`;
+  if (!/^[a-zA-Z\s]*$/.test(name))
+    return "No numbers or special characters allowed";
+  return null;
+};
+
+const validatePhone = (phone: string): string | null => {
+  if (!phone) return "Phone number is required";
+  if (phone.length !== 10) return "Phone number must be exactly 10 digits";
+  if (!/^\d+$/.test(phone)) return "Phone number must contain only numbers";
+  return null;
+};
+
+const validatePassword = (password: string): string | null => {
+  if (!password) return "Password is required";
+  if (password.length < 8) return "Password must be at least 8 characters";
+  if (!/[A-Z]/.test(password))
+    return "Must contain at least one uppercase letter";
+  if (!/[a-z]/.test(password))
+    return "Must contain at least one lowercase letter";
+  if (!/[0-9]/.test(password)) return "Must contain at least one number";
+  if (!/[^A-Za-z0-9]/.test(password))
+    return "Must contain at least one special character";
+  return null;
+};
+
+const validateConfirmPassword = (
+  password: string,
+  confirmPassword: string
+): string | null => {
+  if (!confirmPassword) return "Please confirm your password";
+  if (password !== confirmPassword) return "Passwords do not match";
+  return null;
+};
+
+// ==========================================
+// SECURE INPUT COMPONENT
+// ==========================================
+interface SecureInputProps {
+  value: string;
+  onChangeText: (text: string) => void;
+  label: string;
+  placeholder: string;
+  icon: any;
+  error?: string | null;
+  keyboardType?: "default" | "email-address" | "number-pad";
+  secureTextEntry?: boolean;
+  showPasswordToggle?: boolean;
+  onTogglePassword?: () => void;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  maxLength?: number;
+  editable?: boolean;
 }
 
+const SecureInput: React.FC<SecureInputProps> = ({
+  value,
+  onChangeText,
+  label,
+  placeholder,
+  icon: Icon,
+  error,
+  keyboardType = "default",
+  secureTextEntry = false,
+  showPasswordToggle = false,
+  onTogglePassword,
+  autoCapitalize = "none",
+  maxLength,
+  editable = true,
+}) => {
+  const [isFocused, setIsFocused] = useState(false);
+  const animatedFocus = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(animatedFocus, {
+      toValue: isFocused ? 1 : 0,
+      duration: 200,
+      useNativeDriver: false,
+    }).start();
+  }, [isFocused]);
+
+  const borderColor = animatedFocus.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COLORS.border, COLORS.primary],
+  });
+
+  const backgroundColor = animatedFocus.interpolate({
+    inputRange: [0, 1],
+    outputRange: [COLORS.inputBg, "#FFFFFF"],
+  });
+
+  const shadowOpacity = animatedFocus.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 0.1],
+  });
+
+  return (
+    <View style={styles.inputContainer}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <Animated.View
+        style={[
+          styles.inputWrapper,
+          {
+            borderColor: error ? COLORS.error : borderColor,
+            backgroundColor: backgroundColor,
+            shadowColor: COLORS.primary,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: shadowOpacity,
+            shadowRadius: 8,
+            elevation: isFocused ? 2 : 0,
+          },
+        ]}
+      >
+        {Icon && (
+          <View style={styles.inputIcon}>
+            <Icon
+              size={20}
+              color={
+                error
+                  ? COLORS.error
+                  : isFocused
+                    ? COLORS.primary
+                    : COLORS.textMuted
+              }
+            />
+          </View>
+        )}
+        <TextInput
+          style={styles.textInput}
+          value={value}
+          onChangeText={onChangeText}
+          onBlur={() => setIsFocused(false)}
+          onFocus={() => setIsFocused(true)}
+          placeholder={placeholder}
+          placeholderTextColor={COLORS.textLight}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          secureTextEntry={secureTextEntry}
+          maxLength={maxLength}
+          editable={editable}
+          // CRITICAL: Disable ALL autofill
+          autoComplete="off"
+          autoCorrect={false}
+          textContentType="none"
+          importantForAutofill="no"
+          spellCheck={false}
+        />
+        {showPasswordToggle && (
+          <TouchableOpacity
+            style={styles.passwordToggle}
+            onPress={onTogglePassword}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            {!secureTextEntry ? (
+              <EyeOff size={20} color={COLORS.textMuted} />
+            ) : (
+              <Eye size={20} color={COLORS.textMuted} />
+            )}
+          </TouchableOpacity>
+        )}
+      </Animated.View>
+      {error && (
+        <View style={styles.errorContainer}>
+          <AlertCircle size={14} color={COLORS.error} />
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
+      )}
+    </View>
+  );
+};
+
+// ==========================================
+// PASSWORD STRENGTH METER
+// ==========================================
+const PasswordStrengthMeter = ({ password }: { password: string }) => {
+  if (!password) return null;
+
+  const getStrength = (pass: string) => {
+    let score = 0;
+    if (pass.length >= 8) score += 1;
+    if (/[A-Z]/.test(pass)) score += 1;
+    if (/[0-9]/.test(pass)) score += 1;
+    if (/[^A-Za-z0-9]/.test(pass)) score += 1;
+    return score;
+  };
+
+  const strength = getStrength(password);
+  const maxStrength = 4;
+
+  const getColor = (s: number) => {
+    if (s <= 1) return COLORS.error;
+    if (s === 2) return COLORS.warning;
+    if (s === 3) return "#3182CE";
+    return COLORS.success;
+  };
+
+  const labels = ["Weak", "Fair", "Good", "Strong"];
+
+  return (
+    <View style={styles.strengthContainer}>
+      <View style={styles.strengthBars}>
+        {[...Array(maxStrength)].map((_, index) => (
+          <View
+            key={index}
+            style={[
+              styles.strengthBar,
+              {
+                backgroundColor:
+                  index < strength ? getColor(strength) : COLORS.border,
+                flex: 1,
+              },
+            ]}
+          />
+        ))}
+      </View>
+      <Text
+        style={[
+          styles.strengthLabel,
+          { color: strength > 0 ? getColor(strength) : COLORS.textMuted },
+        ]}
+      >
+        {strength > 0 ? labels[strength - 1] : "Enter Password"}
+      </Text>
+    </View>
+  );
+};
+
+// ==========================================
+// SCREEN COMPONENT
+// ==========================================
 interface SignUpScreenProps {
   navigation: any;
-  route?: any;
 }
 
 const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
-  // Form state - Using refs to avoid re-renders on every keystroke
-  const formDataRef = useRef<SignUpFormData>({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    password: "",
-    confirmPassword: "",
-    acceptTerms: false,
-  });
+  // Form State
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [acceptTerms, setAcceptTerms] = useState(false);
 
-  // Only UI state that needs to trigger re-renders
-  const [errors, setErrors] = useState<ValidationErrors>({});
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [showConfirmPassword, setShowConfirmPassword] =
-    useState<boolean>(false);
-  const [currentStep, setCurrentStep] = useState<number>(1);
+  // Error State
+  const [errors, setErrors] = useState<{ [key: string]: string | null }>({});
 
-  // Remove focusedInput state as it causes unnecessary re-renders
-  // const [focusedInput, setFocusedInput] = useState<string>("");
+  // UI State
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState(1);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
-  // Force re-render when needed (for validation errors, step changes, etc.)
-  const [, forceUpdate] = useState({});
-  const triggerRerender = useCallback(() => forceUpdate({}), []);
-
-  // Animation values
+  // Animated Values
   const slideAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
-  // Refs for form inputs
-  const firstNameRef = useRef<TextInput>(null);
-  const lastNameRef = useRef<TextInput>(null);
-  const emailRef = useRef<TextInput>(null);
-  const phoneRef = useRef<TextInput>(null);
-  const passwordRef = useRef<TextInput>(null);
-  const confirmPasswordRef = useRef<TextInput>(null);
+  // Clear errors when user types
+  const handleFieldChange = (field: string, value: string) => {
+    setErrors((prev) => ({ ...prev, [field]: null }));
 
-  // Component mount logging
-  useEffect(() => {
-    console.log("📱 SignUpScreen component mounted");
-    console.log("🔍 Checking Auth availability on component mount...");
-
-    try {
-      console.log("✅ signUp function available:", typeof signUp);
-    } catch (error) {
-      console.error("❌ Error checking Auth module:", error);
+    switch (field) {
+      case "firstName":
+        setFirstName(value);
+        break;
+      case "lastName":
+        setLastName(value);
+        break;
+      case "email":
+        setEmail(value);
+        break;
+      case "phone":
+        setPhone(value);
+        break;
+      case "password":
+        setPassword(value);
+        break;
+      case "confirmPassword":
+        setConfirmPassword(value);
+        break;
     }
-  }, []);
+  };
 
-  // Animation for step transitions
+  // Step Navigation Animation
   const animateStepTransition = useCallback(
     (direction: "forward" | "backward") => {
-      const toValue = direction === "forward" ? -50 : 50;
+      const toValue = direction === "forward" ? -20 : 20;
 
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue,
-          duration: 150,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: toValue,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]),
         Animated.parallel([
           Animated.timing(fadeAnim, {
             toValue: 1,
@@ -146,145 +410,130 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
             duration: 200,
             useNativeDriver: true,
           }),
-        ]).start();
-      });
+        ]),
+      ]).start();
     },
     [fadeAnim, slideAnim]
   );
 
-  // Enhanced form validation with real-time feedback
-  const validateField = useCallback(
-    (
-      field: keyof SignUpFormData,
-      value: string | boolean,
-      currentFormData?: SignUpFormData
-    ): string | null => {
-      const formDataToUse = currentFormData || formDataRef.current;
+  // Validate Step 1
+  const validateStep1 = (): boolean => {
+    const newErrors: { [key: string]: string | null } = {};
 
-      switch (field) {
-        case "firstName":
-        case "lastName":
-          if (
-            !value ||
-            (typeof value === "string" && value.trim().length < 2)
-          ) {
-            return `${field === "firstName" ? "First" : "Last"
-              } name must be at least 2 characters`;
-          }
-          return null;
+    newErrors.firstName = validateName(firstName, "First name");
+    newErrors.lastName = validateName(lastName, "Last name");
+    newErrors.email = validateEmail(email);
+    newErrors.phone = validatePhone(phone);
 
-        case "email":
-          const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-          if (!value || typeof value !== "string") return "Email is required";
-          if (!emailRegex.test(value))
-            return "Please enter a valid email address";
-          return null;
+    setErrors(newErrors);
 
-        case "phone":
-          const phoneRegex = /^[+]?[\d\s\-()]{10,}$/;
-          if (!value || typeof value !== "string")
-            return "Phone number is required";
-          if (!phoneRegex.test(value))
-            return "Please enter a valid phone number";
-          return null;
+    return !Object.values(newErrors).some((error) => error !== null);
+  };
 
-        case "password":
-          if (!value || typeof value !== "string")
-            return "Password is required";
-          if (value.length < 8) return "Password must be at least 8 characters";
-          if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(value)) {
-            return "Password must include uppercase, lowercase, and number";
-          }
-          return null;
+  // Validate Step 2
+  const validateStep2 = (): boolean => {
+    const newErrors: { [key: string]: string | null } = {};
 
-        case "confirmPassword":
-          if (!value) return "Please confirm your password";
-          if (value !== formDataToUse?.password)
-            return "Passwords do not match";
-          return null;
+    newErrors.password = validatePassword(password);
+    newErrors.confirmPassword = validateConfirmPassword(
+      password,
+      confirmPassword
+    );
 
-        case "acceptTerms":
-          if (!value) return "You must accept the terms and conditions";
-          return null;
-
-        default:
-          return null;
-      }
-    },
-    []
-  );
-
-  const validateForm = useCallback(
-    (currentFormData: SignUpFormData): boolean => {
-      console.log("🔍 Validating form...");
-      const newErrors: ValidationErrors = {};
-
-      Object.entries(currentFormData).forEach(([key, value]) => {
-        const error = validateField(
-          key as keyof SignUpFormData,
-          value,
-          currentFormData
-        );
-        if (error) {
-          newErrors[key as keyof ValidationErrors] = error;
-          console.log(`❌ Validation error for ${key}:`, error);
-        }
-      });
-
-      setErrors(newErrors);
-      const isValid = Object.keys(newErrors).length === 0;
-      console.log(
-        "📋 Form validation result:",
-        isValid ? "✅ Valid" : "❌ Invalid"
-      );
-      return isValid;
-    },
-    [validateField]
-  );
-
-  // Handle form submission with AWS Amplify integration - UPDATED
-  const handleSignUp = useCallback(async () => {
-    console.log("🔐 Starting sign up process...");
-
-    if (!validateForm(formDataRef.current)) {
-      console.log("❌ Form validation failed");
+    if (!acceptTerms) {
       Alert.alert(
-        "Please Review Your Information",
-        "Some fields need your attention before we can create your account.",
-        [{ text: "OK", style: "default" }]
+        "Terms Required",
+        "Please accept the Terms of Service and Privacy Policy to continue."
       );
+      return false;
+    }
+
+    setErrors(newErrors);
+
+    return !Object.values(newErrors).some((error) => error !== null);
+  };
+
+  // Navigate to Step 2
+  const handleContinue = () => {
+    Keyboard.dismiss();
+
+    if (validateStep1()) {
+      animateStepTransition("forward");
+      setCurrentStep(2);
+    }
+  };
+
+  // Go Back to Step 1
+  const handleBack = () => {
+    Keyboard.dismiss();
+    animateStepTransition("backward");
+    setCurrentStep(1);
+  };
+
+  // Backend Validation
+  const checkBackendValidation = async (
+    emailToCheck: string,
+    phoneToCheck: string
+  ): Promise<boolean> => {
+    try {
+      const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "validateRegistration",
+          email: emailToCheck,
+          phone: phoneToCheck,
+        }),
+      });
+      const result = await response.json();
+
+      if (!result.success) {
+        if (result.field === "email") {
+          setErrors((prev) => ({ ...prev, email: result.error }));
+          setCurrentStep(1);
+        } else if (result.field === "phone") {
+          setErrors((prev) => ({ ...prev, phone: result.error }));
+          setCurrentStep(1);
+        } else {
+          Alert.alert("Registration Error", result.error);
+        }
+        return false;
+      }
+      return true;
+    } catch (error) {
+      Alert.alert(
+        "Connection Error",
+        "Could not verify details. Please check your internet connection."
+      );
+      return false;
+    }
+  };
+
+  // Form Submission
+  const handleSubmit = async () => {
+    Keyboard.dismiss();
+
+    if (!validateStep2()) {
       return;
     }
 
-    console.log("✅ Form validation passed");
     setIsLoading(true);
 
     try {
-      // Log the data being sent to Amplify
-      const { firstName, lastName, email, phone, password } =
-        formDataRef.current;
+      // Backend validation
+      const isAvailable = await checkBackendValidation(email, phone);
+      if (!isAvailable) {
+        setIsLoading(false);
+        return;
+      }
 
-      // Format phone number for Cognito (ensure it starts with +)
+      // Format phone number
       const formattedPhone = phone.startsWith("+")
         ? phone
         : `+1${phone.replace(/\D/g, "")}`;
 
-      console.log("📝 Sign up data:", {
-        username: email,
-        email: email,
-        phone_number: formattedPhone,
-        given_name: firstName,
-        family_name: lastName,
-        name: `${firstName} ${lastName}`,
-      });
-
-      // Test if signUp function is available
-      console.log("🔍 Checking signUp function availability...");
-      console.log("🔧 signUp function available:", typeof signUp);
-
-      // Sign up with AWS Amplify V6+ syntax
-      console.log("🚀 Attempting to sign up user with Amplify...");
-      const { isSignUpComplete, userId, nextStep } = await signUp({
+      // Sign up with Amplify
+      await signUp({
         username: email,
         password: password,
         options: {
@@ -299,650 +548,246 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
         },
       });
 
-      console.log("🎉 Sign up successful:", {
-        isSignUpComplete,
-        userId,
-        nextStep,
-      });
-
-      // UPDATED: Navigate to ConfirmUser instead of DoctorDashboard
       Alert.alert(
-        "Account Created! 🎉",
-        "Your account has been created successfully. Please check your email for a verification code to complete your registration.",
+        "Welcome! 🎉",
+        "Account created successfully. Please verify your email to continue.",
         [
           {
-            text: "Continue to Verification",
-            onPress: () => {
-              console.log("🧭 Navigating to ConfirmUser");
+            text: "Verify Now",
+            onPress: () =>
               navigation.navigate("ConfirmUser", {
                 email: email,
                 phone: formattedPhone,
                 firstName: firstName,
                 lastName: lastName,
-              });
-            },
-            style: "default",
+              }),
           },
         ]
       );
     } catch (error: any) {
-      console.error("❌ Sign up error:", error);
-
-      // Log detailed error information
-      console.log("🔍 Error details:", {
-        code: error.code,
-        message: error.message,
-        name: error.name,
-        stack: error.stack,
-      });
-
-      let errorMessage =
-        "We encountered an issue creating your account. Please try again.";
-
-      // Handle specific Amplify errors
-      if (error.name === "UsernameExistsException") {
-        errorMessage =
-          "An account with this email already exists. Please try signing in instead.";
-        console.log("⚠️ User already exists");
-      } else if (error.name === "InvalidPasswordException") {
-        errorMessage =
-          "Password does not meet requirements. Please ensure it has at least 8 characters with uppercase, lowercase, and numbers.";
-        console.log("⚠️ Invalid password format");
-      } else if (error.name === "InvalidParameterException") {
-        errorMessage = "Please check your information and try again.";
-        console.log("⚠️ Invalid parameters");
-      } else if (error.name === "LimitExceededException") {
-        errorMessage = "Too many attempts. Please try again later.";
-        console.log("⚠️ Rate limit exceeded");
-      } else if (error.name === "NotAuthorizedException") {
-        errorMessage = "Authorization failed. Please check your credentials.";
-        console.log("⚠️ Authorization failed");
-      } else if (error.name === "NetworkError") {
-        errorMessage =
-          "Network error. Please check your internet connection and try again.";
-        console.log("⚠️ Network error");
-      } else if (error.message) {
-        errorMessage = error.message;
-      }
-
-      Alert.alert("Registration Error", errorMessage, [
-        { text: "Try Again", style: "default" },
-      ]);
+      console.error("Signup error:", error);
+      Alert.alert(
+        "Registration Failed",
+        error.message || "An error occurred during registration. Please try again."
+      );
     } finally {
-      console.log("🏁 Sign up process completed");
       setIsLoading(false);
     }
-  }, [validateForm, navigation]);
-
-  // Enhanced form data update - NO RE-RENDERS, just update the ref
-  const updateFormData = useCallback(
-    (field: keyof SignUpFormData, value: string | boolean) => {
-      console.log(
-        `📝 Updating ${field}:`,
-        typeof value === "string" ? value.substring(0, 20) + "..." : value
-      );
-
-      // Update the ref directly - NO STATE UPDATE = NO RE-RENDER
-      formDataRef.current = {
-        ...formDataRef.current,
-        [field]: value,
-      };
-    },
-    []
-  );
-
-  const navigateToStep = useCallback(
-    (step: number) => {
-      console.log(`🔄 Navigating to step ${step}`);
-      const direction = step > currentStep ? "forward" : "backward";
-      animateStepTransition(direction);
-      setCurrentStep(step);
-    },
-    [currentStep, animateStepTransition]
-  );
-
-  // Simplified focus handlers - no state updates
-  const handleInputFocus = useCallback((inputId: string) => {
-    console.log(`🎯 Input focused: ${inputId}`);
-    // Don't update state here to avoid re-renders
-  }, []);
-
-  const handleInputBlur = useCallback((inputId: string) => {
-    console.log(`👋 Input blurred: ${inputId}`);
-    // Don't update state here to avoid re-renders
-  }, []);
-
-  const handleSubmitEditing = useCallback(
-    (nextRef?: React.RefObject<TextInput | null>) => {
-      if (nextRef?.current) {
-        console.log(`⏭️ Moving to next input`);
-        nextRef.current.focus();
-      } else {
-        console.log("⌨️ Dismissing keyboard");
-        Keyboard.dismiss();
-      }
-    },
-    []
-  );
-
-  // Enhanced step indicator with progress animation for 2 steps
-  const renderStepIndicator = useMemo(() => {
-    const progress = (currentStep - 1) / 1; // Now only 2 steps, so progress is 0 or 1
-
-    return (
-      <View style={styles.stepIndicatorContainer}>
-        <View style={styles.progressBarContainer}>
-          <View style={styles.progressBarBackground} />
-          <Animated.View
-            style={[styles.progressBarFill, { width: `${progress * 100}%` }]}
-          />
-        </View>
-
-        <View style={styles.stepIndicator}>
-          {[1, 2].map((step) => (
-            <View key={step} style={styles.stepItemContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.stepDot,
-                  currentStep >= step && styles.stepDotActive,
-                  currentStep === step && styles.stepDotCurrent,
-                ]}
-                onPress={() => navigateToStep(step)}
-                disabled={isLoading}
-              >
-                <Text
-                  style={[
-                    styles.stepNumber,
-                    currentStep >= step && styles.stepNumberActive,
-                  ]}
-                >
-                  {step}
-                </Text>
-              </TouchableOpacity>
-
-              {step < 2 && (
-                <View
-                  style={[
-                    styles.stepConnector,
-                    currentStep > step && styles.stepConnectorActive,
-                  ]}
-                />
-              )}
-            </View>
-          ))}
-        </View>
-
-        <View style={styles.stepLabels}>
-          {["Personal Info", "Password"].map((label, index) => (
-            <Text
-              key={index}
-              style={[
-                styles.stepLabel,
-                currentStep === index + 1 && styles.stepLabelActive,
-              ]}
-            >
-              {label}
-            </Text>
-          ))}
-        </View>
-      </View>
-    );
-  }, [currentStep, isLoading, navigateToStep]);
-
-  // Enhanced input component - FIXED to prevent re-renders
-  const CustomTextInput = React.memo(
-    ({
-      label,
-      value,
-      onChangeText,
-      placeholder,
-      error,
-      inputRef,
-      nextRef,
-      keyboardType = "default",
-      autoCapitalize = "none",
-      returnKeyType = "next",
-      secureTextEntry = false,
-      multiline = false,
-      required = false,
-    }: {
-      label: string;
-      value: string;
-      onChangeText: (text: string) => void;
-      placeholder: string;
-      error?: string;
-      inputRef?: React.RefObject<TextInput | null>;
-      nextRef?: React.RefObject<TextInput | null>;
-      keyboardType?: any;
-      autoCapitalize?: any;
-      returnKeyType?: any;
-      secureTextEntry?: boolean;
-      multiline?: boolean;
-      required?: boolean;
-    }) => {
-      const inputId = label.toLowerCase().replace(/\s/g, "");
-
-      // Remove focus state tracking to prevent re-renders
-      // const isFocused = focusedInput === inputId;
-
-      return (
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>
-            {label} {required && <Text style={styles.requiredAsterisk}>*</Text>}
-          </Text>
-          <View
-            style={[
-              styles.inputWrapper,
-              // Remove focus styling that depends on state
-              // isFocused && styles.inputWrapperFocused,
-              error && styles.inputWrapperError,
-            ]}
-          >
-            <TextInput
-              ref={inputRef}
-              style={[styles.textInput, multiline && styles.textInputMultiline]}
-              defaultValue={value} // Use defaultValue instead of value to prevent controlled re-renders
-              onChangeText={onChangeText}
-              placeholder={placeholder}
-              placeholderTextColor="#A0AEC0"
-              keyboardType={keyboardType}
-              autoCapitalize={autoCapitalize}
-              returnKeyType={returnKeyType}
-              secureTextEntry={secureTextEntry}
-              multiline={multiline}
-              onFocus={() => handleInputFocus(inputId)}
-              onBlur={() => handleInputBlur(inputId)}
-              onSubmitEditing={() => handleSubmitEditing(nextRef)}
-            />
-          </View>
-          {error && (
-            <Animated.View style={styles.errorContainer}>
-              <AlertCircle size={16} color="#E53E3E" />
-              <Text style={styles.errorText}>{error}</Text>
-            </Animated.View>
-          )}
-        </View>
-      );
-    }
-  );
-
-  // Enhanced password input with strength indicator - FIXED
-  const CustomPasswordInput = React.memo(
-    ({
-      label,
-      value,
-      onChangeText,
-      placeholder,
-      error,
-      inputRef,
-      nextRef,
-      showPassword,
-      setShowPassword,
-      showStrength = false,
-    }: {
-      label: string;
-      value: string;
-      onChangeText: (text: string) => void;
-      placeholder: string;
-      error?: string;
-      inputRef?: React.RefObject<TextInput | null>;
-      nextRef?: React.RefObject<TextInput | null>;
-      showPassword: boolean;
-      setShowPassword: (show: boolean) => void;
-      showStrength?: boolean;
-    }) => {
-      const getPasswordStrength = useCallback((password: string) => {
-        let strength = 0;
-        if (password.length >= 8) strength++;
-        if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++;
-        if (/\d/.test(password)) strength++;
-        if (/[!@#$%^&*(),.?":{}|<>]/.test(password)) strength++;
-        return strength;
-      }, []);
-
-      const strength = getPasswordStrength(value);
-      const strengthColors = ["#E53E3E", "#ED8936", "#ECC94B", "#48BB78"];
-      const strengthLabels = ["Weak", "Fair", "Good", "Strong"];
-
-      return (
-        <View style={styles.inputContainer}>
-          <Text style={styles.inputLabel}>
-            {label} <Text style={styles.requiredAsterisk}>*</Text>
-          </Text>
-          <View
-            style={[
-              styles.passwordContainer,
-              error && styles.inputWrapperError,
-            ]}
-          >
-            <TextInput
-              ref={inputRef}
-              style={styles.passwordInput}
-              defaultValue={value} // Use defaultValue instead of value
-              onChangeText={onChangeText}
-              placeholder={placeholder}
-              placeholderTextColor="#A0AEC0"
-              secureTextEntry={!showPassword}
-              returnKeyType={nextRef ? "next" : "done"}
-              onFocus={() =>
-                handleInputFocus(label.toLowerCase().replace(/\s/g, ""))
-              }
-              onBlur={() =>
-                handleInputBlur(label.toLowerCase().replace(/\s/g, ""))
-              }
-              onSubmitEditing={() => handleSubmitEditing(nextRef)}
-            />
-            <TouchableOpacity
-              style={styles.passwordToggle}
-              onPress={() => {
-                console.log(`👁️ Toggling password visibility for ${label}`);
-                setShowPassword(!showPassword);
-              }}
-            >
-              {showPassword ? (
-                <EyeOff size={20} color="#718096" />
-              ) : (
-                <Eye size={20} color="#718096" />
-              )}
-            </TouchableOpacity>
-          </View>
-
-          {showStrength && value.length > 0 && (
-            <View style={styles.passwordStrengthContainer}>
-              <View style={styles.passwordStrengthBars}>
-                {[0, 1, 2, 3].map((index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.passwordStrengthBar,
-                      index < strength && {
-                        backgroundColor: strengthColors[strength - 1],
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-              <Text
-                style={[
-                  styles.passwordStrengthText,
-                  {
-                    color:
-                      strength > 0 ? strengthColors[strength - 1] : "#A0AEC0",
-                  },
-                ]}
-              >
-                {strength > 0 ? strengthLabels[strength - 1] : "Enter password"}
-              </Text>
-            </View>
-          )}
-
-          {error && (
-            <Animated.View style={styles.errorContainer}>
-              <AlertCircle size={16} color="#E53E3E" />
-              <Text style={styles.errorText}>{error}</Text>
-            </Animated.View>
-          )}
-        </View>
-      );
-    }
-  );
-
-  // Step components with enhanced styling - Updated to use refs
-  const PersonalStep = React.memo(() => (
-    <Animated.View
-      style={[
-        styles.stepContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateX: slideAnim }],
-        },
-      ]}
-    >
-      <View style={styles.stepHeader}>
-        <Text style={styles.stepTitle}>Personal Information</Text>
-        <Text style={styles.stepSubtitle}>Let's get to know you better</Text>
-      </View>
-
-      <View style={styles.inputRow}>
-        <View style={styles.inputHalf}>
-          <CustomTextInput
-            label="First Name"
-            value={formDataRef.current.firstName}
-            onChangeText={(text) => updateFormData("firstName", text)}
-            placeholder="Enter first name"
-            error={errors.firstName}
-            inputRef={firstNameRef}
-            nextRef={lastNameRef}
-            autoCapitalize="words"
-            required={true}
-          />
-        </View>
-        <View style={styles.inputHalf}>
-          <CustomTextInput
-            label="Last Name"
-            value={formDataRef.current.lastName}
-            onChangeText={(text) => updateFormData("lastName", text)}
-            placeholder="Enter last name"
-            error={errors.lastName}
-            inputRef={lastNameRef}
-            nextRef={emailRef}
-            autoCapitalize="words"
-            required={true}
-          />
-        </View>
-      </View>
-
-      <CustomTextInput
-        label="Email Address"
-        value={formDataRef.current.email}
-        onChangeText={(text) => updateFormData("email", text.toLowerCase())}
-        placeholder="Enter your email"
-        error={errors.email}
-        inputRef={emailRef}
-        nextRef={phoneRef}
-        keyboardType="email-address"
-        required={true}
-      />
-
-      <CustomTextInput
-        label="Phone Number"
-        value={formDataRef.current.phone}
-        onChangeText={(text) => updateFormData("phone", text)}
-        placeholder="Enter phone number"
-        error={errors.phone}
-        inputRef={phoneRef}
-        keyboardType="phone-pad"
-        returnKeyType="done"
-        required={true}
-      />
-
-      <TouchableOpacity
-        style={styles.primaryButton}
-        onPress={() => navigateToStep(2)}
-      >
-        <Text style={styles.primaryButtonText}>Continue</Text>
-        <ArrowRight size={20} color="#FFFFFF" />
-      </TouchableOpacity>
-    </Animated.View>
-  ));
-
-  const PasswordStep = React.memo(() => (
-    <Animated.View
-      style={[
-        styles.stepContainer,
-        {
-          opacity: fadeAnim,
-          transform: [{ translateX: slideAnim }],
-        },
-      ]}
-    >
-      <View style={styles.stepHeader}>
-        <Text style={styles.stepTitle}>Password</Text>
-        <Text style={styles.stepSubtitle}>
-          Secure your account with a strong password
-        </Text>
-      </View>
-
-      <CustomPasswordInput
-        label="Password"
-        value={formDataRef.current.password}
-        onChangeText={(text) => updateFormData("password", text)}
-        placeholder="Create a strong password"
-        error={errors.password}
-        inputRef={passwordRef}
-        nextRef={confirmPasswordRef}
-        showPassword={showPassword}
-        setShowPassword={setShowPassword}
-        showStrength={true}
-      />
-
-      <CustomPasswordInput
-        label="Confirm Password"
-        value={formDataRef.current.confirmPassword}
-        onChangeText={(text) => updateFormData("confirmPassword", text)}
-        placeholder="Confirm your password"
-        error={errors.confirmPassword}
-        inputRef={confirmPasswordRef}
-        showPassword={showConfirmPassword}
-        setShowPassword={setShowConfirmPassword}
-      />
-
-      <TouchableOpacity
-        style={styles.termsContainer}
-        onPress={() => {
-          console.log(
-            "📋 Terms checkbox toggled:",
-            !formDataRef.current.acceptTerms
-          );
-          updateFormData("acceptTerms", !formDataRef.current.acceptTerms);
-          triggerRerender(); // Force re-render for checkbox visual update
-        }}
-        activeOpacity={0.7}
-      >
-        <View style={styles.checkboxContainer}>
-          <Animated.View
-            style={[
-              styles.checkbox,
-              formDataRef.current.acceptTerms && styles.checkboxChecked,
-            ]}
-          >
-            {formDataRef.current.acceptTerms && (
-              <Check size={16} color="#FFFFFF" />
-            )}
-          </Animated.View>
-        </View>
-        <Text style={styles.termsText}>
-          I agree to the <Text style={styles.termsLink}>Terms of Service</Text>{" "}
-          and <Text style={styles.termsLink}>Privacy Policy</Text>
-        </Text>
-      </TouchableOpacity>
-
-      {errors.acceptTerms && (
-        <Animated.View style={[styles.errorContainer, { marginLeft: 32 }]}>
-          <AlertCircle size={16} color="#E53E3E" />
-          <Text style={styles.errorText}>{errors.acceptTerms}</Text>
-        </Animated.View>
-      )}
-
-      <View style={styles.stepButtonsContainer}>
-        <TouchableOpacity
-          style={styles.secondaryButton}
-          onPress={() => navigateToStep(1)}
-        >
-          <ArrowLeft size={20} color="#0070D6" />
-          <Text style={styles.secondaryButtonText}>Back</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.primaryButton, isLoading && styles.buttonDisabled]}
-          onPress={handleSignUp}
-          disabled={isLoading}
-        >
-          {isLoading ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
-          ) : (
-            <>
-              <Text style={styles.primaryButtonText}>Create Account</Text>
-              <Stethoscope size={20} color="#FFFFFF" />
-            </>
-          )}
-        </TouchableOpacity>
-      </View>
-    </Animated.View>
-  ));
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0070D6" />
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.primary} />
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : "height"}
-        style={styles.keyboardAvoidingView}
+        style={{ flex: 1 }}
       >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={styles.scrollContainer}
-            keyboardShouldPersistTaps="handled"
+        <ScrollView
+          contentContainerStyle={styles.scrollContainer}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* PREMIUM BACKGROUND HEADER */}
+          <LinearGradient
+            colors={[COLORS.primary, COLORS.secondary]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.headerBackground}
           >
-            {/* Enhanced Header */}
-            <LinearGradient
-              colors={["#0070D6", "#1A87E3", "#2E94E8"]}
-              style={styles.headerGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+            <View style={styles.headerContent}>
+              <View>
+                <Text style={styles.headerTitle}>Join PhysiciansApp</Text>
+                <Text style={styles.headerSubtitle}>
+                  Create your professional account
+                </Text>
+              </View>
+              <View style={styles.headerIcon}>
+                <Stethoscope size={28} color={COLORS.primary} />
+              </View>
+            </View>
+          </LinearGradient>
+
+          {/* MAIN FORM CARD */}
+          <View style={styles.formCardContainer}>
+            {/* Step Progress */}
+            <View style={styles.progressContainer}>
+              <View style={styles.stepInfo}>
+                <Text style={styles.stepNumber}>Step {currentStep} of 2</Text>
+                <Text style={styles.stepName}>
+                  {currentStep === 1 ? "Personal Details" : "Security & Terms"}
+                </Text>
+              </View>
+              <View style={styles.progressBar}>
+                <View
+                  style={[
+                    styles.progressFill,
+                    { width: currentStep === 1 ? "50%" : "100%" },
+                  ]}
+                />
+              </View>
+            </View>
+
+            <Animated.View
+              style={{
+                opacity: fadeAnim,
+                transform: [{ translateX: slideAnim }],
+              }}
             >
-              <View style={styles.header}>
-                <TouchableOpacity
-                  style={styles.backHeaderButton}
-                  onPress={() => {
-                    console.log("🔙 Back button pressed");
-                    navigation.goBack();
-                  }}
-                >
-                  <ArrowLeft size={24} color="#FFFFFF" />
-                </TouchableOpacity>
+              {currentStep === 1 ? (
+                // STEP 1 CONTENT
+                <View>
+                  <View style={styles.row}>
+                    <View style={{ flex: 1, marginRight: 8 }}>
+                      <SecureInput
+                        value={firstName}
+                        onChangeText={(text) =>
+                          handleFieldChange("firstName", text)
+                        }
+                        label="First Name"
+                        placeholder="Enter first name"
+                        icon={User}
+                        error={errors.firstName}
+                        autoCapitalize="words"
+                      />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 8 }}>
+                      <SecureInput
+                        value={lastName}
+                        onChangeText={(text) =>
+                          handleFieldChange("lastName", text)
+                        }
+                        label="Last Name"
+                        placeholder="Enter last name"
+                        icon={User}
+                        error={errors.lastName}
+                        autoCapitalize="words"
+                      />
+                    </View>
+                  </View>
 
-                <View style={styles.headerContent}>
-                  <Text style={styles.headerTitle}>Join MedApp</Text>
-                  <Text style={styles.headerSubtitle}>
-                    Professional Medical Platform
-                  </Text>
+                  <SecureInput
+                    value={email}
+                    onChangeText={(text) => handleFieldChange("email", text)}
+                    label="Email Address"
+                    placeholder="Enter your email"
+                    icon={Mail}
+                    error={errors.email}
+                    keyboardType="email-address"
+                  />
+
+                  <SecureInput
+                    value={phone}
+                    onChangeText={(text) => handleFieldChange("phone", text)}
+                    label="Phone Number"
+                    placeholder="Enter phone number"
+                    icon={Phone}
+                    error={errors.phone}
+                    keyboardType="number-pad"
+                    maxLength={10}
+                  />
+
+                  <TouchableOpacity
+                    style={styles.primaryButton}
+                    onPress={handleContinue}
+                  >
+                    <Text style={styles.primaryButtonText}>Continue</Text>
+                    <ArrowRight size={20} color="#FFF" />
+                  </TouchableOpacity>
                 </View>
+              ) : (
+                // STEP 2 CONTENT
+                <View>
+                  <SecureInput
+                    value={password}
+                    onChangeText={(text) => handleFieldChange("password", text)}
+                    label="Password"
+                    placeholder="Min. 8 characters"
+                    icon={Lock}
+                    error={errors.password}
+                    secureTextEntry={!showPassword}
+                    showPasswordToggle
+                    onTogglePassword={() => setShowPassword(!showPassword)}
+                  />
+                  <PasswordStrengthMeter password={password} />
 
-                <View style={styles.headerIcon}>
-                  <Stethoscope size={28} color="#FFFFFF" />
+                  <SecureInput
+                    value={confirmPassword}
+                    onChangeText={(text) =>
+                      handleFieldChange("confirmPassword", text)
+                    }
+                    label="Confirm Password"
+                    placeholder="Re-enter password"
+                    icon={ShieldCheck}
+                    error={errors.confirmPassword}
+                    secureTextEntry={!showConfirmPassword}
+                    showPasswordToggle
+                    onTogglePassword={() =>
+                      setShowConfirmPassword(!showConfirmPassword)
+                    }
+                  />
+
+                  {/* Terms Checkbox */}
+                  <View style={styles.termsWrapper}>
+                    <TouchableOpacity
+                      style={styles.checkboxRow}
+                      onPress={() => setAcceptTerms(!acceptTerms)}
+                      activeOpacity={0.7}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          acceptTerms && styles.checkboxChecked,
+                        ]}
+                      >
+                        {acceptTerms && <Check size={14} color="#FFF" />}
+                      </View>
+                      <Text style={styles.termsText}>
+                        I agree to the{" "}
+                        <Text style={styles.linkText}>Terms of Service</Text>{" "}
+                        and <Text style={styles.linkText}>Privacy Policy</Text>
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.buttonRow}>
+                    <TouchableOpacity
+                      style={styles.secondaryButton}
+                      onPress={handleBack}
+                      disabled={isLoading}
+                    >
+                      <ArrowLeft size={20} color={COLORS.primary} />
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.submitButton}
+                      onPress={handleSubmit}
+                      disabled={isLoading}
+                    >
+                      {isLoading ? (
+                        <ActivityIndicator color="#FFF" />
+                      ) : (
+                        <>
+                          <Text style={styles.primaryButtonText}>
+                            Create Account
+                          </Text>
+                          <Check size={20} color="#FFF" />
+                        </>
+                      )}
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
-            </LinearGradient>
+              )}
+            </Animated.View>
+          </View>
 
-            {/* Enhanced Step Indicator */}
-            {renderStepIndicator}
-
-            {/* Form Content */}
-            <View style={styles.formContainer}>
-              <View style={styles.formCard}>
-                {currentStep === 1 && <PersonalStep />}
-                {currentStep === 2 && <PasswordStep />}
-              </View>
-            </View>
-
-            {/* Enhanced Footer */}
-            <View style={styles.footer}>
-              <Text style={styles.footerText}>
-                Already have an account?{" "}
-                <TouchableOpacity
-                  onPress={() => {
-                    console.log("🔗 Sign In link pressed");
-                    navigation.navigate("Login");
-                  }}
-                  style={styles.footerLinkContainer}
-                >
-                  <Text style={styles.footerLink}>Sign In</Text>
-                </TouchableOpacity>
-              </Text>
-            </View>
-          </ScrollView>
-        </TouchableWithoutFeedback>
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>Already have an account?</Text>
+            <TouchableOpacity onPress={() => navigation.navigate("Login")}>
+              <Text style={styles.footerLink}>Sign In</Text>
+            </TouchableOpacity>
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -951,418 +796,240 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FAFC",
-  },
-  keyboardAvoidingView: {
-    flex: 1,
+    backgroundColor: COLORS.background,
   },
   scrollContainer: {
     flexGrow: 1,
-    paddingBottom: 20,
+    paddingBottom: 40,
   },
-  headerGradient: {
-    borderBottomLeftRadius: 32,
-    borderBottomRightRadius: 32,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 112, 214, 0.3)",
-        shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
-        shadowRadius: 16,
-      },
-      android: {
-        elevation: 8,
-      },
-    }),
-  },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    paddingTop: 16,
-  },
-  backHeaderButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: "rgba(255, 255, 255, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
+  headerBackground: {
+    paddingTop: Platform.OS === "ios" ? 60 : 80,
+    paddingBottom: 100,
+    paddingHorizontal: SPACING.l,
+    borderBottomLeftRadius: 40,
+    borderBottomRightRadius: 40,
   },
   headerContent: {
-    flex: 1,
     alignItems: "center",
+    justifyContent: "center",
   },
   headerTitle: {
     fontSize: 24,
     fontWeight: "700",
     color: "#FFFFFF",
-    marginBottom: 4,
-    letterSpacing: 0.5,
+    textAlign: "center",
   },
   headerSubtitle: {
     fontSize: 14,
-    color: "rgba(255, 255, 255, 0.85)",
-    fontWeight: "500",
+    color: "rgba(255,255,255,0.9)",
+    marginTop: 4,
+    textAlign: "center",
   },
   headerIcon: {
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    backgroundColor: "#FFFFFF",
     justifyContent: "center",
     alignItems: "center",
+    marginTop: SPACING.m,
   },
-  stepIndicatorContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    marginTop: -12,
+  formCardContainer: {
+    marginTop: -70,
+    marginHorizontal: SPACING.l,
+    backgroundColor: COLORS.card,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.l,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.05,
+    shadowRadius: 20,
+    elevation: 8,
   },
-  progressBarContainer: {
-    height: 4,
-    backgroundColor: "#E2E8F0",
-    borderRadius: 2,
-    marginBottom: 16,
-    overflow: "hidden",
+  progressContainer: {
+    marginBottom: SPACING.xl,
   },
-  progressBarBackground: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "#E2E8F0",
-  },
-  progressBarFill: {
-    height: "100%",
-    backgroundColor: "#0070D6",
-    borderRadius: 2,
-  },
-  stepIndicator: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 12,
-  },
-  stepItemContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  stepDot: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: "#E2E8F0",
-    justifyContent: "center",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#E2E8F0",
-  },
-  stepDotActive: {
-    backgroundColor: "#0070D6",
-    borderColor: "#0070D6",
-  },
-  stepDotCurrent: {
-    backgroundColor: "#0070D6",
-    borderColor: "#0070D6",
-    transform: [{ scale: 1.1 }],
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 112, 214, 0.4)",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.4,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
-  },
-  stepNumber: {
-    fontSize: 16,
-    fontWeight: "600",
-    color: "#718096",
-  },
-  stepNumberActive: {
-    color: "#FFFFFF",
-  },
-  stepConnector: {
-    width: 40,
-    height: 2,
-    backgroundColor: "#E2E8F0",
-    marginHorizontal: 8,
-  },
-  stepConnectorActive: {
-    backgroundColor: "#0070D6",
-  },
-  stepLabels: {
+  stepInfo: {
     flexDirection: "row",
     justifyContent: "space-between",
+    marginBottom: SPACING.s,
   },
-  stepLabel: {
+  stepNumber: {
     fontSize: 12,
-    color: "#718096",
-    fontWeight: "500",
-    textAlign: "center",
-    flex: 1,
-  },
-  stepLabelActive: {
-    color: "#0070D6",
     fontWeight: "600",
+    color: COLORS.primary,
   },
-  formContainer: {
-    paddingHorizontal: 20,
-    marginTop: 8,
+  stepName: {
+    fontSize: 12,
+    color: COLORS.textMuted,
   },
-  formCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 20,
-    padding: 24,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 0, 0, 0.08)",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.8,
-        shadowRadius: 12,
-      },
-      android: {
-        elevation: 6,
-      },
-    }),
+  progressBar: {
+    height: 4,
+    backgroundColor: COLORS.border,
+    borderRadius: 2,
+    overflow: "hidden",
   },
-  stepContainer: {
-    minHeight: 420,
-  },
-  stepHeader: {
-    marginBottom: 32,
-    alignItems: "center",
-  },
-  stepTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#2D3748",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  stepSubtitle: {
-    fontSize: 15,
-    color: "#718096",
-    textAlign: "center",
-    lineHeight: 22,
-  },
-  inputRow: {
-    flexDirection: "row",
-    marginHorizontal: -8,
-  },
-  inputHalf: {
-    flex: 1,
-    marginHorizontal: 8,
+  progressFill: {
+    height: "100%",
+    backgroundColor: COLORS.primary,
+    borderRadius: 2,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: SPACING.m,
   },
   inputLabel: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: "600",
-    color: "#4A5568",
-    marginBottom: 8,
-  },
-  requiredAsterisk: {
-    color: "#E53E3E",
+    color: COLORS.text,
+    marginBottom: SPACING.s,
+    marginLeft: SPACING.xs,
   },
   inputWrapper: {
-    borderWidth: 2,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1.5,
+    borderRadius: BORDER_RADIUS.m,
+    paddingHorizontal: SPACING.m,
+    height: 52,
   },
-  inputWrapperFocused: {
-    borderColor: "#0070D6",
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 112, 214, 0.15)",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.8,
-        shadowRadius: 4,
-      },
-      android: {
-        elevation: 2,
-      },
-    }),
-  },
-  inputWrapperError: {
-    borderColor: "#E53E3E",
+  inputIcon: {
+    marginRight: SPACING.s,
   },
   textInput: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: "#2D3748",
-    fontWeight: "500",
-  },
-  textInputMultiline: {
-    height: 80,
-    textAlignVertical: "top",
-  },
-  passwordContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 2,
-    borderColor: "#E2E8F0",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
-  },
-  passwordInput: {
     flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
     fontSize: 16,
-    color: "#2D3748",
-    fontWeight: "500",
+    color: COLORS.text,
+    height: "100%",
   },
   passwordToggle: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-  },
-  passwordStrengthContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 8,
-  },
-  passwordStrengthBars: {
-    flexDirection: "row",
-    marginRight: 12,
-  },
-  passwordStrengthBar: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: "#E2E8F0",
-    marginRight: 4,
-  },
-  passwordStrengthText: {
-    fontSize: 12,
-    fontWeight: "500",
+    padding: SPACING.s,
   },
   errorContainer: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 8,
+    marginTop: SPACING.xs,
+    marginLeft: SPACING.xs,
   },
   errorText: {
-    fontSize: 13,
-    color: "#E53E3E",
-    marginLeft: 6,
-    fontWeight: "500",
+    fontSize: 12,
+    color: COLORS.error,
+    marginLeft: 4,
   },
-  termsContainer: {
+  row: {
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginBottom: 8,
-    marginTop: 8,
-  },
-  checkboxContainer: {
-    marginRight: 12,
-    marginTop: 2,
-  },
-  checkbox: {
-    width: 22,
-    height: 22,
-    borderWidth: 2,
-    borderColor: "#E2E8F0",
-    borderRadius: 6,
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-  },
-  checkboxChecked: {
-    backgroundColor: "#0070D6",
-    borderColor: "#0070D6",
-  },
-  termsText: {
-    fontSize: 14,
-    color: "#4A5568",
-    lineHeight: 20,
-    flex: 1,
-    fontWeight: "500",
-  },
-  termsLink: {
-    color: "#0070D6",
-    fontWeight: "600",
-  },
-  stepButtonsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 32,
-    gap: 12,
   },
   primaryButton: {
+    backgroundColor: COLORS.primary,
     flexDirection: "row",
-    alignItems: "center",
     justifyContent: "center",
+    alignItems: "center",
     paddingVertical: 16,
-    paddingHorizontal: 24,
-    backgroundColor: "#0070D6",
-    borderRadius: 12,
-    flex: 1,
-    ...Platform.select({
-      ios: {
-        shadowColor: "rgba(0, 112, 214, 0.3)",
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-      },
-      android: {
-        elevation: 4,
-      },
-    }),
+    borderRadius: BORDER_RADIUS.l,
+    marginTop: SPACING.m,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
   },
   primaryButtonText: {
-    fontSize: 16,
     color: "#FFFFFF",
+    fontSize: 16,
     fontWeight: "600",
     marginRight: 8,
   },
-  secondaryButton: {
+  strengthContainer: {
+    marginTop: -8,
+    marginBottom: SPACING.m,
+    marginLeft: SPACING.xs,
+  },
+  strengthBars: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    height: 4,
+    gap: 4,
+    marginBottom: 6,
+  },
+  strengthBar: {
+    borderRadius: 2,
+  },
+  strengthLabel: {
+    fontSize: 12,
+    fontWeight: "500",
+    textAlign: "right",
+  },
+  termsWrapper: {
+    marginBottom: SPACING.l,
+  },
+  checkboxRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+  },
+  checkbox: {
+    width: 20,
+    height: 20,
     borderWidth: 2,
-    borderColor: "#0070D6",
-    borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    borderColor: COLORS.border,
+    borderRadius: 6,
+    justifyContent: "center",
+    alignItems: "center",
+    marginRight: 10,
+    marginTop: 2,
   },
-  secondaryButtonText: {
-    fontSize: 16,
-    color: "#0070D6",
+  checkboxChecked: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  termsText: {
+    flex: 1,
+    fontSize: 14,
+    color: COLORS.textMuted,
+    lineHeight: 20,
+  },
+  linkText: {
+    color: COLORS.primary,
     fontWeight: "600",
-    marginLeft: 8,
   },
-  buttonDisabled: {
-    opacity: 0.6,
+  buttonRow: {
+    flexDirection: "row",
+    gap: SPACING.m,
+    marginTop: SPACING.s,
+  },
+  secondaryButton: {
+    width: 52,
+    height: 52,
+    borderRadius: BORDER_RADIUS.l,
+    backgroundColor: "rgba(0, 112, 214, 0.1)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  submitButton: {
+    flex: 1,
+    backgroundColor: COLORS.success,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: BORDER_RADIUS.l,
+    height: 52,
+    shadowColor: COLORS.success,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 4,
   },
   footer: {
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-    alignItems: "center",
+    flexDirection: "row",
+    justifyContent: "center",
+    marginTop: SPACING.l,
   },
   footerText: {
-    fontSize: 15,
-    color: "#718096",
-    textAlign: "center",
-    fontWeight: "500",
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  footerLinkContainer: {
+    color: COLORS.textMuted,
+    fontSize: 14,
   },
   footerLink: {
-    color: "#0070D6",
+    color: COLORS.primary,
     fontWeight: "600",
-    fontSize: 15,
-    top: 4,
+    fontSize: 14,
+    marginLeft: 4,
   },
 });
 

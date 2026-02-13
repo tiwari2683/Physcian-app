@@ -35,6 +35,7 @@ import awsExports from "./aws-exports";
 import SignUpScreen from "./Components/Auth/SignUpScreen";
 import SignInScreen from "./Components/Auth/SignInScreen";
 import ConfirmUser from "./Components/Auth/ConfirmUser";
+import ForgotPasswordScreen from "./Components/Auth/ForgotPasswordScreen";
 import DoctorDashboard from "./Components/DoctorDashboard/DoctorDashboard";
 import NewPatientForm from "./Components/NewPatientForm/NewPatientForm";
 import Appointments from "./Components/Appointments/Appointments";
@@ -605,6 +606,15 @@ export default function App(): React.JSX.Element {
               listeners={{
                 focus: () => console.log("📍 ConfirmUser screen focused"),
                 blur: () => console.log("📍 ConfirmUser screen blurred"),
+              }}
+            />
+
+            <Stack.Screen
+              name="ForgotPassword"
+              component={ForgotPasswordScreen as any}
+              listeners={{
+                focus: () => console.log("📍 ForgotPassword screen focused"),
+                blur: () => console.log("📍 ForgotPassword screen blurred"),
               }}
             />
 

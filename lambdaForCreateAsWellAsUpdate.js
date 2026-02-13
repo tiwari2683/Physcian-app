@@ -463,6 +463,9 @@ export const handler = async (event, context) => {
             case 'getPresignedUploadUrl':
                 return await generatePresignedUploadUrl(requestData);
 
+            case 'validateRegistration':
+                return await validateRegistration(requestData);
+
             case 'confirmFileUpload':
                 return await confirmFileUpload(requestData);
 
@@ -523,6 +526,111 @@ export const handler = async (event, context) => {
         return formatErrorResponse(error.message || "Request failed");
     }
 };
+
+// ============================================
+// VALIDATION LOGIC
+// ============================================
+
+/**
+ * Validates registration data against existing records
+ * Checks for duplicate email or phone
+ */
+async function validateRegistration(requestData) {
+    try {
+        const { email, phone } = requestData;
+
+        if (!email && !phone) {
+            return formatErrorResponse("Email or phone is required for validation");
+        }
+
+        console.log(`🔍 Validating registration for: Email=${email}, Phone=${phone}`);
+
+        const filterExpressions = [];
+        const expressionAttributeValues = {};
+        const expressionAttributeNames = {};
+
+        if (email) {
+            filterExpressions.push("contains(#email, :email)");
+            expressionAttributeNames["#email"] = "email"; // Assuming 'email' attribute exists
+            expressionAttributeValues[":email"] = email.toLowerCase().trim();
+        }
+
+        // For phone, we might need to be careful with formatting, but for now let's try direct match
+        // or contain match if formats vary. 'mobile' seems to be the attribute name in Patients table
+        if (phone) {
+            filterExpressions.push("contains(#mobile, :mobile)");
+            expressionAttributeNames["#mobile"] = "mobile";
+            // Basic sanitation for phone match - this might need refinement based on exact storage format
+            // The searchPatients uses digits ONLY, let's try to match that pattern if possible,
+            // but 'contains' with the raw input is safer if we don't know the stored format perfectly yet.
+            // Let's stick to safe 'contains' for now.
+            expressionAttributeValues[":mobile"] = phone.replace(/[^\d+]/g, ''); // Keep digits and plus
+        }
+
+        // OR logic: invalid if EITHER exists
+        const filterExpression = filterExpressions.join(" OR ");
+
+        // Using Scan is not ideal for high volume but works for now. 
+        // Ideally we should have GSI on email and mobile.
+        const command = new ScanCommand({
+            TableName: PATIENTS_TABLE,
+            FilterExpression: filterExpression,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ProjectionExpression: "patientId, mobile, #email", // Optimize projection
+        });
+
+        const result = await dynamodb.send(command);
+        const matches = result.Items || [];
+
+        if (matches.length > 0) {
+            console.log(`⚠️ Found ${matches.length} matches for registration validation`);
+
+            // Determine SPECIFICALLY what collided
+            const emailTaken = email && matches.some(m => m.email && m.email.toLowerCase() === email.toLowerCase());
+            const phoneTaken = phone && matches.some(m => m.mobile && m.mobile.includes(phone.replace(/[^\d+]/g, '')));
+
+            let errorMessage = "";
+            if (emailTaken && phoneTaken) errorMessage = "Email and Phone are already registered";
+            else if (emailTaken) errorMessage = "Email is already registered";
+            else if (phoneTaken) errorMessage = "Phone number is already registered";
+            else errorMessage = "User already exists"; // Fallback
+
+            return {
+                statusCode: 409, // Conflict
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Credentials': true
+                },
+                body: JSON.stringify({
+                    success: false,
+                    error: errorMessage,
+                    field: emailTaken ? "email" : (phoneTaken ? "phone" : "unknown")
+                })
+            };
+        }
+
+        console.log("✅ Registration validation passed (No duplicates found)");
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Credentials': true
+            },
+            body: JSON.stringify({
+                success: true,
+                message: "Validation successful"
+            })
+        };
+
+    } catch (error) {
+        console.error('❌ Validation error:', error);
+        return formatErrorResponse(`Validation failed: ${error.message}`);
+    }
+}
 
 // ============================================
 // HELPER FUNCTIONS (Minimal Stubs)
