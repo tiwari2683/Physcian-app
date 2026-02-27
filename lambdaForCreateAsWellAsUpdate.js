@@ -511,6 +511,9 @@ export const handler = async (event, context) => {
             case "addMedicine":
                 return await addMedicine(requestData);
 
+            case "deletePatient":
+                return await deletePatient(requestData);
+
             default:
                 // Handle legacy create/update operations
                 if (requestData.patientId && requestData.updateMode) {
@@ -1121,6 +1124,25 @@ async function updatePatientData(requestData) {
         updateExpression.push('#updatedAt = :updatedAt');
         expressionAttributeNames['#updatedAt'] = 'updatedAt';
         expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+        // ============================================
+        // VISIT LOCK: Mark visit as completed when this is a final prescription save
+        // isPartialSave === false means the doctor clicked Save/Update on the Prescription tab
+        // ============================================
+        const isFinalPrescriptionSave = updateData.isPartialSave === false ||
+            updateData.saveSection === 'prescription';
+
+        if (isFinalPrescriptionSave) {
+            const todayDate = new Date().toISOString().split('T')[0]; // "YYYY-MM-DD"
+            console.log(`🔒 Final prescription save detected. Locking visit for date: ${todayDate}`);
+            updateExpression.push('#lastLockedVisitDate = :lastLockedVisitDate');
+            expressionAttributeNames['#lastLockedVisitDate'] = 'lastLockedVisitDate';
+            expressionAttributeValues[':lastLockedVisitDate'] = todayDate;
+
+            updateExpression.push('#visitCompletedAt = :visitCompletedAt');
+            expressionAttributeNames['#visitCompletedAt'] = 'visitCompletedAt';
+            expressionAttributeValues[':visitCompletedAt'] = new Date().toISOString();
+        }
 
         // ============================================
         // STEP 4: Execute conditional update

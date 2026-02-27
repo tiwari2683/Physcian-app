@@ -624,6 +624,18 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     }));
   };
 
+  // VISIT LOCK: Compute whether the current visit is already locked
+  // This mirrors the same logic as PrescriptionTab.isVisitLocked
+  // Only relevant when editing an existing patient (prefillMode) on the prescription tab
+  const isVisitLocked = prefillMode &&
+    activeSection === "prescription" &&
+    (() => {
+      const lastLockedDate = (patientData as any)?.lastLockedVisitDate;
+      if (!lastLockedDate) return false;
+      const todayDate = new Date().toISOString().split("T")[0];
+      return lastLockedDate >= todayDate;
+    })();
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -645,24 +657,32 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           )}
         </View>
 
-        <TouchableOpacity
-          style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
-          onPress={handleSubmit}
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Text style={styles.saveButtonText}>
-              {activeSection === "prescription"
-                ? "Save Patient"
-                : activeSection === "basic" && !permanentPatientId && !patient?.patientId
-                  ? "Create Patient" // UX: Explicit action for new patients
-                  : "Next"}
-            </Text>
-          )}
-        </TouchableOpacity>
+        {isVisitLocked ? (
+          <View style={[styles.saveButton, { backgroundColor: "#718096", flexDirection: "row", alignItems: "center", gap: 4 }]}>
+            <Ionicons name="lock-closed" size={14} color="#FFFFFF" />
+            <Text style={styles.saveButtonText}>Locked</Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.saveButtonText}>
+                {activeSection === "prescription"
+                  ? "Save Patient"
+                  : activeSection === "basic" && !permanentPatientId && !patient?.patientId
+                    ? "Create Patient" // UX: Explicit action for new patients
+                    : "Next"}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
       </View>
+
 
       <View style={styles.tabContainer}>
         {!hideBasicTab && (

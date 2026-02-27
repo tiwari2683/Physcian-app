@@ -110,6 +110,8 @@ interface CurrentVisitSectionProps {
   setPrescriptionModalVisible: (visible: boolean) => void;
   setCurrentPrescriptionDate: (date: string) => void;
   setCurrentPrescriptionMeds: (meds: Medication[]) => void;
+  // When true, this visit is already completed/locked — no edits allowed
+  isVisitLocked?: boolean;
 }
 
 const CurrentVisitSection = React.memo(
@@ -131,6 +133,7 @@ const CurrentVisitSection = React.memo(
     setPrescriptionModalVisible,
     setCurrentPrescriptionDate,
     setCurrentPrescriptionMeds,
+    isVisitLocked = false,
   }: CurrentVisitSectionProps) => {
     // Helper to check if a date string represents today
     const isDateToday = (dateString: string): boolean => {
@@ -168,36 +171,61 @@ const CurrentVisitSection = React.memo(
     return (
       <View style={styles.currentVisitSection}>
         <View style={styles.sectionHeaderRow}>
-          <Ionicons name="create-outline" size={20} color="#0070D6" />
+          <Ionicons
+            name={isVisitLocked ? "lock-closed-outline" : "create-outline"}
+            size={20}
+            color={isVisitLocked ? "#718096" : "#0070D6"}
+          />
           <Text style={styles.sectionHeaderText}>Current Visit</Text>
-          <View style={styles.editableBadge}>
-            <Text style={styles.editableBadgeText}>Editable</Text>
-          </View>
-        </View>
-
-        {/* Add Prescription Button */}
-        <View style={styles.prescriptionActionsContainer}>
-          {!(prefillMode && initialTab === "prescription") && (
-            <TouchableOpacity
-              style={styles.addButton}
-              onPress={() => createPrescription(false)}
-            >
-              <Ionicons name="add-circle" size={24} color="#0070D6" />
-              <Text style={styles.addButtonText}>Add Prescription</Text>
-            </TouchableOpacity>
+          {isVisitLocked ? (
+            <View style={[styles.readOnlyBadge, { backgroundColor: "#FEF3C7", borderColor: "#F59E0B" }]}>
+              <Ionicons name="lock-closed" size={12} color="#92400E" style={{ marginRight: 3 }} />
+              <Text style={[styles.readOnlyBadgeText, { color: "#92400E" }]}>Visit Completed</Text>
+            </View>
+          ) : (
+            <View style={styles.editableBadge}>
+              <Text style={styles.editableBadgeText}>Editable</Text>
+            </View>
           )}
         </View>
+
+        {/* Locked Visit Notice */}
+        {isVisitLocked && (
+          <View style={styles.visitLockedNoticeContainer}>
+            <Ionicons name="information-circle-outline" size={16} color="#92400E" />
+            <Text style={styles.visitLockedNoticeText}>
+              This visit has been saved and locked. Prescriptions from this visit cannot be modified.
+            </Text>
+          </View>
+        )}
+
+        {/* Add Prescription Button — hidden when visit is locked */}
+        {!isVisitLocked && (
+          <View style={styles.prescriptionActionsContainer}>
+            {!(prefillMode && initialTab === "prescription") && (
+              <TouchableOpacity
+                style={styles.addButton}
+                onPress={() => createPrescription(false)}
+              >
+                <Ionicons name="add-circle" size={24} color="#0070D6" />
+                <Text style={styles.addButtonText}>Add Prescription</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* Current Visit Medications (today's prescriptions) */}
         {currentVisitMedications.length === 0 ? (
           <View style={styles.emptyCurrentVisitContainer}>
             <Ionicons name="medical-outline" size={32} color="#CBD5E0" />
             <Text style={styles.emptyCurrentVisitText}>
-              No medications added for today
+              {isVisitLocked ? "Visit completed — no medications to show" : "No medications added for today"}
             </Text>
-            <Text style={styles.emptyCurrentVisitSubtext}>
-              Click "Add Prescription" to prescribe medications
-            </Text>
+            {!isVisitLocked && (
+              <Text style={styles.emptyCurrentVisitSubtext}>
+                Click "Add Prescription" to prescribe medications
+              </Text>
+            )}
           </View>
         ) : (
           groupedMedications
@@ -223,6 +251,7 @@ const CurrentVisitSection = React.memo(
                 setPrescriptionModalVisible={setPrescriptionModalVisible}
                 setCurrentPrescriptionDate={setCurrentPrescriptionDate}
                 setCurrentPrescriptionMeds={setCurrentPrescriptionMeds}
+                isReadOnly={isVisitLocked}
               />
             ))
         )}
@@ -1117,17 +1146,27 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
         return (
           <View key={idx} style={styles.expandedMedicationItem}>
             <View style={styles.expandedMedicationHeader}>
-              <Text style={styles.expandedMedicationName}>
-                {med.name || `Medication ${idx + 1}`}
-              </Text>
-              {/* Only show delete button if prescription can be edited */}
-              {medications.length > 1 && canEdit ? (
-                <TouchableOpacity
-                  onPress={() => removeMedication(originalIndex)}
-                >
-                  <Ionicons name="trash-outline" size={20} color="#E53935" />
-                </TouchableOpacity>
-              ) : null}
+              <View style={{ flexDirection: "row", alignItems: "center", flex: 1, gap: 6 }}>
+                <Text style={styles.expandedMedicationName}>
+                  {med.name || `Medication ${idx + 1}`}
+                </Text>
+                {/* Show lock icon for DB-loaded medications (saved record, not editable) */}
+                {canEdit && !newPrescriptionIndices.includes(originalIndex) && (
+                  <Ionicons name="lock-closed" size={12} color="#718096" />
+                )}
+              </View>
+              {/* Per-medication edit check:
+                  canEdit = group-level (today + not globally read-only)
+                  canEditThisMed = also requires the med was added THIS session (not from DB)
+                  Medications NOT in newPrescriptionIndices were loaded from DB → permanently locked */}
+              {(() => {
+                const canEditThisMed = canEdit && newPrescriptionIndices.includes(originalIndex);
+                return medications.length > 1 && canEditThisMed ? (
+                  <TouchableOpacity onPress={() => removeMedication(originalIndex)}>
+                    <Ionicons name="trash-outline" size={20} color="#E53935" />
+                  </TouchableOpacity>
+                ) : null;
+              })()}
             </View>
 
             {/* Show individual expiration status directly below the header */}
@@ -1204,12 +1243,12 @@ const MedicationGroupCard: React.FC<MedicationGroupProps> = ({
               ) : null}
             </View>
 
-            {/* Edit button for medications - only show if editable */}
-            {canEdit ? (
+            {/* Edit button for medications - only show if THIS medication is editable
+                (was added by doctor this session, not loaded from DB) */}
+            {canEdit && newPrescriptionIndices.includes(originalIndex) ? (
               <TouchableOpacity
                 style={styles.editMedicationButton}
                 onPress={() => {
-                  // Call the onEditMedication handler with the medication details and index
                   onEditMedication(med, originalIndex);
                 }}
               >
@@ -2169,6 +2208,23 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   }, [medications]);
 
   /**
+   * VISIT LOCK: Determine if today's visit is already completed/locked.
+   * The lambda stores `lastLockedVisitDate` (format "YYYY-MM-DD") in DynamoDB
+   * whenever the doctor clicks Save/Update on the prescription tab.
+   * If that date >= today, the entire current visit section is read-only.
+   */
+  const isVisitLocked = useMemo(() => {
+    if (!prefillMode) return false; // New patients never locked
+    const lastLockedDate = patientData?.lastLockedVisitDate;
+    if (!lastLockedDate) return false;
+    const todayDate = new Date().toISOString().split("T")[0]; // "YYYY-MM-DD"
+    // If lastLockedVisitDate is today or later, visit is locked
+    return lastLockedDate >= todayDate;
+  }, [patientData?.lastLockedVisitDate, prefillMode]);
+
+
+
+  /**
    * Helper to check if a date string represents today (local timezone)
    */
   const isDateToday = (dateString: string): boolean => {
@@ -3006,7 +3062,9 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
           setPrescriptionModalVisible={setPrescriptionModalVisible}
           setCurrentPrescriptionDate={setCurrentPrescriptionDate}
           setCurrentPrescriptionMeds={setCurrentPrescriptionMeds}
+          isVisitLocked={isVisitLocked}
         />
+
 
         {/* ============================================================ */}
         {/* PAST RECORDS SECTION - Read-only prescriptions from earlier */}
@@ -3094,18 +3152,28 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
         )}
 
         {/* Submit Button */}
-        <TouchableOpacity
-          style={[styles.submitButton, isSubmitting && styles.disabledButton]}
-          onPress={() => handleSubmit()}
-          disabled={isSubmitting}
-          activeOpacity={0.8}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
-          ) : (
-            <Text style={styles.submitButtonText}>{getSubmitButtonText()}</Text>
-          )}
-        </TouchableOpacity>
+        {isVisitLocked ? (
+          <View style={styles.visitAlreadySavedContainer}>
+            <Ionicons name="checkmark-circle" size={20} color="#4CAF50" />
+            <Text style={styles.visitAlreadySavedText}>
+              Visit Already Saved — Open a New Visit to Add Prescriptions
+            </Text>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={[styles.submitButton, isSubmitting && styles.disabledButton]}
+            onPress={() => handleSubmit()}
+            disabled={isSubmitting}
+            activeOpacity={0.8}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={styles.submitButtonText}>{getSubmitButtonText()}</Text>
+            )}
+          </TouchableOpacity>
+        )}
+
 
         {/* Prescription Modal */}
         <Modal
@@ -4664,6 +4732,44 @@ const styles = StyleSheet.create({
   addCustomHighlight: {
     fontWeight: "600",
     color: "#38A169",
+  },
+  // ── Visit Lock Styles ─────────────────────────────────────────────────────
+  visitLockedNoticeContainer: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    backgroundColor: "#FFFBEB",
+    borderWidth: 1,
+    borderColor: "#FDE68A",
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 12,
+    gap: 8,
+  },
+  visitLockedNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    color: "#92400E",
+    lineHeight: 18,
+  },
+  visitAlreadySavedContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F0FFF4",
+    borderWidth: 1,
+    borderColor: "#C6F6D5",
+    borderRadius: 8,
+    padding: 14,
+    marginHorizontal: 16,
+    marginBottom: 24,
+    gap: 8,
+  },
+  visitAlreadySavedText: {
+    fontSize: 14,
+    color: "#276749",
+    fontWeight: "600",
+    flex: 1,
+    textAlign: "center",
   },
 });
 

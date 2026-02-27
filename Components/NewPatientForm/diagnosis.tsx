@@ -418,20 +418,22 @@ const InvestigationsSelector: React.FC<InvestigationsSelectorProps> = ({ value, 
   const toggleInvestigation = (investigation: string) => {
     if (disabled) return;
 
-    setSelectedInvestigations((prev) => {
-      const newSelected = prev.includes(investigation)
-        ? prev.filter((item) => item !== investigation)
-        : [...prev, investigation];
+    // Calculate new state based on current state (closure)
+    const isSelected = selectedInvestigations.includes(investigation);
+    const newSelected = isSelected
+      ? selectedInvestigations.filter((item) => item !== investigation)
+      : [...selectedInvestigations, investigation];
 
-      logInfo(
-        `Investigation ${prev.includes(investigation) ? "deselected" : "selected"
-        }: ${investigation}`
-      );
+    logInfo(
+      `Investigation ${isSelected ? "deselected" : "selected"
+      }: ${investigation}`
+    );
 
-      // Update the parent component's value
-      updateCombinedValue(newSelected, customInvestigationText);
-      return newSelected;
-    });
+    // Update local state
+    setSelectedInvestigations(newSelected);
+
+    // Update the parent component's value
+    updateCombinedValue(newSelected, customInvestigationText);
   };
 
   // Function to handle custom investigation text changes
