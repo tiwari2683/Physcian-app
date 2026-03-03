@@ -521,6 +521,7 @@ const InvestigationsSelector: React.FC<InvestigationsSelectorProps> = ({ value, 
             ? "Advised investigations cleared after save"
             : "Enter any additional investigations not listed above"
         }
+        placeholderTextColor="#A0AEC0"
         multiline
         numberOfLines={4}
         textAlignVertical="top"

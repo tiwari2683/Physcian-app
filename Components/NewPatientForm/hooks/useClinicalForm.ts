@@ -474,18 +474,9 @@ export const useClinicalForm = (props: any) => {
 
     // Legacy useEffects for history persistence removed.
     // DraftService now handles all persistence via patientData.
-
-    useEffect(() => {
-        if (patientId) {
-            setClinicalParameters({
-                date: new Date(),
-                inr: "", hb: "", wbc: "", platelet: "", bilirubin: "", sgot: "", sgpt: "",
-                alt: "", tprAlb: "", ureaCreat: "", sodium: "", fastingHBA1C: "",
-                pp: "", tsh: "", ft4: "", others: "",
-            });
-            fetchCurrentPatientData();
-        }
-    }, [patientId, fetchCurrentPatientData, setClinicalParameters]);
+    // NOTE: Clinical parameters are intentionally NOT reset here.
+    // usePatientForm already initializes them empty when the form is first created.
+    // Resetting here would wipe data whenever the doctor switches tabs mid-visit.
 
     // Fetch historical data
     const fetchHistoricalData = useCallback(async (forceRefresh = false) => {

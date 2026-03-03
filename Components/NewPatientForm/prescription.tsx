@@ -279,6 +279,7 @@ interface PrescriptionTabProps {
   initialTab?: string;
   permanentPatientId?: string;
   tempPatientId?: string;
+  clinicalParameters?: any;
 }
 
 interface ReportsModalProps {
@@ -1522,6 +1523,10 @@ const ReportsModal: React.FC<ReportsModalProps> = ({ visible, setVisible, patien
 
 
 const HistoryModal: React.FC<HistoryModalProps> = ({ visible, setVisible, patientData }) => {
+  // Use clinical.history or fallback to backwards compatible property
+  const currentSymptoms = patientData.clinicalParameters?.history || patientData.newHistoryEntry;
+  const pastHistory = patientData.medicalHistory;
+
   return (
     <Modal
       visible={visible}
@@ -1539,13 +1544,35 @@ const HistoryModal: React.FC<HistoryModalProps> = ({ visible, setVisible, patien
           </View>
           <ScrollView style={styles.quickAccessModalScroll}>
             <View style={styles.quickAccessModalBody}>
-              {patientData.medicalHistory ? (
-                formatHistoryDisplay(patientData.medicalHistory)
-              ) : (
-                <Text style={styles.quickAccessEmptyText}>
-                  No history records available
-                </Text>
-              )}
+
+              {/* Current Visit Symptoms */}
+              <Text style={styles.quickAccessSectionTitle}>
+                Current Visit Symptoms
+              </Text>
+              <View style={styles.quickAccessDataContainer}>
+                {currentSymptoms ? (
+                  formatTextWithBullets(currentSymptoms)
+                ) : (
+                  <Text style={styles.quickAccessEmptyText}>
+                    No new symptoms entered for this visit
+                  </Text>
+                )}
+              </View>
+
+              {/* Past Medical History */}
+              <Text style={styles.quickAccessSectionTitle}>
+                Past Medical History
+              </Text>
+              <View style={[styles.quickAccessDataContainer, { marginTop: 8 }]}>
+                {pastHistory ? (
+                  formatHistoryDisplay(pastHistory)
+                ) : (
+                  <Text style={styles.quickAccessEmptyText}>
+                    No past history records available
+                  </Text>
+                )}
+              </View>
+
             </View>
           </ScrollView>
         </View>
@@ -1882,6 +1909,112 @@ const formatHistoryDisplay = (text: string | null | undefined) => {
 };
 
 // ============================================================================
+// CLINICAL PARAMETERS MODAL — shows current-visit data entered in Clinical tab
+// ============================================================================
+const PARAM_META: Record<string, { label: string; unit: string }> = {
+  inr: { label: "INR", unit: "ratio (0.8–1.2)" },
+  hb: { label: "Haemoglobin", unit: "g/dL" },
+  wbc: { label: "WBC", unit: "×10³/µL" },
+  platelet: { label: "Platelet", unit: "×10³/µL" },
+  bilirubin: { label: "Bilirubin", unit: "mg/dL" },
+  sgot: { label: "SGOT", unit: "U/L" },
+  sgpt: { label: "SGPT / ALT", unit: "U/L" },
+  alt: { label: "ALT", unit: "U/L" },
+  tprAlb: { label: "Total Protein / Albumin", unit: "g/dL" },
+  ureaCreat: { label: "Urea / Creatinine", unit: "mg/dL" },
+  sodium: { label: "Sodium", unit: "mEq/L" },
+  fastingHBA1C: { label: "Fasting / HbA1c", unit: "mg/dL / %" },
+  pp: { label: "PP", unit: "mg/dL" },
+  tsh: { label: "TSH", unit: "mIU/L" },
+  ft4: { label: "FT4", unit: "ng/dL" },
+  others: { label: "Others / Notes", unit: "" },
+};
+
+const ClinicalParametersModal: React.FC<{
+  visible: boolean;
+  setVisible: (v: boolean) => void;
+  clinicalParameters: any;
+}> = ({ visible, setVisible, clinicalParameters }) => {
+  // Build the list of filled parameters in display order
+  const filledParams = Object.keys(PARAM_META).filter(
+    (key) => clinicalParameters?.[key] && String(clinicalParameters[key]).trim() !== ''
+  );
+
+  return (
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={true}
+      onRequestClose={() => setVisible(false)}
+    >
+      <View style={styles.quickAccessModalOverlay}>
+        <View style={styles.quickAccessModalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Clinical Parameters</Text>
+            <TouchableOpacity onPress={() => setVisible(false)}>
+              <Ionicons name="close" size={24} color="#2D3748" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.quickAccessModalScroll}>
+            <View style={styles.quickAccessModalBody}>
+              <Text style={styles.quickAccessSectionTitle}>
+                Current Visit Parameters
+              </Text>
+
+              {filledParams.length === 0 ? (
+                <Text style={styles.quickAccessEmptyText}>
+                  No clinical parameters have been entered for this visit.
+                </Text>
+              ) : (
+                <View style={styles.quickAccessDataContainer}>
+                  {filledParams.map((key, index) => {
+                    const meta = PARAM_META[key];
+                    const value = String(clinicalParameters[key]).trim();
+                    return (
+                      <View
+                        key={key}
+                        style={{
+                          flexDirection: "row",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          paddingVertical: 10,
+                          borderBottomWidth: index < filledParams.length - 1 ? 1 : 0,
+                          borderBottomColor: "#EDF2F7",
+                        }}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, fontWeight: "600", color: "#2D3748" }}>
+                            {meta.label}
+                          </Text>
+                          {meta.unit ? (
+                            <Text style={{ fontSize: 11, color: "#A0AEC0" }}>{meta.unit}</Text>
+                          ) : null}
+                        </View>
+                        <Text style={{ fontSize: 15, fontWeight: "700", color: "#0070D6" }}>
+                          {value}
+                        </Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+
+              {/* Show date if available */}
+              {clinicalParameters?.date && (
+                <Text style={{ fontSize: 12, color: "#A0AEC0", marginTop: 12, textAlign: "center" }}>
+                  Recorded: {new Date(clinicalParameters.date).toLocaleDateString()}
+                </Text>
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+// ============================================================================
 // VISIT CONTEXT SUMMARY COMPONENT
 // ============================================================================
 // Shows a compact, always-visible summary of clinical context from earlier tabs.
@@ -1896,6 +2029,8 @@ interface VisitContextSummaryProps {
   onExpandReports: () => void;
   onExpandHistory: () => void;
   onExpandDiagnosis: () => void;
+  clinicalParameters?: any;
+  onExpandClinicalParams?: () => void;
 }
 
 const VisitContextSummary = ({
@@ -1905,6 +2040,8 @@ const VisitContextSummary = ({
   onExpandReports,
   onExpandHistory,
   onExpandDiagnosis,
+  clinicalParameters,
+  onExpandClinicalParams,
 }: VisitContextSummaryProps) => {
   // Data checks
   const reportCount = reportFiles.length;
@@ -1914,9 +2051,18 @@ const VisitContextSummary = ({
       ? patientData.diagnosis.trim().substring(0, 40) + "…"
       : patientData.diagnosis.trim()
     : null;
-  const hasHistory = !!patientData.medicalHistory?.trim();
+  const hasHistory = !!patientData.medicalHistory?.trim() || !!patientData.newHistoryEntry?.trim();
   const hasInvestigations = !!patientData.advisedInvestigations?.trim();
-  // investigationsPreview removed as we now render pills directly
+  // Check if any clinical parameter (other than date) has been filled
+  const hasCurrentParams = clinicalParameters && Object.entries(clinicalParameters).some(
+    ([key, val]) => key !== 'date' && val && String(val).trim() !== ''
+  );
+  // Count filled params for the chip label
+  const filledParamsCount = clinicalParameters
+    ? Object.entries(clinicalParameters).filter(
+      ([key, val]) => key !== 'date' && val && String(val).trim() !== ''
+    ).length
+    : 0;
 
   return (
     <View style={styles.contextSummaryContainer}>
@@ -1981,6 +2127,31 @@ const VisitContextSummary = ({
             ]}
           >
             History
+          </Text>
+          <Ionicons name="chevron-forward" size={12} color="#A0AEC0" />
+        </TouchableOpacity>
+
+        {/* Clinical Parameters chip */}
+        <TouchableOpacity
+          style={[
+            styles.contextChip,
+            hasCurrentParams ? styles.contextChipActive : styles.contextChipEmpty,
+          ]}
+          onPress={onExpandClinicalParams}
+          activeOpacity={0.7}
+        >
+          <Ionicons
+            name="stats-chart-outline"
+            size={14}
+            color={hasCurrentParams ? "#0070D6" : "#A0AEC0"}
+          />
+          <Text
+            style={[
+              styles.contextChipText,
+              hasCurrentParams ? styles.contextChipTextActive : styles.contextChipTextEmpty,
+            ]}
+          >
+            {hasCurrentParams ? `Params (${filledParamsCount})` : "Params"}
           </Text>
           <Ionicons name="chevron-forward" size={12} color="#A0AEC0" />
         </TouchableOpacity>
@@ -2099,13 +2270,15 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
   getSubmitButtonText,
   prefillMode,
   initialTab,
-  permanentPatientId, // Add this line
-  tempPatientId, // Add this line
+  permanentPatientId,
+  tempPatientId,
+  clinicalParameters,
 }) => {
   // State for quick access modals
   const [reportsModalVisible, setReportsModalVisible] = useState(false);
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [diagnosisModalVisible, setDiagnosisModalVisible] = useState(false);
+  const [clinicalParametersModalVisible, setClinicalParametersModalVisible] = useState(false);
 
   // NEW: State for diagnosis data fetched from database
   const [diagnosisData, setDiagnosisData] = useState({
@@ -3038,6 +3211,15 @@ const PrescriptionTab: React.FC<PrescriptionTabProps> = ({
           onExpandReports={() => setReportsModalVisible(true)}
           onExpandHistory={() => setHistoryModalVisible(true)}
           onExpandDiagnosis={handleDiagnosisButtonClick}
+          clinicalParameters={clinicalParameters}
+          onExpandClinicalParams={() => setClinicalParametersModalVisible(true)}
+        />
+
+        {/* Clinical Parameters Modal */}
+        <ClinicalParametersModal
+          visible={clinicalParametersModalVisible}
+          setVisible={setClinicalParametersModalVisible}
+          clinicalParameters={clinicalParameters}
         />
 
         {/* ============================================================ */}

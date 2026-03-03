@@ -605,8 +605,9 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
               getSubmitButtonText={getSubmitButtonText}
               prefillMode={prefillMode}
               initialTab={initialTab}
-              // ADD THIS LINE: Pass permanentPatientId for new patients
               tempPatientId={permanentPatientId || undefined}
+              clinicalParameters={clinicalParameters}
+              permanentPatientId={permanentPatientId || undefined}
             />
           </KeyboardAwareScrollView>
         );

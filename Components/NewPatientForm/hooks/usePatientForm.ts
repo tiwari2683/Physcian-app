@@ -88,20 +88,24 @@ export const usePatientForm = ({
     // Extract patientId from patient object or use permanentPatientId
     const patientId = patient?.patientId || permanentPatientId || null;
 
-    // Patient data state
     const [patientData, setPatientData] = useState({
+        // ── Persistent Patient Context (pre-fill from patient object) ──
         name: prefillMode && patient ? patient.name : "",
         age: prefillMode && patient ? patient.age.toString() : "",
         sex: prefillMode && patient ? patient.sex : "Male",
         mobile: prefillMode && patient ? patient.mobile : "",
         address: prefillMode && patient ? patient.address : "",
         medicalHistory: prefillMode && patient ? patient.medicalHistory || "" : "",
-        diagnosis: prefillMode && patient ? patient.diagnosis || "" : "",
-        prescription: prefillMode && patient ? patient.prescription : "",
-        treatment: prefillMode && patient ? patient.treatment : "",
-        reports: prefillMode && patient ? patient.reports : "",
-        advisedInvestigations: prefillMode && patient ? patient.advisedInvestigations : "",
         existingData: prefillMode && patient ? patient.existingData || "" : "",
+
+        // ── Visit-Specific Fields (always start EMPTY for each new visit) ──
+        // These get restored from Draft if the doctor was mid-visit without saving.
+        diagnosis: "",
+        prescription: "",
+        treatment: "",
+        reports: "",
+        advisedInvestigations: "",
+
         newHistoryEntry: "", // Phase 3: Unified Clinical History Draft Field
     });
 
@@ -113,20 +117,8 @@ export const usePatientForm = ({
         sodium: "", fastingHBA1C: "", pp: "", tsh: "", ft4: "", others: "",
     });
 
-    // Medications state
-    const [medications, setMedications] = useState(() => {
-        if (prefillMode && patient && patient.medications && patient.medications.length > 0) {
-            return patient.medications.map((med: any) => ({
-                name: med.name || "",
-                duration: med.duration || "",
-                timing: med.timing || "",
-                timingValues: med.timingValues || "{}",
-                specialInstructions: med.specialInstructions || "",
-                datePrescribed: med.datePrescribed || patient.updatedAt || patient.createdAt,
-            }));
-        }
-        return [];
-    });
+    // Medications state — always empty at visit start; restored from Draft if mid-visit
+    const [medications, setMedications] = useState<any[]>([]);
     const [newPrescriptionIndices, setNewPrescriptionIndices] = useState<number[]>([]);
     const [expandedMedications, setExpandedMedications] = useState<number[]>([]);
     const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -135,14 +127,9 @@ export const usePatientForm = ({
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [tempDate, setTempDate] = useState(new Date());
 
-    // Report data state
-    const [reportData, setReportData] = useState(() => {
-        if (prefillMode && patient && patient.reportData) {
-            return { ...patient.reportData };
-        }
-        return {
-            testName: "", testDate: "", testResults: "", interpretation: "", recommendations: "",
-        };
+    // Report data state — always empty at visit start; restored from Draft if mid-visit
+    const [reportData, setReportData] = useState({
+        testName: "", testDate: "", testResults: "", interpretation: "", recommendations: "",
     });
 
     // Report files state - ENHANCED to preserve S3 metadata and deduplicate
@@ -334,20 +321,8 @@ export const usePatientForm = ({
         }
     }, [permanentPatientId]);
 
-    useEffect(() => {
-        if (prefillMode && patient && patient.clinicalParameters) {
-            console.log("Loading clinical parameters from existing patient data");
-            const patientParams = { ...patient.clinicalParameters };
-            if (typeof patientParams.date === "string") {
-                patientParams.date = new Date(patientParams.date);
-            } else if (!patientParams.date) {
-                patientParams.date = new Date();
-            }
-            setClinicalParameters(patientParams);
-            setTempDate(patientParams.date);
-            console.log("✅ Successfully loaded clinical parameters from patient record");
-        }
-    }, [prefillMode, patient]);
+    // NOTE: clinicalParameters intentionally NOT pre-filled from the patient's last visit.
+    // They should start empty for each new visit and are restored from Draft if mid-visit.
 
     // Reset parameters on patient change
     useEffect(() => {
@@ -368,21 +343,9 @@ export const usePatientForm = ({
                 sgot: "", sgpt: "", alt: "", tprAlb: "", ureaCreat: "",
                 sodium: "", fastingHBA1C: "", pp: "", tsh: "", ft4: "", others: "",
             });
-
-            if (patient.clinicalParameters) {
-                try {
-                    const patientParams = { ...patient.clinicalParameters };
-                    if (typeof patientParams.date === "string") {
-                        patientParams.date = new Date(patientParams.date);
-                    } else if (!patientParams.date) {
-                        patientParams.date = new Date();
-                    }
-                    setClinicalParameters(patientParams);
-                    setTempDate(patientParams.date);
-                } catch (error) {
-                    console.error("❌ Error loading clinical parameters:", error);
-                }
-            }
+            // NOTE: We intentionally do NOT restore patient.clinicalParameters here.
+            // Clinical parameters belong to a specific visit and should start empty.
+            // If the doctor was mid-visit, the Draft will restore them.
         }
     }, [patient?.patientId]);
 

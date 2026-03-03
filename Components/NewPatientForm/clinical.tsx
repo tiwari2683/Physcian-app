@@ -1297,209 +1297,190 @@ const ClinicalTab = forwardRef<any, ClinicalTabProps>(
               )}
             </View>
 
-            {/* First row of parameters */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              style={styles.parametersScrollView}
-            >
-              <View style={styles.parametersRow}>
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>INR (last)</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.inr}
-                    onChangeText={(text) => handleParameterUpdate("inr", text)}
-                  />
-                </View>
+            {/* Parameters grid — 2 columns, wraps vertically, no horizontal scroll */}
+            <View style={styles.parametersGrid}>
 
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>HB</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.hb}
-                    onChangeText={(text) => handleParameterUpdate("hb", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>WBC</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.wbc}
-                    onChangeText={(text) => handleParameterUpdate("wbc", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>Platelet</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.platelet}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("platelet", text)
-                    }
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>Bilirubin</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.bilirubin}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("bilirubin", text)
-                    }
-                  />
-                </View>
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>INR (last)</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="ratio (0.8–1.2)"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.inr}
+                  onChangeText={(text) => handleParameterUpdate("inr", text)}
+                />
               </View>
-            </ScrollView>
 
-            {/* Second row of parameters */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              style={styles.parametersScrollView}
-            >
-              <View style={styles.parametersRow}>
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>SGOT</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.sgot}
-                    onChangeText={(text) => handleParameterUpdate("sgot", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>SGPT</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.sgpt}
-                    onChangeText={(text) => handleParameterUpdate("sgpt", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>ALT</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.alt}
-                    onChangeText={(text) => handleParameterUpdate("alt", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>TPR/Alb</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.tprAlb}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("tprAlb", text)
-                    }
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>Urea/Creat</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.ureaCreat}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("ureaCreat", text)
-                    }
-                  />
-                </View>
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>HB</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="g/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.hb}
+                  onChangeText={(text) => handleParameterUpdate("hb", text)}
+                />
               </View>
-            </ScrollView>
 
-            {/* Third row of parameters */}
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              style={styles.parametersScrollView}
-            >
-              <View style={styles.parametersRow}>
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>Sodium (Na)</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.sodium}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("sodium", text)
-                    }
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>Fasting/HBA1C</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.fastingHBA1C}
-                    onChangeText={(text) =>
-                      handleParameterUpdate("fastingHBA1C", text)
-                    }
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>P.P</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.pp}
-                    onChangeText={(text) => handleParameterUpdate("pp", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>TSH</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.tsh}
-                    onChangeText={(text) => handleParameterUpdate("tsh", text)}
-                  />
-                </View>
-
-                <View style={styles.parameterInputContainer}>
-                  <Text style={styles.parameterLabel}>FT4</Text>
-                  <TextInput
-                    style={styles.parameterInput}
-                    keyboardType="numeric"
-                    placeholder="Value"
-                    value={clinicalParameters.ft4}
-                    onChangeText={(text) => handleParameterUpdate("ft4", text)}
-                  />
-                </View>
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>WBC</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="×10³/µL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.wbc}
+                  onChangeText={(text) => handleParameterUpdate("wbc", text)}
+                />
               </View>
-            </ScrollView>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>Platelet</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="lakhs/µL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.platelet}
+                  onChangeText={(text) => handleParameterUpdate("platelet", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>Bilirubin</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="mg/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.bilirubin}
+                  onChangeText={(text) => handleParameterUpdate("bilirubin", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>SGOT</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="U/L"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.sgot}
+                  onChangeText={(text) => handleParameterUpdate("sgot", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>SGPT</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="U/L"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.sgpt}
+                  onChangeText={(text) => handleParameterUpdate("sgpt", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>ALT</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="U/L"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.alt}
+                  onChangeText={(text) => handleParameterUpdate("alt", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>TPR/Alb</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="g/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.tprAlb}
+                  onChangeText={(text) => handleParameterUpdate("tprAlb", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>Urea/Creat</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="mg/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.ureaCreat}
+                  onChangeText={(text) => handleParameterUpdate("ureaCreat", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>Sodium (Na)</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="mEq/L"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.sodium}
+                  onChangeText={(text) => handleParameterUpdate("sodium", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>Fasting/HBA1C</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="mg/dL / %"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.fastingHBA1C}
+                  onChangeText={(text) => handleParameterUpdate("fastingHBA1C", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>P.P</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="mg/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.pp}
+                  onChangeText={(text) => handleParameterUpdate("pp", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>TSH</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="µIU/mL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.tsh}
+                  onChangeText={(text) => handleParameterUpdate("tsh", text)}
+                />
+              </View>
+
+              <View style={styles.parameterInputContainer}>
+                <Text style={styles.parameterLabel}>FT4</Text>
+                <TextInput
+                  style={styles.parameterInput}
+                  keyboardType="numeric"
+                  placeholder="ng/dL"
+                  placeholderTextColor="#A0AEC0"
+                  value={clinicalParameters.ft4}
+                  onChangeText={(text) => handleParameterUpdate("ft4", text)}
+                />
+              </View>
+
+            </View>
 
             {/* Other parameter field */}
             <View style={styles.otherParameterContainer}>
@@ -2017,13 +1998,20 @@ const styles = StyleSheet.create({
   parametersScrollView: {
     marginBottom: 12,
   },
+  parametersGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    marginHorizontal: -4,
+    marginBottom: 8,
+  },
   parametersRow: {
     flexDirection: "row",
     paddingBottom: 8,
   },
   parameterInputContainer: {
-    width: 120,
-    marginRight: 12,
+    width: "50%",
+    paddingHorizontal: 4,
+    marginBottom: 12,
   },
   parameterLabel: {
     fontSize: 12,

@@ -1282,6 +1282,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.opinion}
               onChangeText={(text) => updateFormData("opinion", text)}
               placeholder="Enter medical opinion"
+              placeholderTextColor="#A0AEC0"
               multiline
             />
           </View>
@@ -1395,6 +1396,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                       updateFormData("medicationModificationText", text)
                     }
                     placeholder="Prescription details will be auto-loaded from patient data..."
+                    placeholderTextColor="#A0AEC0"
                     multiline
                     textAlignVertical="top"
                     editable={true}
@@ -1447,6 +1449,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                       updateFormData("fitnessReservedText", text)
                     }
                     placeholder="Investigation details will be auto-loaded from patient data..."
+                    placeholderTextColor="#A0AEC0"
                     multiline
                     textAlignVertical="top"
                     editable={true}
@@ -1482,6 +1485,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 updateFormData("preOpEvaluationForm", text)
               }
               placeholder="Enter form type (e.g., Surgical, Cardiac, etc.)"
+              placeholderTextColor="#A0AEC0"
             />
           </View>
 
@@ -1494,6 +1498,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.referredForPreOp}
               onChangeText={(text) => updateFormData("referredForPreOp", text)}
               placeholder="Doctor name or surgery/procedure type"
+              placeholderTextColor="#A0AEC0"
               multiline
             />
           </View>
@@ -1506,6 +1511,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.pastHistory}
               onChangeText={(text) => updateFormData("pastHistory", text)}
               placeholder="Past medical history"
+              placeholderTextColor="#A0AEC0"
               multiline
               textAlignVertical="top"
             />
@@ -1520,6 +1526,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
                 updateFormData("cardioRespiratoryFunction", text)
               }
               placeholder="Cardio respiratory function assessment"
+              placeholderTextColor="#A0AEC0"
             />
           </View>
 
@@ -1530,6 +1537,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.syE}
               onChangeText={(text) => updateFormData("syE", text)}
               placeholder="Symptoms and examination findings"
+              placeholderTextColor="#A0AEC0"
               multiline
             />
           </View>
@@ -1542,6 +1550,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.ecgField}
               onChangeText={(text) => updateFormData("ecgField", text)}
               placeholder="ECG findings"
+              placeholderTextColor="#A0AEC0"
             />
           </View>
 
@@ -1552,6 +1561,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.echoField}
               onChangeText={(text) => updateFormData("echoField", text)}
               placeholder="Echocardiogram findings"
+              placeholderTextColor="#A0AEC0"
             />
           </View>
 
@@ -1562,6 +1572,7 @@ const FitnessCertificate: React.FC<FitnessCertificateProps> = ({
               value={formData.cxrField}
               onChangeText={(text) => updateFormData("cxrField", text)}
               placeholder="Chest X-ray findings"
+              placeholderTextColor="#A0AEC0"
             />
           </View>
 
