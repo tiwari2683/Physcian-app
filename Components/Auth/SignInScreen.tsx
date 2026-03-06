@@ -268,8 +268,22 @@ const SignInScreen: React.FC<SignInScreenProps> = ({ navigation }) => {
       });
 
       if (isSignedIn) {
-        console.log("✅ Signed in");
-        navigation.navigate("DoctorDashboard", { isAuthenticated: true });
+        console.log("✅ Signed in. Fetching attributes...");
+        const { fetchUserAttributes } = await import('@aws-amplify/auth');
+        const attributes = await fetchUserAttributes();
+        const role = attributes['custom:role'];
+
+        if (role === 'Doctor') {
+          console.log("👨‍⚕️ Doctor verified");
+          navigation.navigate("DoctorDashboard", { isAuthenticated: true });
+        } else {
+          console.log("🚫 Unauthorized role:", role);
+          await (await import('@aws-amplify/auth')).signOut();
+          Alert.alert(
+            "Access Denied",
+            "This app is for Doctors only. Please use the Assistant Panel website."
+          );
+        }
       } else if (nextStep?.signInStep === "CONFIRM_SIGN_UP") {
         Alert.alert(
           "Verification Required",

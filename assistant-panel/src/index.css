@@ -1,0 +1,47 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+@layer base {
+  body {
+    @apply bg-appBg text-type-body font-sans antialiased;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-type-heading font-semibold;
+  }
+}
+
+@layer components {
+  .panel-card {
+    @apply bg-cardBg rounded-lg shadow-tier-light border border-borderColor p-6;
+  }
+
+  .input-field {
+    @apply w-full rounded-md border border-borderColor bg-white px-3 py-2 text-type-contrast outline-none focus:border-primary-base focus:ring-1 focus:ring-primary-base transition-colors duration-200;
+  }
+
+  .btn-primary {
+    @apply bg-primary-base text-white px-4 py-2 rounded-md hover:bg-primary-dark shadow-tier-light hover:shadow-tier-medium transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary-base text-white px-4 py-2 rounded-md hover:bg-secondary-dark shadow-tier-light hover:shadow-tier-medium transition-all duration-200 font-medium disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .tab-button {
+    @apply px-4 py-2 font-medium transition-all duration-200 border-b-2;
+  }
+
+  .tab-button-active {
+    @apply border-primary-base text-primary-base;
+  }
+
+  .tab-button-inactive {
+    @apply border-transparent text-type-body hover:text-type-heading hover:border-borderColor;
+  }
+}

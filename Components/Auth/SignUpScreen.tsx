@@ -543,6 +543,7 @@ const SignUpScreen: React.FC<SignUpScreenProps> = ({ navigation }) => {
             given_name: firstName,
             family_name: lastName,
             name: `${firstName} ${lastName}`,
+            'custom:role': 'Doctor'
           },
           autoSignIn: false,
         },
