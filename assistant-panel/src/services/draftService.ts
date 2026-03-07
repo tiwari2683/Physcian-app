@@ -1,38 +1,68 @@
-// draftService.ts uses any for state right now to decouple from strict types, 
-// but we omit the unused PatientVisitState import.
+export interface DraftPatient {
+    patientId: string;
+    lastUpdatedAt: number;
+    status: "DRAFT";
+    patientData: any; // Aggregated state of the 4 tabs
+    savedSections: {
+        basic: boolean;
+        clinical: boolean;
+        diagnosis: boolean;
+        prescription: boolean;
+    };
+}
+
 const DRAFT_PREFIX = 'DRAFT_PATIENT_';
 
 export const DraftService = {
-    saveDraft: (patientId: string, state: any) => {
-        if (!patientId) return;
-        const key = `${DRAFT_PREFIX}${patientId}`;
-        localStorage.setItem(key, JSON.stringify({
-            ...state,
-            timestamp: new Date().toISOString()
-        }));
+    generateDraftId: (): string => {
+        return `draft_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     },
 
-    getDraft: (patientId: string): any | null => {
+    saveDraft: (patientId: string, data: DraftPatient): void => {
+        if (!patientId) return;
+        const key = `${DRAFT_PREFIX}${patientId}`;
+        const draftData = {
+            ...data,
+            lastUpdatedAt: Date.now(),
+        };
+        localStorage.setItem(key, JSON.stringify(draftData));
+    },
+
+    getDraft: (patientId: string): DraftPatient | null => {
         if (!patientId) return null;
         const key = `${DRAFT_PREFIX}${patientId}`;
         const saved = localStorage.getItem(key);
-        return saved ? JSON.parse(saved) : null;
+        if (!saved) return null;
+
+        try {
+            return JSON.parse(saved) as DraftPatient;
+        } catch (e) {
+            console.error("Failed to parse draft", e);
+            return null;
+        }
     },
 
-    clearDraft: (patientId: string) => {
+    deleteDraft: (patientId: string): void => {
         if (!patientId) return;
         const key = `${DRAFT_PREFIX}${patientId}`;
         localStorage.removeItem(key);
     },
 
-    listAllDrafts: () => {
-        const drafts = [];
+    getAllDrafts: (): DraftPatient[] => {
+        const drafts: DraftPatient[] = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
             if (key?.startsWith(DRAFT_PREFIX)) {
-                drafts.push(key);
+                const saved = localStorage.getItem(key);
+                if (saved) {
+                    try {
+                        drafts.push(JSON.parse(saved) as DraftPatient);
+                    } catch (e) {
+                        console.warn("Invalid draft format for key:", key);
+                    }
+                }
             }
         }
-        return drafts;
+        return drafts.sort((a, b) => b.lastUpdatedAt - a.lastUpdatedAt);
     }
 };

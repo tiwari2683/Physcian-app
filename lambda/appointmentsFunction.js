@@ -14,13 +14,22 @@ exports.handler = async (event) => {
     // Header for CORS
     const headers = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type",
-        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,DELETE,PATCH"
+        "Access-Control-Allow-Credentials": true, // Very important for auth
+        "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+        "Access-Control-Allow-Methods": "OPTIONS,POST,GET,DELETE,PATCH,PUT"
     };
+
 
     try {
         // Handle different HTTP methods - Support both v1 (REST) and v2 (HTTP/Function URL)
         const method = event.httpMethod || event.requestContext?.http?.method;
+        if (method === "OPTIONS") {
+            return {
+                statusCode: 200,
+                headers,
+                body: JSON.stringify({ message: "CORS preflight successful" })
+            };
+        }
 
         if (method === "GET") {
             // GET /appointments - Fetch all appointments

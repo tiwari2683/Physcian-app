@@ -27,19 +27,18 @@ const AppointmentsList = () => {
      * If strictly past new Date(), and status is "Upcoming", mark strictly as completed on frontend.
      */
     const getSmartStatusAndDate = (apt: Appointment) => {
-        let smartStatus = apt.status;
+        // Normalize incoming status to Title Case for UI consistency
+        const rawStatus = apt.status?.toLowerCase() || 'upcoming';
+        let smartStatus = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
         let aptDateObj: Date | null = null;
 
         try {
-            // Attempt to parse Date and Time into a Date object
-            // E.g. date: "Jan 6, 2026", time: "15:00" or "3:00 PM"
-            // Simple parsing assuming valid JS Date string formats
             const dateStr = `${apt.date} ${apt.time}`;
             aptDateObj = new Date(dateStr);
 
             if (!isNaN(aptDateObj.getTime())) {
                 const now = new Date();
-                if (apt.status === 'Upcoming' && aptDateObj < now) {
+                if (smartStatus === 'Upcoming' && aptDateObj < now) {
                     smartStatus = 'Completed';
                 }
             }
@@ -192,7 +191,7 @@ const AppointmentsList = () => {
                                         <h3 className="font-bold text-[#1F2937] text-lg truncate">{apt.patientName}</h3>
                                         <div className="flex flex-wrap items-center gap-2 mt-1">
                                             <span className="text-xs font-semibold text-[#6B7280] bg-[#F3F4F6] px-2 py-0.5 rounded-md">
-                                                {apt.type}
+                                                {apt.type || 'Consultation'}
                                             </span>
                                             <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${styles.badge}`}>
                                                 {smartStatus}

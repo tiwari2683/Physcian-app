@@ -1,5 +1,6 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
+import { DraftService, type DraftPatient } from '../../services/draftService';
 import type {
     PatientBasic,
     ClinicalData,
@@ -12,6 +13,7 @@ export interface PatientVisitState {
     patientId: string | null;
     draftId: string | null;
     activeTab: number;
+    visitStatus: 'DRAFT' | 'WAITING' | 'COMPLETED';
 
     // Current Form State
     basic: PatientBasic;
@@ -31,15 +33,16 @@ export interface PatientVisitState {
     // Logic Flags
     isVisitLocked: boolean;
     lastLockedVisitDate: string | null;
-    lastSavedAt: string | null;
+    lastSavedAt: number | null;
     isLoading: boolean;
     error: string | null;
 }
 
-const initialState: PatientVisitState = {
+const getInitialState = (): PatientVisitState => ({
     patientId: null,
     draftId: null,
     activeTab: 0,
+    visitStatus: 'DRAFT',
 
     basic: {
         fullName: '',
@@ -73,7 +76,9 @@ const initialState: PatientVisitState = {
     lastSavedAt: null,
     isLoading: false,
     error: null,
-};
+});
+
+const initialState: PatientVisitState = getInitialState();
 
 const patientVisitSlice = createSlice({
     name: 'patientVisit',
@@ -107,6 +112,9 @@ const patientVisitSlice = createSlice({
         setVisitLock: (state, action: PayloadAction<{ isLocked: boolean; lastLockedDate: string | null }>) => {
             state.isVisitLocked = action.payload.isLocked;
             state.lastLockedVisitDate = action.payload.lastLockedDate;
+            if (action.payload.isLocked) {
+                state.visitStatus = 'COMPLETED';
+            }
         },
 
         // Loading full history payload
@@ -131,24 +139,54 @@ const patientVisitSlice = createSlice({
                 if (lockedDate >= today) {
                     state.isVisitLocked = true;
                     state.lastLockedVisitDate = action.payload.lastLockedVisitDate;
+                    state.visitStatus = 'COMPLETED';
                 }
             }
         },
 
-        markDraftSaved: (state, action: PayloadAction<string>) => {
-            state.draftId = action.payload;
-            state.lastSavedAt = new Date().toISOString();
+        // Draft Management
+        initializeNewVisit: (state, action: PayloadAction<string | undefined>) => {
+            // Reset state using a factory function approach
+            Object.assign(state, getInitialState());
+
+            // If the UI generated a specific draft ID to sync with the URL, use it.
+            // Otherwise, fallback to generating one here.
+            state.draftId = action.payload || DraftService.generateDraftId();
+            state.visitStatus = 'DRAFT';
         },
 
-        restoreFromDraft: (state, action: PayloadAction<any>) => {
-            return {
-                ...state,
-                ...action.payload,
-                prescription: { ...action.payload.prescription, isAssistant: true }
-            };
+        initializeExistingVisit: (state, action: PayloadAction<string>) => {
+            Object.assign(state, getInitialState());
+            state.patientId = action.payload;
+            // State will remain in DRAFT until AWS fetch populates it or it gets locked
+            state.visitStatus = 'DRAFT';
         },
 
-        clearVisitSession: () => initialState,
+        loadDraftIntoState: (state, action: PayloadAction<DraftPatient>) => {
+            // Overwrite the specific dynamic state portions
+            const { patientData } = action.payload;
+
+            state.patientId = patientData.patientId;
+            state.draftId = patientData.draftId;
+            state.activeTab = patientData.activeTab;
+            state.visitStatus = patientData.visitStatus;
+
+            state.basic = patientData.basic;
+            state.clinical = patientData.clinical;
+            state.diagnosis = patientData.diagnosis;
+            state.prescription = { ...patientData.prescription, isAssistant: true };
+
+            state.clinicalHistory = patientData.clinicalHistory || [];
+            state.medicalHistory = patientData.medicalHistory || [];
+            state.diagnosisHistory = patientData.diagnosisHistory || [];
+            state.investigationsHistory = patientData.investigationsHistory || [];
+
+            state.isVisitLocked = patientData.isVisitLocked;
+            state.lastLockedVisitDate = patientData.lastLockedVisitDate;
+            state.lastSavedAt = action.payload.lastUpdatedAt;
+        },
+
+        clearVisitSession: () => getInitialState(),
     },
 });
 
@@ -160,8 +198,9 @@ export const {
     setActiveTab,
     setVisitLock,
     setFullPatientHistory,
-    markDraftSaved,
-    restoreFromDraft,
+    initializeNewVisit,
+    initializeExistingVisit,
+    loadDraftIntoState,
     clearVisitSession,
 } = patientVisitSlice.actions;
 

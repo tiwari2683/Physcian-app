@@ -435,10 +435,11 @@ export const handler = async (event, context) => {
                 statusCode: 200,
                 headers: {
                     "Access-Control-Allow-Origin": "*",
-                    "Access-Control-Allow-Headers": "Content-Type,Authorization",
-                    "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE"
+                    "Access-Control-Allow-Credentials": true,
+                    "Access-Control-Allow-Headers": "Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token",
+                    "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE,PATCH"
                 },
-                body: ""
+                body: JSON.stringify({ message: "CORS preflight successful" })
             };
         }
 

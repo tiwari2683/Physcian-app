@@ -1,16 +1,10 @@
 import React from 'react';
 import { useAppSelector } from '../../../controllers/hooks';
 import { Card, Button } from '../../components/UI';
-import { ShieldAlert, Printer, Save, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Printer, CheckCircle2 } from 'lucide-react';
 
 export const PrescriptionTab: React.FC = () => {
     const { prescription, isVisitLocked } = useAppSelector((state) => state.patientVisit);
-
-    const handleSaveVisit = () => {
-        // Logic to bundle all state and send to PATIENT_PROCESSOR
-        console.log("Saving full visit to PATIENT_PROCESSOR...");
-        alert("Visit data staged successfully! (Ready for Doctor's final PDF generation)");
-    };
 
     return (
         <div className="space-y-6">
@@ -40,19 +34,10 @@ export const PrescriptionTab: React.FC = () => {
                     <h3 className="text-xl font-bold text-type-heading mb-2">Assistant Role Restriction</h3>
                     <p className="text-type-body max-w-md mb-6">
                         As a Physician's Assistant, you can stage medications and clinical data.
-                        However, final Prescription PDF generation is reserved for the primary doctor.
+                        However, finalizing visits and Prescription PDF generation is reserved for the primary doctor.
                     </p>
 
                     <div className="flex gap-4">
-                        <Button
-                            variant="primary"
-                            onClick={handleSaveVisit}
-                            disabled={isVisitLocked}
-                            className="flex gap-2"
-                        >
-                            <Save size={18} /> Save Patient Visit
-                        </Button>
-
                         <Button
                             disabled={true}
                             className="flex gap-2 opacity-50 cursor-not-allowed bg-gray-400 text-white px-4 py-2 rounded-md"
