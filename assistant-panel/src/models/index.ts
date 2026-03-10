@@ -76,7 +76,11 @@ export interface Appointment {
     id: string;
     patientId?: string;
     patientName: string;
-    date: string; // Formatting to match mobile logic if string
+    age?: number | string;
+    mobile?: string;
+    sex?: 'Male' | 'Female' | 'Other';
+    address?: string;
+    date: string;
     time: string;
     type: string;
     status: 'Upcoming' | 'Completed' | 'Canceled';

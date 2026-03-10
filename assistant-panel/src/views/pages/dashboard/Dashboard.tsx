@@ -3,7 +3,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Users, Calendar, Activity, FilePlus, Save, Trash2 } from 'lucide-react';
 import { fetchPatients, fetchAppointments } from '../../../controllers/apiThunks';
-import { initializeNewVisit, loadDraftIntoState } from '../../../controllers/slices/patientVisitSlice';
+import { loadDraftIntoState } from '../../../controllers/slices/patientVisitSlice';
 import { DraftService, type DraftPatient } from '../../../services/draftService';
 import type { RootState, AppDispatch } from '../../../controllers/store';
 
@@ -21,19 +21,29 @@ const Dashboard = () => {
     useEffect(() => {
         dispatch(fetchPatients());
         dispatch(fetchAppointments());
-
-        // Load local storage drafts into dashboard component locally
         setLocalDrafts(DraftService.getAllDrafts());
+
+        // Refresh appointments whenever the user navigates back to this tab/page
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                dispatch(fetchAppointments());
+                setLocalDrafts(DraftService.getAllDrafts());
+            }
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
     }, [dispatch]);
 
     const handleNewVisit = () => {
-        dispatch(initializeNewVisit());
+        // Navigate to /visit/new — NewPatientForm will generate and redirect to a stable draft ID
         navigate('/visit/new');
     };
 
     const handleResumeDraft = (draft: DraftPatient) => {
+        // Pre-load into Redux so the form won't wipe it on mount
         dispatch(loadDraftIntoState(draft));
-        navigate('/visit/new');
+        // Navigate to the EXACT draft ID so NewPatientForm sees it in the URL
+        navigate(`/visit/${draft.patientId}`);
     };
 
     const handleDeleteDraft = (draftId: string) => {
@@ -43,10 +53,71 @@ const Dashboard = () => {
         }
     };
 
+    const handleCheckIn = (apt: any) => {
+        // KEY: Deterministic ID tied to the appointment — prevents duplicate drafts
+        const draftId = `checkin_${apt.id}`;
+
+        // Build a FRESH payload from the LATEST appointment data EVERY TIME.
+        // Do NOT return an old stale draft — it may have been created before sex/address were added.
+        const freshDraft: DraftPatient = {
+            patientId: draftId,
+            lastUpdatedAt: Date.now(),
+            status: "DRAFT",
+            savedSections: { basic: true, clinical: false, diagnosis: false, prescription: false },
+            patientData: {
+                patientId: draftId,
+                draftId: draftId,
+                activeTab: 0,
+                visitStatus: 'DRAFT',
+                basic: {
+                    fullName: apt.patientName || apt.name || apt.fullName || '',
+                    age: apt.age ? String(apt.age) : '',
+                    mobileNumber: apt.mobile || apt.phone || apt.mobileNumber || '',
+                    sex: apt.sex || apt.gender || 'Male',
+                    address: apt.address || ''
+                },
+                clinical: { historyText: '', vitals: {}, reports: [] },
+                diagnosis: { diagnosisText: '', selectedInvestigations: [], customInvestigations: '' },
+                prescription: { medications: [], isAssistant: true },
+                clinicalHistory: [],
+                medicalHistory: [],
+                diagnosisHistory: [],
+                investigationsHistory: [],
+                isVisitLocked: false,
+                lastLockedVisitDate: null
+            }
+        };
+
+        // Save fresh draft to LocalStorage (overwrites any stale previous check-in)
+        DraftService.saveDraft(draftId, freshDraft);
+
+        // Load into Redux so BasicTab reads the updated data immediately
+        dispatch(loadDraftIntoState(freshDraft));
+
+        navigate(`/visit/${draftId}`);
+    };
+
     const todayAppointments = appointments.filter((apt) => {
-        const today = new Date();
+        // Exclude canceled appointments from the dashboard check-in list
+        const status = (apt.status || '').toLowerCase();
+        if (status === 'canceled' || status === 'cancelled') return false;
+
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(todayStart);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        // Primary: Parse the ISO "YYYY-MM-DD HH:MM" format from <input type="date">
+        try {
+            const aptDate = new Date(`${apt.date} ${apt.time || '00:00'}`);
+            if (!isNaN(aptDate.getTime())) {
+                return aptDate >= todayStart && aptDate < tomorrow;
+            }
+        } catch { /* fall through to legacy check */ }
+
+        // Legacy fallback: handle old "Mar 10, 2026" string format entries
         const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const todayStr = `${months[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
+        const todayStr = `${months[todayStart.getMonth()]} ${todayStart.getDate()}, ${todayStart.getFullYear()}`;
         return apt.date === todayStr;
     });
 
@@ -211,11 +282,7 @@ const Dashboard = () => {
                                         </div>
                                     </div>
                                     <button
-                                        onClick={() => {
-                                            // Ensure clean slate before opening standard visit
-                                            dispatch(initializeNewVisit());
-                                            navigate(`/visit/${apt.patientId || 'new'}`);
-                                        }}
+                                        onClick={() => handleCheckIn(apt)}
                                         className="text-[#6B7280] border border-[#E5E7EB] bg-white px-4 py-2 rounded-md text-sm font-medium hover:bg-gray-50 transition"
                                     >
                                         Check In

@@ -11,6 +11,8 @@ const AppointmentsList = () => {
     const [activeTab, setActiveTab] = useState<'Today' | 'Upcoming' | 'Completed' | 'Canceled'>('Today');
     const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+    const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
 
     useEffect(() => {
         dispatch(fetchAppointments());
@@ -113,7 +115,10 @@ const AppointmentsList = () => {
                 </div>
                 <div className="flex gap-3">
                     <button
-                        onClick={() => setIsModalOpen(true)}
+                        onClick={() => {
+                            setSelectedAppointment(null);
+                            setIsModalOpen(true);
+                        }}
                         className="bg-[#2563EB] text-white px-5 py-2.5 rounded-lg flex items-center gap-2 hover:bg-[#1E40AF] transition shadow-md"
                     >
                         <Plus size={20} />
@@ -178,9 +183,30 @@ const AppointmentsList = () => {
                             <div key={apt.id} className={`bg-white rounded-xl shadow-sm border border-[#E5E7EB] border-l-4 ${styles.border} p-5 hover:shadow-md transition duration-200 group relative`}>
 
                                 <div className="absolute top-4 right-4">
-                                    <button className="text-[#9CA3AF] hover:text-[#374151] p-1 rounded-md hover:bg-[#F3F4F6] transition">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            setMenuOpenId(menuOpenId === apt.id ? null : apt.id);
+                                        }}
+                                        className="text-[#9CA3AF] hover:text-[#374151] p-1 rounded-md hover:bg-[#F3F4F6] transition"
+                                    >
                                         <MoreVertical size={20} />
                                     </button>
+                                    {menuOpenId === apt.id && (
+                                        <div className="absolute right-0 mt-1 w-36 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-10 py-1">
+                                            <button
+                                                className="w-full text-left px-4 py-2 hover:bg-[#F3F4F6] text-sm text-[#374151] font-medium transition"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setSelectedAppointment(apt);
+                                                    setIsModalOpen(true);
+                                                    setMenuOpenId(null);
+                                                }}
+                                            >
+                                                Edit Appointment
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="flex items-start gap-4">
@@ -218,7 +244,13 @@ const AppointmentsList = () => {
 
             {/* Modals */}
             {isModalOpen && (
-                <NewAppointmentModal onClose={() => setIsModalOpen(false)} />
+                <NewAppointmentModal
+                    onClose={() => {
+                        setIsModalOpen(false);
+                        setSelectedAppointment(null);
+                    }}
+                    initialData={selectedAppointment}
+                />
             )}
         </div>
     );
