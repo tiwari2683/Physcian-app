@@ -9,9 +9,18 @@ import type {
     VisitHistoryItem
 } from '../../models';
 
+
+export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
 export interface PatientVisitState {
     patientId: string | null;
     draftId: string | null;
+    /**
+     * Set when the draft has been persisted to the cloud at least once.
+     * Subsequent cloud saves use this ID in UPDATE mode instead of creating
+     * a brand-new DynamoDB record every time.
+     */
+    cloudPatientId: string | null;
     activeTab: number;
     visitStatus: 'DRAFT' | 'WAITING' | 'COMPLETED';
 
@@ -36,11 +45,16 @@ export interface PatientVisitState {
     lastSavedAt: number | null;
     isLoading: boolean;
     error: string | null;
+
+    // ── Layer 3: Cloud Auto-Save UX ──────────────────────────────────────────
+    /** Drives the Google-Forms-style save indicator in FormFooter */
+    saveStatus: SaveStatus;
 }
 
 const getInitialState = (): PatientVisitState => ({
     patientId: null,
     draftId: null,
+    cloudPatientId: null,
     activeTab: 0,
     visitStatus: 'DRAFT',
 
@@ -63,7 +77,7 @@ const getInitialState = (): PatientVisitState => ({
     },
     prescription: {
         medications: [],
-        isAssistant: true, // Role Restriction
+        isAssistant: true,
     },
 
     clinicalHistory: [],
@@ -76,6 +90,8 @@ const getInitialState = (): PatientVisitState => ({
     lastSavedAt: null,
     isLoading: false,
     error: null,
+
+    saveStatus: 'idle',
 });
 
 const initialState: PatientVisitState = getInitialState();
@@ -106,6 +122,24 @@ const patientVisitSlice = createSlice({
         },
         setActiveTab: (state, action: PayloadAction<number>) => {
             state.activeTab = action.payload;
+        },
+
+        // ── Layer 3 UX ───────────────────────────────────────────────────────
+        /**
+         * Manually set the cloud save status.
+         * Called by the 8s autosave effect before dispatching the cloud thunk,
+         * and by the thunk's fulfilled/rejected handlers via extraReducers.
+         */
+        setSaveStatus: (state, action: PayloadAction<SaveStatus>) => {
+            state.saveStatus = action.payload;
+        },
+
+        /**
+         * Store the cloud patient ID returned by the first successful cloud save.
+         * All subsequent saves will use this in UPDATE mode.
+         */
+        setCloudPatientId: (state, action: PayloadAction<string>) => {
+            state.cloudPatientId = action.payload;
         },
 
         // Visit Lock Logic
@@ -146,11 +180,7 @@ const patientVisitSlice = createSlice({
 
         // Draft Management
         initializeNewVisit: (state, action: PayloadAction<string | undefined>) => {
-            // Reset state using a factory function approach
             Object.assign(state, getInitialState());
-
-            // If the UI generated a specific draft ID to sync with the URL, use it.
-            // Otherwise, fallback to generating one here.
             state.draftId = action.payload || DraftService.generateDraftId();
             state.visitStatus = 'DRAFT';
         },
@@ -158,16 +188,15 @@ const patientVisitSlice = createSlice({
         initializeExistingVisit: (state, action: PayloadAction<string>) => {
             Object.assign(state, getInitialState());
             state.patientId = action.payload;
-            // State will remain in DRAFT until AWS fetch populates it or it gets locked
             state.visitStatus = 'DRAFT';
         },
 
         loadDraftIntoState: (state, action: PayloadAction<DraftPatient>) => {
-            // Overwrite the specific dynamic state portions
             const { patientData } = action.payload;
 
             state.patientId = patientData.patientId;
             state.draftId = patientData.draftId;
+            state.cloudPatientId = patientData.cloudPatientId || null;
             state.activeTab = patientData.activeTab;
             state.visitStatus = patientData.visitStatus;
 
@@ -184,6 +213,7 @@ const patientVisitSlice = createSlice({
             state.isVisitLocked = patientData.isVisitLocked;
             state.lastLockedVisitDate = patientData.lastLockedVisitDate;
             state.lastSavedAt = action.payload.lastUpdatedAt;
+            state.saveStatus = 'saved'; // Hydrated from storage = already saved
         },
 
         clearVisitSession: () => getInitialState(),
@@ -196,6 +226,8 @@ export const {
     updateDiagnosisDetails,
     setMedications,
     setActiveTab,
+    setSaveStatus,
+    setCloudPatientId,
     setVisitLock,
     setFullPatientHistory,
     initializeNewVisit,

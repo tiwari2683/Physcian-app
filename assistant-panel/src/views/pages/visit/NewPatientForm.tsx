@@ -5,8 +5,11 @@ import {
     setActiveTab,
     initializeNewVisit,
     initializeExistingVisit,
-    loadDraftIntoState
+    loadDraftIntoState,
+    setSaveStatus,
+    setCloudPatientId,
 } from '../../../controllers/slices/patientVisitSlice';
+import { autoSaveDraftToCloud } from '../../../controllers/apiThunks';
 import { BasicTab } from './BasicTab';
 import { ClinicalTab } from './ClinicalTab';
 import { DiagnosisTab } from './DiagnosisTab';
@@ -22,8 +25,7 @@ const TABS = [
     { id: 3, label: 'Prescription', icon: FileText },
 ];
 
-// A valid local draft starts with 'draft_' or 'checkin_'.
-// Server-side patient IDs (e.g., 'patient_abc123') must NOT be auto-saved locally.
+/** Only local draft IDs (draft_xxx or checkin_xxx) should be autosaved locally. */
 const isLocalDraftId = (id: string | null | undefined): boolean => {
     if (!id) return false;
     return id.startsWith('draft_') || id.startsWith('checkin_');
@@ -34,92 +36,124 @@ export const NewPatientForm: React.FC = () => {
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
     const patientVisitState = useAppSelector((state) => state.patientVisit);
-    const { activeTab, isVisitLocked, patientId, draftId, basic } = patientVisitState;
+    const { activeTab, isVisitLocked, patientId, draftId, cloudPatientId, basic } = patientVisitState;
 
-    const timeoutRef = useRef<NodeJS.Timeout | null>(null);
-    /**
-     * Guard flag: MUST be true before autosave fires.
-     * Prevents blank drafts from being written while Redux hydrates.
-     */
+    // Guard flag: prevents both autosave effects from firing during hydration
     const isInitialized = useRef(false);
+    const localSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const cloudSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    /**
+     * A ref that always holds the LATEST Redux state.
+     * Used in the flush-save cleanup so it reads current data even inside a
+     * `useEffect(..., [])` closure that would otherwise capture stale values.
+     */
+    const patientVisitStateRef = useRef(patientVisitState);
+    useEffect(() => {
+        patientVisitStateRef.current = patientVisitState;
+    });
 
     // =========================================================================
-    // FIX A + B: INITIALIZATION & HYDRATION HOOK
+    // INITIALIZATION & HYDRATION HOOK
     //
-    // LocalStorage is the single authoritative source of truth for local drafts.
-    // We NO LONGER dispatch initializeNewVisit() inside the /visit/new redirect
-    // because that dispatch triggers the autosave with empty state (blank draft bug).
+    // 3-Step Priority Order:
+    //   Step A: Redux already has matching data → skip any reload (fastest path).
+    //           This is the key fix for navigation: when user goes Dashboard →
+    //           /visit/:id, Redux still has the draft in memory — no reload needed.
+    //   Step B: Redux is empty/stale → load from LocalStorage (page refresh path).
+    //   Step C: Nothing saved → initialize fresh blank form.
     // =========================================================================
     useEffect(() => {
-        // Arm the guard — autosave is blocked while we load
         isInitialized.current = false;
 
-        // SCENARIO 1: URL has a specific stable ID (e.g., draft_xxx or checkin_xxx)
         if (id && id !== 'new') {
-            const savedDraft = DraftService.getDraft(id);
+            // ── STEP A: Redux fast-path ──────────────────────────────────────
+            // If Redux already has the right draft loaded (e.g., user navigated
+            // away to Dashboard and came back), there is NO need to reload.
+            // Reloading would overwrite any unsaved changes still in Redux!
+            if (draftId === id || patientId === id) {
+                console.log('[Form] Step A: Redux already has draft', id, '— skipping reload');
+                isInitialized.current = true;
+                return;
+            }
 
+            // ── STEP B: LocalStorage path (page refresh or first mount) ──────
+            const savedDraft = DraftService.getDraft(id);
             if (savedDraft) {
-                // Draft found in LocalStorage — hydrate Redux from it.
-                // This handles: first Check-In, page refresh, and Resume button clicks.
-                console.log('[Form] Hydrating from LocalStorage:', id, '| Patient:', savedDraft.patientData?.basic?.fullName || '(none)');
+                console.log('[Form] Step B: Loading from LocalStorage:', id, '| Patient:', savedDraft.patientData?.basic?.fullName || '(none)');
                 dispatch(loadDraftIntoState(savedDraft));
             } else if (isLocalDraftId(id)) {
-                // Local draft ID in URL but nothing saved yet — fresh new visit.
-                // This happens when /visit/new redirected here and no draft exists.
-                console.log('[Form] New local draft ID with no saved data. Initializing:', id);
+                // ── STEP C: New local draft with no saved data ───────────────
+                console.log('[Form] Step C: New local draft — initializing blank form:', id);
                 dispatch(initializeNewVisit(id));
             } else {
-                // Server-side patient ID — fetch from AWS (future implementation)
-                console.log('[Form] Server patient ID, loading fresh state for:', id);
+                console.log('[Form] Step C: Server patient ID — loading fresh state:', id);
                 dispatch(initializeExistingVisit(id));
             }
 
-            // Unblock autosave now that initialization is complete
             isInitialized.current = true;
-        }
-        // SCENARIO 2: Pure /visit/new URL
-        // FIX A: Do NOT dispatch initializeNewVisit here — that dispatch was
-        // triggering the autosave immediately with empty state (the blank draft bug).
-        // Instead, just generate the ID and redirect. The re-run of this effect
-        // with the new stable ID will handle initialization cleanly above.
-        else {
+        } else {
+            // /visit/new → generate stable ID and redirect (no dispatch = no blank draft)
             const newDraftId = DraftService.generateDraftId();
-            console.log('[Form] /visit/new — redirecting to stable draft ID:', newDraftId);
-            // ⚠️ NO dispatch here — redirect only
+            console.log('[Form] /visit/new — redirecting to:', newDraftId);
             navigate(`/visit/${newDraftId}`, { replace: true });
-            // isInitialized stays false; the re-run handles it
         }
 
-    }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [id, draftId, patientId]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
     // =========================================================================
-    // FIX B + C: DEBOUNCED AUTOSAVE ENGINE
+    // FLUSH-SAVE ON UNMOUNT (Navigation Guard)
     //
-    // Three guards prevent blank drafts:
-    //   1. isInitialized.current — blocks saves until hydration is complete
-    //   2. isLocalDraftId(currentId) — only saves local drafts, not server patients
-    //   3. 5000ms delay — gives Redux state time to fully stabilize after hydration
+    // THE KEY FIX: When the user navigates away (component unmounts), the 2s
+    // autosave timer is cancelled by React. This effect runs its CLEANUP when
+    // the component unmounts and immediately writes the current Redux state to
+    // localStorage — so no data is lost between the last keystroke and navigation.
     // =========================================================================
     useEffect(() => {
-        // Guard 1: Block autosave if hydration isn't complete
-        if (!isInitialized.current) return;
+        return () => {
+            // This code runs ONLY on unmount (navigation away)
+            const snapshot = patientVisitStateRef.current;
+            const currentId = snapshot.draftId || snapshot.patientId;
+            if (!currentId || !isLocalDraftId(currentId) || snapshot.isVisitLocked) return;
 
-        // Guard 2: Never autosave server-side patient records
+            console.log('[Form] Flush-save on unmount for:', currentId);
+            DraftService.saveDraft(currentId, {
+                patientId: currentId,
+                cloudPatientId: snapshot.cloudPatientId ?? undefined,
+                status: 'DRAFT',
+                patientData: snapshot,
+                lastUpdatedAt: Date.now(),
+                savedSections: {
+                    basic: !!snapshot.basic?.fullName,
+                    clinical: false,
+                    diagnosis: false,
+                    prescription: false,
+                }
+            });
+        };
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+    // =========================================================================
+    // LAYER 2: LOCAL AUTOSAVE (2 000ms debounce → localStorage)
+    //
+    // Fast, free, synchronous. Survives Ctrl+R page refresh.
+    // Guard: only fires after hydration; only for local draft IDs.
+    // =========================================================================
+    useEffect(() => {
+        if (!isInitialized.current) return;
         const currentId = draftId || patientId;
         if (!isLocalDraftId(currentId)) return;
-
         if (isVisitLocked) return;
 
-        if (timeoutRef.current) {
-            clearTimeout(timeoutRef.current);
-        }
+        if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
 
-        // FIX C: 5000ms delay ensures Redux stabilizes before the first write
-        timeoutRef.current = setTimeout(() => {
+        localSaveTimerRef.current = setTimeout(() => {
             if (!currentId) return;
             DraftService.saveDraft(currentId, {
                 patientId: currentId,
+                cloudPatientId: cloudPatientId ?? undefined,
                 status: 'DRAFT',
                 patientData: patientVisitState,
                 lastUpdatedAt: Date.now(),
@@ -130,13 +164,55 @@ export const NewPatientForm: React.FC = () => {
                     prescription: false,
                 }
             });
-            console.log('[Form] Autosaved draft:', currentId, '| Patient:', basic.fullName || '(unnamed)');
-        }, 5000);
+            console.log('[Layer 2] Local draft saved:', currentId, '| Patient:', basic.fullName || '(none)');
+        }, 2000);
 
-        return () => {
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        };
-    }, [patientVisitState, isVisitLocked, patientId, draftId]);
+        return () => { if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current); };
+    }, [patientVisitState, isVisitLocked, patientId, draftId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+
+    // =========================================================================
+    // LAYER 3: CLOUD AUTOSAVE (8 000ms debounce → DynamoDB via PATIENT_DATA API)
+    //
+    // Saves with status:'DRAFT' so it never enters the live Waiting Room queue.
+    // First call creates a DynamoDB record; subsequent calls UPDATE it via cloudPatientId.
+    // Guard: only fires if patient has entered their full name (meaningful data).
+    // =========================================================================
+    useEffect(() => {
+        if (!isInitialized.current) return;
+        const currentId = draftId || patientId;
+        if (!isLocalDraftId(currentId)) return;
+        if (isVisitLocked) return;
+        if (!basic.fullName) return; // Don't cloud-save empty drafts
+
+        if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
+
+        // Show "Saving..." indicator while debounce is pending
+        dispatch(setSaveStatus('saving'));
+
+        cloudSaveTimerRef.current = setTimeout(async () => {
+            const result = await dispatch(autoSaveDraftToCloud());
+
+            if (autoSaveDraftToCloud.fulfilled.match(result)) {
+                const { cloudPatientId: newCloudId } = result.payload;
+
+                // Persist the cloud ID back to localStorage so refresh also has it
+                if (newCloudId && newCloudId !== cloudPatientId) {
+                    dispatch(setCloudPatientId(newCloudId));
+                    const savedDraft = DraftService.getDraft(currentId!);
+                    if (savedDraft) {
+                        DraftService.saveDraft(currentId!, { ...savedDraft, cloudPatientId: newCloudId });
+                    }
+                }
+                dispatch(setSaveStatus('saved'));
+            } else {
+                dispatch(setSaveStatus('error'));
+            }
+        }, 8000);
+
+        return () => { if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current); };
+    }, [patientVisitState, isVisitLocked, patientId, draftId]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
     return (
         <div className="max-w-6xl mx-auto px-4 py-8 pb-32">
@@ -198,7 +274,7 @@ export const NewPatientForm: React.FC = () => {
                 )}
             </div>
 
-            {/* Sticky Form Footer */}
+            {/* Sticky Form Footer with live save indicator */}
             <FormFooter />
         </div>
     );

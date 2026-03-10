@@ -23,6 +23,9 @@ const Dashboard = () => {
         dispatch(fetchAppointments());
         setLocalDrafts(DraftService.getAllDrafts());
 
+        // Prune stale local drafts older than 30 days (mirrors mobile app cleanupOldDrafts)
+        DraftService.cleanupOldDrafts(30);
+
         // Refresh appointments whenever the user navigates back to this tab/page
         const handleVisibilityChange = () => {
             if (document.visibilityState === 'visible') {
