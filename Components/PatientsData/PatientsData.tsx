@@ -60,6 +60,7 @@ interface Patient {
   reportData?: Record<string, string>;
   firstVisit?: Record<string, any>;
   existingData?: string;
+  status?: string;
 }
 
 interface APIResponse {
@@ -375,11 +376,14 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
   };
 
   // Render a patient card with improved touch feedback
-  const renderPatientCard = ({ item }: { item: Patient }) => (
+  const renderPatientCard = ({ item }: { item: Patient }) => {
+    const isDraft = item.status === "DRAFT" || item.treatment === "DRAFT";
+    
+    return (
     <TouchableOpacity
       style={styles.patientCard}
-      onPress={() => handleViewPatient(item)}
-      activeOpacity={0.85}
+      onPress={() => isDraft ? null : handleViewPatient(item)}
+      activeOpacity={isDraft ? 1 : 0.85}
       accessibilityLabel={`View details for patient ${item.name}`}
     >
       <View style={styles.patientCardHeader}>
@@ -432,57 +436,83 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
         )}
       </View>
       <View style={styles.patientCardFooter}>
-        <TouchableOpacity
-          style={styles.cardButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            navigation.navigate("NewPatientForm", {
-              patient: item,
-              initialTab: "clinical", // Changed from "basic" to "clinical"
-              prefillMode: true,
-              hideBasicTab: true, // Add this new parameter
-            });
-          }}
-          accessibilityLabel={`Prescribe for ${item.name}`}
-        >
-          <Ionicons name="create-outline" size={16} color="#0070D6" />
-          <Text style={styles.cardButtonText}>Prescribe</Text>
-        </TouchableOpacity>
+        {isDraft ? (
+          <View
+            style={[
+              styles.cardButton,
+              {
+                backgroundColor: "#f5f5f5",
+                borderColor: "#e0e0e0",
+                width: "100%",
+                justifyContent: "center",
+              },
+            ]}
+          >
+            <Ionicons name="time-outline" size={16} color="#718096" />
+            <Text
+              style={[
+                styles.cardButtonText,
+                { color: "#718096", marginLeft: 8, fontWeight: "600" },
+              ]}
+            >
+              DRAFT - AT FRONT DESK
+            </Text>
+          </View>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={styles.cardButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                navigation.navigate("NewPatientForm", {
+                  patient: item,
+                  initialTab: "clinical", // Changed from "basic" to "clinical"
+                  prefillMode: true,
+                  hideBasicTab: true, // Add this new parameter
+                });
+              }}
+              accessibilityLabel={`Prescribe for ${item.name}`}
+            >
+              <Ionicons name="create-outline" size={16} color="#0070D6" />
+              <Text style={styles.cardButtonText}>Prescribe</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={styles.cardButton}
-          onPress={(e) => {
-            e.stopPropagation();
-            navigation.navigate("FitnessCertificate", { patient: item });
-          }}
-          accessibilityLabel={`Certificate for ${item.name}`}
-        >
-          <Ionicons name="ribbon-outline" size={16} color="#0070D6" />
-          <Text style={styles.cardButtonText}>Certificate</Text>
-        </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.cardButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                navigation.navigate("FitnessCertificate", { patient: item });
+              }}
+              accessibilityLabel={`Certificate for ${item.name}`}
+            >
+              <Ionicons name="ribbon-outline" size={16} color="#0070D6" />
+              <Text style={styles.cardButtonText}>Certificate</Text>
+            </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.cardButton, styles.deleteButton]}
-          onPress={(e) => {
-            e.stopPropagation();
-            handleDeletePatient(item);
-          }}
-          disabled={isDeletingPatient === item.patientId}
-          accessibilityLabel={`Delete ${item.name}`}
-        >
-          {isDeletingPatient === item.patientId ? (
-            <ActivityIndicator size="small" color="#E53935" />
-          ) : (
-            <Ionicons name="trash-outline" size={16} color="#E53935" />
-          )}
-          <Text style={[styles.cardButtonText, styles.deleteButtonText]}>
-            {isDeletingPatient === item.patientId ? "Deleting..." : "Delete"}
-          </Text>
-        </TouchableOpacity>
-
+            <TouchableOpacity
+              style={[styles.cardButton, styles.deleteButton]}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleDeletePatient(item);
+              }}
+              disabled={isDeletingPatient === item.patientId}
+              accessibilityLabel={`Delete ${item.name}`}
+            >
+              {isDeletingPatient === item.patientId ? (
+                <ActivityIndicator size="small" color="#E53935" />
+              ) : (
+                <Ionicons name="trash-outline" size={16} color="#E53935" />
+              )}
+              <Text style={[styles.cardButtonText, styles.deleteButtonText]}>
+                {isDeletingPatient === item.patientId ? "Deleting..." : "Delete"}
+              </Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </TouchableOpacity>
   );
+  };
 
   if (isLoading) {
     return (

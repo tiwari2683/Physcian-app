@@ -44,11 +44,16 @@ export interface PatientVisitState {
     lastLockedVisitDate: string | null;
     lastSavedAt: number | null;
     isLoading: boolean;
+    isSubmitting: boolean;
     error: string | null;
 
     // ── Layer 3: Cloud Auto-Save UX ──────────────────────────────────────────
     /** Drives the Google-Forms-style save indicator in FormFooter */
     saveStatus: SaveStatus;
+
+    // ── Task 4: UI State ─────────────────────────────────────────────────────
+    isHistoryDrawerOpen: boolean;
+    historyDrawerType: 'clinical' | 'medical' | 'diagnosis' | 'investigations';
 }
 
 const getInitialState = (): PatientVisitState => ({
@@ -67,6 +72,7 @@ const getInitialState = (): PatientVisitState => ({
     },
     clinical: {
         historyText: '',
+        reportNotes: '',
         vitals: {},
         reports: [],
     },
@@ -89,9 +95,12 @@ const getInitialState = (): PatientVisitState => ({
     lastLockedVisitDate: null,
     lastSavedAt: null,
     isLoading: false,
+    isSubmitting: false,
     error: null,
 
     saveStatus: 'idle',
+    isHistoryDrawerOpen: false,
+    historyDrawerType: 'clinical',
 });
 
 const initialState: PatientVisitState = getInitialState();
@@ -122,6 +131,9 @@ const patientVisitSlice = createSlice({
         },
         setActiveTab: (state, action: PayloadAction<number>) => {
             state.activeTab = action.payload;
+        },
+        setIsSubmitting: (state, action: PayloadAction<boolean>) => {
+            state.isSubmitting = action.payload;
         },
 
         // ── Layer 3 UX ───────────────────────────────────────────────────────
@@ -216,6 +228,13 @@ const patientVisitSlice = createSlice({
             state.saveStatus = 'saved'; // Hydrated from storage = already saved
         },
 
+        toggleHistoryDrawer: (state, action: PayloadAction<{ open: boolean; type?: PatientVisitState['historyDrawerType'] }>) => {
+            state.isHistoryDrawerOpen = action.payload.open;
+            if (action.payload.type) {
+                state.historyDrawerType = action.payload.type;
+            }
+        },
+
         clearVisitSession: () => getInitialState(),
     },
 });
@@ -226,6 +245,7 @@ export const {
     updateDiagnosisDetails,
     setMedications,
     setActiveTab,
+    setIsSubmitting,
     setSaveStatus,
     setCloudPatientId,
     setVisitLock,
@@ -234,6 +254,7 @@ export const {
     initializeExistingVisit,
     loadDraftIntoState,
     clearVisitSession,
+    toggleHistoryDrawer,
 } = patientVisitSlice.actions;
 
 export default patientVisitSlice.reducer;

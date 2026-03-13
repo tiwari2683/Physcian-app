@@ -7,6 +7,7 @@ import { logStateUpdate } from "../../../Utils/Logger";
 import { isFileAlreadyUploaded } from "../../../Utils/FileUtils";
 import { uploadFilesWithPresignedUrls, FileToUpload } from "../../../Utils/UploadService";
 import { DraftService, DraftPatient } from "../Services/DraftService";
+import { unmarshallDynamoDBObject } from "../../../Utils/DynamoDbUtils";
 
 // ============================================
 // FILE DEDUPLICATION HELPER
@@ -90,35 +91,53 @@ export const usePatientForm = ({
 
     const [patientData, setPatientData] = useState({
         // ── Persistent Patient Context (pre-fill from patient object) ──
-        name: prefillMode && patient ? patient.name : "",
-        age: prefillMode && patient ? patient.age.toString() : "",
-        sex: prefillMode && patient ? patient.sex : "Male",
-        mobile: prefillMode && patient ? patient.mobile : "",
-        address: prefillMode && patient ? patient.address : "",
+        name: prefillMode && patient ? patient.name || "" : "",
+        age: prefillMode && patient ? patient.age?.toString() || "" : "",
+        sex: prefillMode && patient ? patient.sex || "Male" : "Male",
+        mobile: prefillMode && patient ? patient.mobile || "" : "",
+        address: prefillMode && patient ? patient.address || "" : "",
         medicalHistory: prefillMode && patient ? patient.medicalHistory || "" : "",
         existingData: prefillMode && patient ? patient.existingData || "" : "",
 
-        // ── Visit-Specific Fields (always start EMPTY for each new visit) ──
-        // These get restored from Draft if the doctor was mid-visit without saving.
-        diagnosis: "",
-        prescription: "",
-        treatment: "",
-        reports: "",
-        advisedInvestigations: "",
+        // ── Visit-Specific Fields (Hydrate from patient if editing) ──
+        diagnosis: prefillMode && patient ? patient.diagnosis || "" : "",
+        prescription: prefillMode && patient ? patient.prescription || "" : "",
+        treatment: prefillMode && patient ? patient.treatment || "" : "",
+        reports: prefillMode && patient ? patient.reports || "" : "",
+        advisedInvestigations: prefillMode && patient ? patient.advisedInvestigations || "" : "",
 
         newHistoryEntry: "", // Phase 3: Unified Clinical History Draft Field
     });
 
     // Clinical parameters state
-    const [clinicalParameters, setClinicalParameters] = useState({
-        date: new Date(),
-        inr: "", hb: "", wbc: "", platelet: "", bilirubin: "",
-        sgot: "", sgpt: "", alt: "", tprAlb: "", ureaCreat: "",
-        sodium: "", fastingHBA1C: "", pp: "", tsh: "", ft4: "", others: "",
+    const [clinicalParameters, setClinicalParameters] = useState(() => {
+        if (prefillMode && patient && patient.clinicalParameters) {
+            const params = { ...patient.clinicalParameters };
+            if (typeof params.date === 'string') {
+                params.date = new Date(params.date);
+            }
+            if (!params.date || isNaN(params.date.getTime())) {
+                params.date = new Date();
+            }
+            return {
+                date: params.date,
+                inr: params.inr || "", hb: params.hb || "", wbc: params.wbc || "", platelet: params.platelet || "", bilirubin: params.bilirubin || "",
+                sgot: params.sgot || "", sgpt: params.sgpt || "", alt: params.alt || "", tprAlb: params.tprAlb || "", ureaCreat: params.ureaCreat || "",
+                sodium: params.sodium || "", fastingHBA1C: params.fastingHBA1C || "", pp: params.pp || "", tsh: params.tsh || "", ft4: params.ft4 || "", others: params.others || "",
+            };
+        }
+        return {
+            date: new Date(),
+            inr: "", hb: "", wbc: "", platelet: "", bilirubin: "",
+            sgot: "", sgpt: "", alt: "", tprAlb: "", ureaCreat: "",
+            sodium: "", fastingHBA1C: "", pp: "", tsh: "", ft4: "", others: "",
+        };
     });
 
-    // Medications state — always empty at visit start; restored from Draft if mid-visit
-    const [medications, setMedications] = useState<any[]>([]);
+    // Medications state — Hydrate from patient if editing
+    const [medications, setMedications] = useState<any[]>(() => {
+        return prefillMode && patient && patient.medications ? patient.medications : [];
+    });
     const [newPrescriptionIndices, setNewPrescriptionIndices] = useState<number[]>([]);
     const [expandedMedications, setExpandedMedications] = useState<number[]>([]);
     const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -127,9 +146,20 @@ export const usePatientForm = ({
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [tempDate, setTempDate] = useState(new Date());
 
-    // Report data state — always empty at visit start; restored from Draft if mid-visit
-    const [reportData, setReportData] = useState({
-        testName: "", testDate: "", testResults: "", interpretation: "", recommendations: "",
+    // Report data state — Hydrate from patient if editing
+    const [reportData, setReportData] = useState(() => {
+        if (prefillMode && patient && patient.reportData) {
+            return {
+                testName: patient.reportData.testName || "",
+                testDate: patient.reportData.testDate || "",
+                testResults: patient.reportData.testResults || "",
+                interpretation: patient.reportData.interpretation || "",
+                recommendations: patient.reportData.recommendations || "",
+            };
+        }
+        return {
+            testName: "", testDate: "", testResults: "", interpretation: "", recommendations: "",
+        };
     });
 
     // Report files state - ENHANCED to preserve S3 metadata and deduplicate
@@ -177,14 +207,10 @@ export const usePatientForm = ({
         };
     }, []);
 
-    // Initialize Draft ID and Load Draft
+    // Initialize Data (Draft -> Server Full Fetch -> Sparse Props)
     useEffect(() => {
-        const initializeDraft = async () => {
-            // Determine the ID to use for the draft
+        const initializeData = async () => {
             let idToUse = patient?.patientId || permanentPatientId;
-
-            // If we have an existing patient ID, we try to load THAT draft.
-            // If new patient (no ID), we check if we generated a temp ID already.
 
             if (idToUse) {
                 currentDraftId.current = idToUse;
@@ -195,13 +221,11 @@ export const usePatientForm = ({
                     // Merge draft data into state
                     if (draft.patientData) setPatientData(prev => ({ ...prev, ...draft.patientData }));
                     if (draft.clinicalParameters) {
-                        // Restore Date object with improved error handling
                         try {
                             const params = { ...draft.clinicalParameters };
                             if (typeof params.date === 'string') {
                                 params.date = new Date(params.date);
                             }
-                            // Fallback to current date if invalid
                             if (!params.date || isNaN(params.date.getTime())) {
                                 console.warn("Invalid date in draft, using current date");
                                 params.date = new Date();
@@ -209,7 +233,6 @@ export const usePatientForm = ({
                             setClinicalParameters(params);
                         } catch (e) {
                             console.error("Error restoring clinicalParameters date from draft", e);
-                            // Set default parameters with current date on error
                             setClinicalParameters({ ...draft.clinicalParameters, date: new Date() });
                         }
                     }
@@ -217,6 +240,70 @@ export const usePatientForm = ({
                     if (draft.reportData) setReportData(draft.reportData);
                     if (draft.reportFiles) setReportFiles(draft.reportFiles);
                     if (draft.savedSections) setSavedSections(draft.savedSections);
+                } else if (prefillMode && patientId) {
+                    // No draft found. Fetch the full patient record from the server to fill sparse props.
+                    console.log(`[usePatientForm] No draft found. Fetching full patient record for ${patientId}...`);
+                    try {
+                        const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", Accept: "application/json", "Cache-Control": "no-cache" },
+                            body: JSON.stringify({ action: "getPatient", patientId: patientId }),
+                        });
+                        const result = await response.json();
+                        const data = result.body ? (typeof result.body === "string" ? JSON.parse(result.body) : result.body) : result;
+
+                        if (data.success && data.patient) {
+                            console.log("[usePatientForm] Successfully fetched full patient record.");
+                            const sp = data.patient;
+                            
+                            // Merge fetched data into state
+                            setPatientData(prev => ({
+                                ...prev,
+                                medicalHistory: sp.medicalHistory || prev.medicalHistory,
+                                diagnosis: sp.diagnosis || prev.diagnosis,
+                                prescription: sp.prescription || prev.prescription,
+                                treatment: sp.treatment || prev.treatment,
+                                reports: sp.reports || prev.reports,
+                                advisedInvestigations: sp.advisedInvestigations || prev.advisedInvestigations,
+                                existingData: sp.existingData || prev.existingData,
+                            }));
+
+                            // Hydrate clinical parameters
+                            if (sp.clinicalParameters) {
+                                let cParams = sp.clinicalParameters.M 
+                                    ? unmarshallDynamoDBObject(sp.clinicalParameters) 
+                                    : sp.clinicalParameters;
+                                
+                                if (typeof cParams.date === "string") cParams.date = new Date(cParams.date);
+                                if (!cParams.date || isNaN(cParams.date.getTime())) cParams.date = new Date();
+                                setClinicalParameters(cParams);
+                            }
+
+                            // Hydrate medications
+                            if (sp.medications && Array.isArray(sp.medications)) {
+                                setMedications(sp.medications);
+                            }
+
+                            // Hydrate report files
+                            if (sp.reportFiles && Array.isArray(sp.reportFiles)) {
+                                const mappedFiles = sp.reportFiles.map((file: any) => ({
+                                    uri: file.url || file.signedUrl || "",
+                                    name: file.name || file.fileName || "",
+                                    type: file.type || file.fileType || "application/pdf",
+                                    category: file.category || "",
+                                    s3Key: file.s3Key || file.key || null,
+                                    uploadedToS3: file.uploadedToS3 || !!file.s3Key || !!file.key,
+                                    uploadDate: file.uploadDate || file.uploadedAt || null,
+                                    fileId: file.s3Key || file.key || `pending_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                                }));
+                                setReportFiles(deduplicateFiles(mappedFiles));
+                            }
+                        } else {
+                            console.warn("[usePatientForm] API returned success=false or no patient data", data);
+                        }
+                    } catch (error) {
+                        console.error("[usePatientForm] Error fetching patient record:", error);
+                    }
                 } else {
                     console.log(`[usePatientForm] No draft found for ${idToUse}`);
                 }
@@ -228,9 +315,9 @@ export const usePatientForm = ({
         };
 
         if (!isLoaded.current) {
-            initializeDraft();
+            initializeData();
         }
-    }, [patient?.patientId, permanentPatientId]);
+    }, [patient?.patientId, permanentPatientId, prefillMode, patientId]);
 
 
     // Auto-Save Effect

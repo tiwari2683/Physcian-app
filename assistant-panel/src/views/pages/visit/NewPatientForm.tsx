@@ -13,16 +13,16 @@ import { autoSaveDraftToCloud } from '../../../controllers/apiThunks';
 import { BasicTab } from './BasicTab';
 import { ClinicalTab } from './ClinicalTab';
 import { DiagnosisTab } from './DiagnosisTab';
-import { PrescriptionTab } from './PrescriptionTab';
-import { FormFooter } from './FormFooter';
+import { OverviewTab } from './OverviewTab';
 import { DraftService } from '../../../services/draftService';
-import { Stethoscope, ClipboardList, Activity, FileText } from 'lucide-react';
+import { HistoryDrawer } from './components/HistoryDrawer';
+import { Stethoscope, ClipboardList, Activity, FileText, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
 
 const TABS = [
     { id: 0, label: 'Basic', icon: Stethoscope },
     { id: 1, label: 'Clinical', icon: Activity },
     { id: 2, label: 'Diagnosis', icon: ClipboardList },
-    { id: 3, label: 'Prescription', icon: FileText },
+    { id: 3, label: 'Overview', icon: FileText },
 ];
 
 /** Only local draft IDs (draft_xxx or checkin_xxx) should be autosaved locally. */
@@ -32,11 +32,48 @@ const isLocalDraftId = (id: string | null | undefined): boolean => {
 };
 
 export const NewPatientForm: React.FC = () => {
-    const { id } = useParams<{ id: string }>();
+    const { patientId: id } = useParams<{ patientId: string }>();
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
     const patientVisitState = useAppSelector((state) => state.patientVisit);
-    const { activeTab, isVisitLocked, patientId, draftId, cloudPatientId, basic } = patientVisitState;
+    const { activeTab, isVisitLocked, patientId, draftId, cloudPatientId, basic, saveStatus, isHistoryDrawerOpen, isSubmitting } = patientVisitState;
+
+    // Helper for Save Status UI
+    const getSaveStatusDisplay = () => {
+        if (isVisitLocked) return null;
+
+        switch (saveStatus) {
+            case 'saving':
+                return (
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-[#6B7280]">
+                        <Clock size={16} className="animate-spin text-[#9CA3AF]" />
+                        <span>Saving...</span>
+                    </div>
+                );
+            case 'saved':
+                return (
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-[#10B981] bg-[#ECFDF5] px-2.5 py-1 rounded-full border border-[#D1FAE5]">
+                        <CheckCircle2 size={16} />
+                        <span>Saved ✓</span>
+                    </div>
+                );
+            case 'error':
+                return (
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-[#EF4444] bg-[#FEF2F2] px-2 py-1 rounded-full border border-[#FEE2E2]">
+                        <AlertCircle size={16} />
+                        <span>Cloud save failed</span>
+                    </div>
+                );
+            default:
+                // Idle state — imply local save is ready
+                return (
+                    <div className="flex items-center gap-1.5 text-sm font-medium text-[#9CA3AF]">
+                        <CheckCircle2 size={16} />
+                        <span>Draft ready</span>
+                    </div>
+                );
+        }
+    };
 
     // Guard flag: prevents both autosave effects from firing during hydration
     const isInitialized = useRef(false);
@@ -115,7 +152,7 @@ export const NewPatientForm: React.FC = () => {
             // This code runs ONLY on unmount (navigation away)
             const snapshot = patientVisitStateRef.current;
             const currentId = snapshot.draftId || snapshot.patientId;
-            if (!currentId || !isLocalDraftId(currentId) || snapshot.isVisitLocked) return;
+            if (!currentId || !isLocalDraftId(currentId) || snapshot.isVisitLocked || snapshot.isSubmitting) return;
 
             console.log('[Form] Flush-save on unmount for:', currentId);
             DraftService.saveDraft(currentId, {
@@ -146,6 +183,7 @@ export const NewPatientForm: React.FC = () => {
         const currentId = draftId || patientId;
         if (!isLocalDraftId(currentId)) return;
         if (isVisitLocked) return;
+        if (isSubmitting) return;
 
         if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current);
 
@@ -168,7 +206,7 @@ export const NewPatientForm: React.FC = () => {
         }, 2000);
 
         return () => { if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current); };
-    }, [patientVisitState, isVisitLocked, patientId, draftId]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [patientVisitState, isVisitLocked, patientId, draftId, isSubmitting]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
     // =========================================================================
@@ -184,6 +222,7 @@ export const NewPatientForm: React.FC = () => {
         if (!isLocalDraftId(currentId)) return;
         if (isVisitLocked) return;
         if (!basic.fullName) return; // Don't cloud-save empty drafts
+        if (isSubmitting) return;
 
         if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
 
@@ -208,74 +247,91 @@ export const NewPatientForm: React.FC = () => {
             } else {
                 dispatch(setSaveStatus('error'));
             }
-        }, 8000);
+        }, 3000);
 
         return () => { if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current); };
-    }, [patientVisitState, isVisitLocked, patientId, draftId]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [patientVisitState, isVisitLocked, patientId, draftId, isSubmitting]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
     return (
-        <div className="max-w-6xl mx-auto px-4 py-8 pb-32">
-            <div className="flex justify-between items-center mb-8">
-                <div>
-                    <h1 className="text-3xl font-bold text-type-heading">Patient Visit</h1>
-                    <p className="text-type-body">Record clinical details and manage health records</p>
-                </div>
-                {isVisitLocked && (
-                    <div className="bg-status-warning/10 text-status-warning px-4 py-2 rounded-full border border-status-warning font-semibold">
-                        Visit Locked (Read-Only)
+        <div className="flex w-full h-screen overflow-hidden bg-appBg">
+            {/* Main Content Area */}
+            <div className={`flex-1 overflow-y-auto transition-all duration-300 ease-in-out ${isHistoryDrawerOpen ? 'mr-0 md:mr-0 lg:pr-[448px]' : 'mr-0'}`}>
+                <div className="max-w-6xl mx-auto px-4 py-8">
+                    {/* Header */}
+                    <div className="flex justify-between items-center mb-8">
+                        <div>
+                            <h1 className="text-3xl font-bold text-type-heading">
+                                {activeTab === 3 ? 'Final Overview' : 'Patient Visit'}
+                            </h1>
+                            <p className="text-type-body">Record clinical details and manage health records</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            {getSaveStatusDisplay()}
+
+                            {isVisitLocked && (
+                                <div className="bg-status-warning/10 text-status-warning px-4 py-2 rounded-full border border-status-warning font-semibold">
+                                    Visit Locked (Read-Only)
+                                </div>
+                            )}
+                        </div>
                     </div>
-                )}
+
+                    {/* Tabs Header */}
+                    <div className="flex border-b border-borderColor mb-6 overflow-x-auto">
+                        {TABS.map((tab) => {
+                            const Icon = tab.icon;
+                            const isActive = activeTab === tab.id;
+                            return (
+                                <button
+                                    key={tab.id}
+                                    onClick={() => dispatch(setActiveTab(tab.id))}
+                                    className={`tab-button flex items-center gap-2 whitespace-nowrap ${isActive ? 'tab-button-active' : 'tab-button-inactive'}`}
+                                >
+                                    <Icon size={18} />
+                                    {tab.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+
+                    {/* Tab Content */}
+                    <div className="transition-all duration-300">
+                        {activeTab === 0 && <BasicTab />}
+                        {activeTab === 1 && <ClinicalTab />}
+                        {activeTab === 2 && <DiagnosisTab />}
+                        {activeTab === 3 && <OverviewTab />}
+                    </div>
+
+                    {/* Navigation Buttons */}
+                    <div className="mt-8 flex justify-end gap-4">
+                        {activeTab > 0 && (
+                            <button
+                                onClick={() => dispatch(setActiveTab(activeTab - 1))}
+                                className="btn-secondary"
+                            >
+                                Previous
+                            </button>
+                        )}
+                        {activeTab < 3 && (
+                            <button
+                                onClick={() => {
+                                    if (activeTab === 0 && basic.fullName && !isVisitLocked && !isSubmitting) {
+                                        dispatch(autoSaveDraftToCloud());
+                                    }
+                                    dispatch(setActiveTab(activeTab + 1));
+                                }}
+                                className="btn-primary"
+                            >
+                                Next Step
+                            </button>
+                        )}
+                    </div>
+                </div>
             </div>
 
-            {/* Tabs Header */}
-            <div className="flex border-b border-borderColor mb-6 overflow-x-auto">
-                {TABS.map((tab) => {
-                    const Icon = tab.icon;
-                    const isActive = activeTab === tab.id;
-                    return (
-                        <button
-                            key={tab.id}
-                            onClick={() => dispatch(setActiveTab(tab.id))}
-                            className={`tab-button flex items-center gap-2 whitespace-nowrap ${isActive ? 'tab-button-active' : 'tab-button-inactive'}`}
-                        >
-                            <Icon size={18} />
-                            {tab.label}
-                        </button>
-                    );
-                })}
-            </div>
-
-            {/* Tab Content */}
-            <div className="transition-all duration-300">
-                {activeTab === 0 && <BasicTab />}
-                {activeTab === 1 && <ClinicalTab />}
-                {activeTab === 2 && <DiagnosisTab />}
-                {activeTab === 3 && <PrescriptionTab />}
-            </div>
-
-            {/* Navigation Buttons */}
-            <div className="mt-8 flex justify-end gap-4">
-                {activeTab > 0 && (
-                    <button
-                        onClick={() => dispatch(setActiveTab(activeTab - 1))}
-                        className="btn-secondary"
-                    >
-                        Previous
-                    </button>
-                )}
-                {activeTab < 3 && (
-                    <button
-                        onClick={() => dispatch(setActiveTab(activeTab + 1))}
-                        className="btn-primary"
-                    >
-                        Next Step
-                    </button>
-                )}
-            </div>
-
-            {/* Sticky Form Footer with live save indicator */}
-            <FormFooter />
+            {/* History Drawer */}
+            {isHistoryDrawerOpen && <HistoryDrawer />}
         </div>
     );
 };

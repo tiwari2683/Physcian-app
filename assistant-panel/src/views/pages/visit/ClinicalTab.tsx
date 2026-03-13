@@ -1,13 +1,188 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks';
-import { updateClinicalDetails } from '../../../controllers/slices/patientVisitSlice';
-import { UploadService } from '../../../services/uploadService';
-import { Card, Input, Button } from '../../components/UI';
-import { Camera, FileUp, History as HistoryIcon, Table } from 'lucide-react';
+import { updateClinicalDetails, toggleHistoryDrawer } from '../../../controllers/slices/patientVisitSlice';
+import { Card, Button, Input } from '../../components/UI';
+import { usePendingFiles } from '../../../contexts/PendingFilesContext';
+import { AWS_CONFIG } from '../../../config';
+import { Camera, FileUp, FileText, History as HistoryIcon, Table, X, MoreHorizontal } from 'lucide-react';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Vitals field schema — single source of truth for both Grid and Compare views
+// ─────────────────────────────────────────────────────────────────────────────
+const vitalsFields = [
+    { name: 'inr', label: 'INR', unit: '' },
+    { name: 'hb', label: 'Hb', unit: 'g/dL' },
+    { name: 'wbc', label: 'WBC', unit: '×10³' },
+    { name: 'platelet', label: 'Platelet', unit: '×10³' },
+    { name: 'bilirubin', label: 'Bilirubin', unit: 'mg/dL' },
+    { name: 'sgot', label: 'SGOT', unit: 'U/L' },
+    { name: 'sgpt', label: 'SGPT', unit: 'U/L' },
+    { name: 'alt', label: 'ALT', unit: 'U/L' },
+    { name: 'tprAlb', label: 'TPR/Alb', unit: '' },
+    { name: 'ureaCreat', label: 'Urea/Creat', unit: 'mg/dL' },
+    { name: 'sodium', label: 'Sodium', unit: 'mEq/L' },
+    { name: 'fastingHbA1c', label: 'Fasting/HbA1c', unit: '%' },
+    { name: 'pp', label: 'PP', unit: 'mg/dL' },
+    { name: 'tsh', label: 'TSH', unit: 'mIU/L' },
+    { name: 'ft4', label: 'FT4', unit: 'ng/dL' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CompareTable — sticky first column, read-only history, editable Today
+// ─────────────────────────────────────────────────────────────────────────────
+interface CompareTableProps {
+    vitals: Record<string, string | undefined>;
+    history: Array<{ timestamp: string; data: any }>;
+    onVitalsChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    isLocked: boolean;
+}
+
+const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsChange, isLocked }) => {
+    // Filter history items that actually have vitals data, newest-first → show max 4 past visits
+    const historicalColumns = [...history]
+        .filter(h => h.data?.vitals && Object.keys(h.data.vitals).length > 0)
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .slice(0, 4)
+        .reverse(); // show oldest → newest (left → right), Today is rightmost
+
+    const formatDate = (iso: string) => {
+        try {
+            const d = new Date(iso);
+            return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+        } catch {
+            return iso;
+        }
+    };
+
+    const todayLabel = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+
+    return (
+        <div className="overflow-x-auto rounded-lg border border-[#E5E7EB] shadow-sm">
+            <table className="min-w-full border-collapse text-sm">
+                {/* ── THEAD ──────────────────────────────────────────────── */}
+                <thead>
+                    <tr className="bg-[#F9FAFB]">
+                        {/* Sticky header: Parameter column */}
+                        <th
+                            className="sticky left-0 z-20 bg-[#F9FAFB] text-left px-4 py-3 font-bold text-[#374151] border-b border-r border-[#E5E7EB] min-w-[140px] whitespace-nowrap"
+                        >
+                            Parameter
+                        </th>
+
+                        {/* Historical date headers (read-only) */}
+                        {historicalColumns.map((col, i) => (
+                            <th
+                                key={i}
+                                className="text-center px-4 py-3 font-semibold text-[#6B7280] border-b border-r border-[#E5E7EB] min-w-[100px] whitespace-nowrap"
+                            >
+                                {formatDate(col.timestamp)}
+                            </th>
+                        ))}
+
+                        {/* Today column header */}
+                        <th
+                            className="text-center px-4 py-3 font-bold text-white bg-[#2563EB] border-b border-[#1D4ED8] min-w-[120px] whitespace-nowrap"
+                        >
+                            Today
+                            <span className="block text-xs font-normal opacity-75">{todayLabel}</span>
+                        </th>
+                    </tr>
+                </thead>
+
+                {/* ── TBODY ──────────────────────────────────────────────── */}
+                <tbody>
+                    {vitalsFields.map((field, rowIdx) => {
+                        const isEven = rowIdx % 2 === 0;
+                        const rowBg = isEven ? 'bg-white' : 'bg-[#F9FAFB]';
+
+                        return (
+                            <tr key={field.name} className={`${rowBg} hover:bg-[#EFF6FF] transition-colors group`}>
+                                {/* ── Sticky Parameter Name Cell ─────────── */}
+                                <td
+                                    className={`sticky left-0 z-10 ${rowBg} group-hover:bg-[#EFF6FF] transition-colors px-4 py-2.5 font-semibold text-[#374151] border-r border-[#E5E7EB] whitespace-nowrap`}
+                                >
+                                    <span>{field.label}</span>
+                                    {field.unit && (
+                                        <span className="ml-1 text-xs text-[#9CA3AF] font-normal">({field.unit})</span>
+                                    )}
+                                </td>
+
+                                {/* ── Read-Only Historical Cells ─────────── */}
+                                {historicalColumns.map((col, i) => {
+                                    const val = col.data?.vitals?.[field.name];
+                                    return (
+                                        <td
+                                            key={i}
+                                            className="text-center px-4 py-2.5 text-[#374151] border-r border-[#E5E7EB]"
+                                        >
+                                            {val !== undefined && val !== '' && val !== null
+                                                ? <span className="font-medium">{val}</span>
+                                                : <span className="text-[#D1D5DB]">—</span>
+                                            }
+                                        </td>
+                                    );
+                                })}
+
+                                {/* ── Editable Today Cell — bound to Redux ─ */}
+                                <td className="px-3 py-1.5 bg-[#EFF6FF]">
+                                    <input
+                                        type="number"
+                                        name={field.name}
+                                        value={vitals[field.name] || ''}
+                                        onChange={onVitalsChange}
+                                        disabled={isLocked}
+                                        step="0.01"
+                                        placeholder="—"
+                                        className="w-full text-center bg-white border border-[#93C5FD] rounded-md px-2 py-1.5 text-sm font-semibold text-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200"
+                                    />
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+
+            {/* Empty history notice */}
+            {historicalColumns.length === 0 && (
+                <div className="text-center py-4 text-sm text-[#9CA3AF] bg-[#F9FAFB] border-t border-[#E5E7EB]">
+                    No previous visit data available for comparison. Fill in "Today" values to build history.
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main ClinicalTab component
+// ─────────────────────────────────────────────────────────────────────────────
 export const ClinicalTab: React.FC = () => {
     const dispatch = useAppDispatch();
-    const { clinical, patientId, isVisitLocked } = useAppSelector((state) => state.patientVisit);
+    const { basic, clinical, clinicalHistory, patientId, cloudPatientId, isVisitLocked } = useAppSelector((state) => state.patientVisit);
+    const { addPendingFile } = usePendingFiles();
+
+    // ── ID RESOLUTION STRATEGY ──────────────────────────────────────────────
+    // For existing patients, patientId is a UUID.
+    // For new patients, patientId is a local ID (checkin_...).
+    // cloudPatientId is set once the Layer 3 autosave syncs the draft to DynamoDB.
+    // The backend handshake REQUIRES a persistent ID (UUID) or null (to create).
+    // ──────────────────────────────────────────────────────────────────────────
+    const isLocalId = (id: string | null) => id?.startsWith('draft_') || id?.startsWith('checkin_');
+    const effectiveId = (!isLocalId(patientId) ? patientId : cloudPatientId) || null;
+    const canUpload = !!basic.fullName;
+
+    const [isCompareMode, setIsCompareMode] = useState(false);
+
+    const handleViewReport = (report: any) => {
+        if (report.fileUrl) {
+            window.open(report.fileUrl, '_blank');
+        } else if (report.signedUrl || report.url) {
+            window.open(report.signedUrl || report.url, '_blank');
+        } else if (report.s3Key) {
+            const url = `${AWS_CONFIG.S3_URL_PREFIX}${report.s3Key}`;
+            window.open(url, '_blank');
+        }
+    };
 
     const handleVitalsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
@@ -18,7 +193,6 @@ export const ClinicalTab: React.FC = () => {
 
     const handleHistoryChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         let value = e.target.value;
-        // Auto-bullet logic: if line doesn't start with • and isn't empty, prepend it
         const lines = value.split('\n');
         const bulletedLines = lines.map(line => {
             if (line.trim() && !line.trim().startsWith('•')) {
@@ -26,54 +200,57 @@ export const ClinicalTab: React.FC = () => {
             }
             return line;
         });
-
         dispatch(updateClinicalDetails({ historyText: bulletedLines.join('\n') }));
+    };
+
+    const handleReportNotesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+        dispatch(updateClinicalDetails({ reportNotes: e.target.value }));
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file || !patientId) return;
+        if (!file) return;
 
         try {
-            const result = await UploadService.performCompleteUpload(patientId, file, 'Report');
+            const fileId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(7);
+            const localUrl = URL.createObjectURL(file);
+            
+            // Stage physical file in Context
+            addPendingFile(fileId, file);
+
+            // Stage serializable metadata in Redux
             dispatch(updateClinicalDetails({
                 reports: [...clinical.reports, {
-                    ...result,
+                    fileId: fileId,
+                    fileName: file.name,
+                    fileType: file.type,
                     fileSize: file.size,
+                    fileUrl: localUrl,
+                    isPending: true,
                     category: 'Report',
                     timestamp: new Date().toISOString()
                 }]
             }));
-            alert('File uploaded successfully!');
-        } catch (error) {
-            alert('Upload failed. Please check CORS or AWS credentials.');
+            
+            // Reset the input so the same file can be selected again if needed
+            e.target.value = '';
+        } catch (error: any) {
+            console.error('Failed to stage file:', error);
+            alert('Failed to stage file.');
         }
     };
 
-    const vitalsFields = [
-        { name: 'inr', label: 'INR' },
-        { name: 'hb', label: 'Hb' },
-        { name: 'wbc', label: 'WBC' },
-        { name: 'platelet', label: 'Platelet' },
-        { name: 'bilirubin', label: 'Bilirubin' },
-        { name: 'sgot', label: 'SGOT' },
-        { name: 'sgpt', label: 'SGPT' },
-        { name: 'alt', label: 'ALT' },
-        { name: 'tprAlb', label: 'TPR/Alb' },
-        { name: 'ureaCreat', label: 'Urea/Creat' },
-        { name: 'sodium', label: 'Sodium' },
-        { name: 'fastingHbA1c', label: 'Fasting/HbA1c' },
-        { name: 'pp', label: 'PP' },
-        { name: 'tsh', label: 'TSH' },
-        { name: 'ft4', label: 'FT4' },
-    ];
-
     return (
         <div className="space-y-6">
+            {/* ── History & Symptoms ──────────────────────────────────────── */}
             <Card title="History & Symptoms">
                 <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-semibold text-type-heading">Complaints (Auto-Bulleted)</label>
-                    <Button variant="secondary" className="text-xs py-1 h-auto flex gap-1">
+                    <Button
+                        variant="secondary"
+                        className="text-xs py-1 h-auto flex gap-1"
+                        onClick={() => dispatch(toggleHistoryDrawer({ open: true, type: 'clinical' }))}
+                    >
                         <HistoryIcon size={14} /> View History
                     </Button>
                 </div>
@@ -86,30 +263,76 @@ export const ClinicalTab: React.FC = () => {
                 />
             </Card>
 
+            {/* ── Clinical Vitals ─────────────────────────────────────────── */}
             <Card title="Clinical Vitals">
+                {/* Header row: description + toggle button */}
                 <div className="flex justify-between items-center mb-4">
-                    <p className="text-sm text-type-body">Enter vital parameters from reports</p>
-                    <Button variant="secondary" className="text-xs py-1 h-auto flex gap-1">
-                        <Table size={14} /> Compare Table
-                    </Button>
+                    <p className="text-sm text-type-body">
+                        {isCompareMode
+                            ? 'Longitudinal comparison — scroll horizontally for past visits'
+                            : 'Enter vital parameters from reports'}
+                    </p>
+                    <button
+                        onClick={() => setIsCompareMode(prev => !prev)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${isCompareMode
+                            ? 'bg-[#2563EB] text-white border-[#1D4ED8] shadow-sm'
+                            : 'bg-white text-[#2563EB] border-[#2563EB] hover:bg-[#EFF6FF]'
+                            }`}
+                    >
+                        {isCompareMode
+                            ? <><X size={13} /> Close Compare</>
+                            : <><Table size={13} /> Compare Table</>
+                        }
+                    </button>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
-                    {vitalsFields.map((field) => (
-                        <Input
-                            key={field.name}
-                            label={field.label}
-                            name={field.name}
-                            value={clinical.vitals[field.name] || ''}
-                            onChange={handleVitalsChange}
+
+                {isCompareMode ? (
+                    /* ── Compare Table View ─────────────────────────────── */
+                    <CompareTable
+                        vitals={clinical.vitals}
+                        history={clinicalHistory}
+                        onVitalsChange={handleVitalsChange}
+                        isLocked={isVisitLocked}
+                    />
+                ) : (
+                    /* ── Standard Grid View ─────────────────────────────── */
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+                        {vitalsFields.map((field) => (
+                            <Input
+                                key={field.name}
+                                label={field.label}
+                                name={field.name}
+                                value={clinical.vitals[field.name] || ''}
+                                onChange={handleVitalsChange}
+                                disabled={isVisitLocked}
+                                type="number"
+                                step="0.01"
+                                placeholder="0.00"
+                            />
+                        ))}
+                    </div>
+                )}
+
+                {!isCompareMode && (
+                    <div className="mt-6">
+                        <label className="text-sm font-semibold text-type-heading mb-1 block flex items-center gap-2">
+                            <MoreHorizontal size={16} className="text-primary-base" />
+                            Other Vital Parameters
+                        </label>
+                        <textarea
+                            value={clinical.vitals.others || ''}
+                            onChange={(e) => dispatch(updateClinicalDetails({
+                                vitals: { ...clinical.vitals, others: e.target.value }
+                            }))}
                             disabled={isVisitLocked}
-                            type="number"
-                            step="0.01"
-                            placeholder="0.00"
+                            className="input-field min-h-[100px] text-sm"
+                            placeholder="Enter any other specific vital observations..."
                         />
-                    ))}
-                </div>
+                    </div>
+                )}
             </Card>
 
+            {/* ── Reports & Documents ─────────────────────────────────────── */}
             <Card title="Reports & Documents">
                 <div className="flex flex-col items-center justify-center border-2 border-dashed border-borderColor rounded-lg p-8 bg-gray-50">
                     <FileUp size={48} className="text-type-body mb-4" />
@@ -120,17 +343,29 @@ export const ClinicalTab: React.FC = () => {
                         id="report-upload"
                         className="hidden"
                         onChange={handleFileUpload}
-                        disabled={isVisitLocked || !patientId}
+                        disabled={isVisitLocked || !canUpload}
                     />
                     <Button
                         variant="primary"
                         onClick={() => document.getElementById('report-upload')?.click()}
-                        disabled={isVisitLocked || !patientId}
+                        disabled={isVisitLocked || !canUpload}
                         className="flex gap-2"
                     >
                         <Camera size={18} /> Select Files
                     </Button>
-                    {!patientId && <p className="mt-2 text-xs text-status-error font-medium">Please fill Basic info first to enable uploads</p>}
+                    {!canUpload && <p className="mt-2 text-xs text-status-error font-medium">Please fill Basic info first to enable uploads</p>}
+                    {canUpload && !effectiveId && <p className="mt-2 text-xs text-blue-500 font-medium italic">Syncing with cloud... uploads will be processed on finalize</p>}
+                </div>
+
+                <div className="mt-4">
+                    <label className="text-sm font-semibold text-type-heading mb-1 block">Report Details / Notes</label>
+                    <textarea
+                        value={clinical.reportNotes || ''}
+                        onChange={handleReportNotesChange}
+                        disabled={isVisitLocked}
+                        className="input-field min-h-[120px] text-sm"
+                        placeholder="Add findings, summaries, or specific observations about the uploaded reports..."
+                    />
                 </div>
 
                 {clinical.reports.length > 0 && (
@@ -144,11 +379,17 @@ export const ClinicalTab: React.FC = () => {
                                             <FileText size={16} />
                                         </div>
                                         <div>
-                                            <p className="text-sm font-medium text-type-heading">{report.fileName}</p>
+                                            <p className="text-sm font-medium text-type-heading truncate max-w-[200px]">{report.fileName}</p>
                                             <p className="text-xs text-type-body">{(report.fileSize / 1024).toFixed(1)} KB • {report.category}</p>
                                         </div>
                                     </div>
-                                    <Button variant="secondary" className="text-xs py-1 h-auto">View</Button>
+                                    <Button 
+                                        variant="secondary" 
+                                        className="text-xs py-1 h-auto"
+                                        onClick={() => handleViewReport(report)}
+                                    >
+                                        View
+                                    </Button>
                                 </div>
                             ))}
                         </div>
@@ -158,6 +399,3 @@ export const ClinicalTab: React.FC = () => {
         </div>
     );
 };
-
-// Re-importing FileText since it was used but not imported
-import { FileText } from 'lucide-react';

@@ -1485,33 +1485,21 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
   }, []);
 
   // Optimized diagnosis change handler that doesn't check AsyncStorage on every keystroke
-  const handleDiagnosisChange = (text: string) => {
-    // Update local state immediately for smooth typing
-    setLocalDiagnosis(text);
-
-    // Clear any pending timeouts
-    if (blockCheckTimeoutRef.current) {
-      clearTimeout(blockCheckTimeoutRef.current);
+  // Synchronize local diagnosis with parent data
+  useEffect(() => {
+    if (patientData.diagnosis && !diagnosisEdited) {
+      setLocalDiagnosis(patientData.diagnosis);
     }
+  }, [patientData.diagnosis, diagnosisEdited]);
 
-    // Use timeout to debounce the actual update to parent
-    blockCheckTimeoutRef.current = setTimeout(() => {
-      if (blockDiagnosisRefetch) {
-        logWarning("BLOCKED diagnosis field update due to refetch blocking");
-        setLocalDiagnosis("");
-        updateField("diagnosis", "");
-        return;
-      }
-
-      // Update parent state with debounced value
-      updateField("diagnosis", text);
-
-      // Update tracking flags only once when needed
-      if (!diagnosisEdited && text) {
-        setDiagnosisEdited(true);
-        setCurrentDiagnosisDate(new Date());
-      }
-    }, 300); // 300ms debounce
+  // Optimized diagnosis change handler
+  const handleDiagnosisChange = (text: string) => {
+    setLocalDiagnosis(text);
+    if (!diagnosisEdited && text) {
+      setDiagnosisEdited(true);
+      setCurrentDiagnosisDate(new Date());
+    }
+    updateField("diagnosis", text);
   };
 
   // Update component unmount cleanup
@@ -1523,7 +1511,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
     };
   }, []);
 
-  // Log when patientData changes, especially advisedInvestigations
+  // Log when patientData changes
   useEffect(() => {
     log("Patient data changed:");
     log(
@@ -1532,23 +1520,11 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
         ? `${patientData.advisedInvestigations.length} chars`
         : "empty"
     );
-
-    // NEW CODE: Add diagnosis data monitoring
     log(
       "- diagnosis: ",
       patientData.diagnosis ? `${patientData.diagnosis.length} chars` : "empty"
     );
-
-    // If diagnosis is being refetched when it should be blocked, clear it again
-    if (blockDiagnosisRefetch && patientData.diagnosis) {
-      logWarning("🚨 BLOCKING DIAGNOSIS REFETCH - clearing field again");
-      // Set a small timeout to ensure this happens after the state update
-      setTimeout(() => {
-        updateField("diagnosis", "");
-        log("Forced diagnosis clear due to blockDiagnosisRefetch flag");
-      }, 100);
-    }
-  }, [patientData, blockDiagnosisRefetch]);
+  }, [patientData]);
 
   // Add effect to ensure refetch blocking is checked at component load
   // Add effect to ensure refetch blocking AND ensure diagnosis field starts empty
@@ -2763,76 +2739,8 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
     checkDiagnosisClearedTimestamp();
   }, []);
 
-  // Add listener to check AsyncStorage for diagnosis clear flag
-  useEffect(() => {
-    // Function to check if diagnosis should be cleared
-    const checkForDiagnosisClearFlag = async () => {
-      try {
-        const shouldClear = await AsyncStorage.getItem("clearDiagnosisFlag");
-
-        if (shouldClear === "true") {
-          log("🚩 Detected clearDiagnosisFlag = true in AsyncStorage");
-
-          // Clear the diagnosis field
-          if (patientData.diagnosis) {
-            log("🧹 Clearing diagnosis field based on AsyncStorage flag");
-
-            // Store current diagnosis in history before clearing
-            const timestamp = new Date().toISOString();
-
-            // Create a new history item
-            const newHistoryItem = {
-              diagnosis: patientData.diagnosis,
-              date: timestamp,
-              formattedDate: formatDate(timestamp),
-              formattedTime: formatTime(timestamp),
-            };
-
-            // Add to history first
-            setDiagnosisHistory((prevHistory) => [
-              newHistoryItem,
-              ...prevHistory,
-            ]);
-
-            // Set the block refetch flag
-            setBlockDiagnosisRefetch(true);
-
-            // Clear the field IMMEDIATELY (no setTimeout)
-            updateField("diagnosis", "");
-            log("✅ Diagnosis field cleared via AsyncStorage flag mechanism");
-
-            // Reset the diagnosis edited flag
-            setDiagnosisEdited(false);
-
-            // Clear the flag
-            AsyncStorage.removeItem("clearDiagnosisFlag");
-
-            // Reset block flag after delay
-            setTimeout(() => {
-              setBlockDiagnosisRefetch(false);
-            }, 5000);
-          }
-        }
-      } catch (error) {
-        logError("Error checking diagnosis clear flag:", error);
-      }
-    };
-
-    // Check for diagnosis clear flag when component mounts or when active
-    checkForDiagnosisClearFlag();
-
-    // Also listen for AppState changes to detect when app comes to foreground
-    const subscription = AppState.addEventListener("change", (nextAppState) => {
-      if (nextAppState === "active") {
-        log("App came to foreground, checking if diagnosis should be cleared");
-        checkForDiagnosisClearFlag();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
+  // Unified Hydration: Removed AsyncStorage-based auto-clearing logic.
+  // We now rely on the parent usePatientForm to manage state correctly.
 
   // Listen for save completion through route params
   useEffect(() => {
@@ -2867,7 +2775,7 @@ const DiagnosisTab: React.FC<DiagnosisTabProps> = ({
       >
         <View style={styles.inputWrapper}>
           <AutoBulletTextArea
-            value={localDiagnosis || patientData.diagnosis} // Use local state for rendering
+            value={localDiagnosis}
             onChangeText={(text: string) => handleDiagnosisChange(text)}
             placeholder="Enter diagnosis details. Use dash (-) or bullet (•) at the beginning of a line for auto-bulleting."
             numberOfLines={15}

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks';
-import { updateDiagnosisDetails } from '../../../controllers/slices/patientVisitSlice';
+import { updateDiagnosisDetails, toggleHistoryDrawer } from '../../../controllers/slices/patientVisitSlice';
 import { Card, Button } from '../../components/UI';
 import { History as HistoryIcon } from 'lucide-react';
 
@@ -42,7 +42,11 @@ export const DiagnosisTab: React.FC = () => {
             <Card title="Clinical Diagnosis">
                 <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-semibold text-type-heading">Current Diagnosis (Auto-Bulleted)</label>
-                    <Button variant="secondary" className="text-xs py-1 h-auto flex gap-1">
+                    <Button
+                        variant="secondary"
+                        className="text-xs py-1 h-auto flex gap-1"
+                        onClick={() => dispatch(toggleHistoryDrawer({ open: true, type: 'diagnosis' }))}
+                    >
                         <HistoryIcon size={14} /> History
                     </Button>
                 </div>

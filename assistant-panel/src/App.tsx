@@ -11,6 +11,7 @@ import Dashboard from './views/pages/dashboard/Dashboard';
 import AppointmentsList from './views/pages/appointments/AppointmentsList';
 import PatientsDirectory from './views/pages/patients/PatientsDirectory';
 import { NewPatientForm } from './views/pages/visit/NewPatientForm';
+import { PendingFilesProvider } from './contexts/PendingFilesContext';
 import './index.css';
 
 // Require Auth Wrapper
@@ -92,7 +93,9 @@ const AppRouter = () => {
 function App() {
   return (
     <Provider store={store}>
-      <AppRouter />
+      <PendingFilesProvider>
+        <AppRouter />
+      </PendingFilesProvider>
     </Provider>
   );
 }

@@ -3628,9 +3628,15 @@ const styles = StyleSheet.create({
   inputWrapper: { marginBottom: 16 },
   inputLabel: {
     fontSize: 14,
-    fontWeight: "500",
-    color: "#4A5568",
-    marginBottom: 6,
+    fontWeight: "600",
+    color: "#2D3748",
+    marginBottom: 8,
+  },
+  inputHelpText: {
+    fontSize: 12,
+    color: "#718096",
+    marginTop: 4,
+    fontStyle: "italic",
   },
   textInput: {
     backgroundColor: "#F9FAFB",

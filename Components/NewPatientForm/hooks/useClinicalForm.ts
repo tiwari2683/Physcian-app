@@ -163,108 +163,11 @@ export const useClinicalForm = (props: any) => {
         }
     }, [setClinicalParameters, setTempDate]);
 
-    // Fetch current patient data
+    // Unified Hydration: Individual fetch logic removed. 
+    // Data is now fetched by the parent usePatientForm hook on mount.
     const fetchCurrentPatientData = useCallback(async () => {
-        if (!patientId) return;
-
-        setApiError(null);
-        // Using direct URL from original file, but logic suggests it should be from Config or Props
-        // Keeping original URL for consistency with refactoring (no functional changes)
-        const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
-
-        try {
-            // First check for a local draft - PREFER DRAFT OVER SERVER DATA
-            // This prevents "vanishing" data if the user has unsaved changes that are newer than the server
-            const storageKey = `clinical_params_${patientId}`;
-            const storedData = await AsyncStorage.getItem(storageKey);
-
-            if (storedData) {
-                console.log(`📝 Found local clinical draft for ${patientId}, using it instead of server data`);
-                const parsedDraft = JSON.parse(storedData);
-                // Basic validation to ensure we don't restore an empty draft over valid server data
-                const hasData = Object.values(parsedDraft).some(val => val && val.toString().trim() !== "");
-
-                if (hasData) {
-                    updateInputFieldsFromRecord(parsedDraft);
-                    return; // Stop here, don't fetch from server if we have a valid draft
-                }
-            }
-
-            // If no valid draft, proceed to fetch from API
-            const response = await fetch(apiUrl, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    Accept: "application/json",
-                    "Cache-Control": "no-cache",
-                },
-                body: JSON.stringify({
-                    action: "getPatient",
-                    patientId: patientId,
-                }),
-            });
-
-            const responseText = await response.text();
-            let result;
-            try {
-                result = JSON.parse(responseText);
-            } catch (e: any) {
-                setApiError("Failed to parse API response: " + e.message);
-                return;
-            }
-
-            const data = result.body
-                ? typeof result.body === "string"
-                    ? JSON.parse(result.body)
-                    : result.body
-                : result;
-
-            if (data.success && data.patient) {
-                let clinicalParams = null;
-                if (data.patient.clinicalParameters) {
-                    if (data.patient.clinicalParameters.M) {
-                        try {
-                            clinicalParams = unmarshallDynamoDBObject(data.patient.clinicalParameters);
-                        } catch (e: any) {
-                            setApiError("Error processing clinical parameters: " + e.message);
-                        }
-                    } else {
-                        clinicalParams = data.patient.clinicalParameters;
-                    }
-
-                    if (clinicalParams) {
-                        updateInputFieldsFromRecord(clinicalParams);
-                    }
-                }
-            } else {
-                if (data.error) setApiError("API Error: " + data.error);
-                else setApiError("No patient data returned from API");
-            }
-
-        } catch (error: any) {
-            setApiError("Error: " + error.message);
-            // Fallback to local storage (redundant if we checked first, but good for safety)
-            try {
-                const storageKey = `clinical_params_${patientId}`;
-                const storedData = await AsyncStorage.getItem(storageKey);
-                if (storedData) {
-                    updateInputFieldsFromRecord(JSON.parse(storedData));
-                }
-            } catch (e) { }
-        }
-    }, [patientId, updateInputFieldsFromRecord]);
-
-    // NEW: Function to clear the clinical draft after successful save
-    const clearClinicalDraft = async () => {
-        if (patientId) {
-            try {
-                console.log(`🧹 Clearing clinical draft for ${patientId}`);
-                await AsyncStorage.removeItem(`clinical_params_${patientId}`);
-            } catch (error) {
-                console.error("❌ Error clearing clinical draft:", error);
-            }
-        }
-    };
+        console.log("ℹ️ fetchCurrentPatientData: Redundant call. Data is managed by parent hook.");
+    }, []);
 
     // Enhanced function to remove report file from both frontend and backend
     const removeReportFileWithBackend = async (index: number) => {
@@ -459,17 +362,11 @@ export const useClinicalForm = (props: any) => {
     };
 
     const handleParameterUpdate = (field: string, value: any) => {
-        setClinicalParameters((prev: any) => {
-            const updated = {
-                ...prev,
-                [field]: value,
-                date: new Date(),
-            };
-            if (patientId) {
-                AsyncStorage.setItem(`clinical_params_${patientId}`, JSON.stringify(updated)).catch(e => console.error(e));
-            }
-            return updated;
-        });
+        setClinicalParameters((prev: any) => ({
+            ...prev,
+            [field]: value,
+            date: new Date(),
+        }));
     };
 
     // Legacy useEffects for history persistence removed.
@@ -548,6 +445,5 @@ export const useClinicalForm = (props: any) => {
         handleParameterUpdate,
         fetchCurrentPatientData,
         fetchHistoricalData,
-        clearClinicalDraft,
     };
 };

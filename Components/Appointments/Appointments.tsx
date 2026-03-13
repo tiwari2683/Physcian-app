@@ -98,39 +98,78 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
   // DATE-TIME PARSING AND COMPUTED STATUS LOGIC
   // ============================================
 
-  // Parse "Jan 6, 2026" + "3:00 PM" into a Date object
+  // Parse Date/Time handling both Web Panel (2026-03-13 18:43) and Mobile (Jan 6, 2026 3:00 PM) formats
   const parseAppointmentDateTime = (dateStr: string, timeStr: string): Date => {
-    const months: Record<string, number> = {
-      "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5,
-      "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11
-    };
+    if (!dateStr || !timeStr) return new Date(0);
 
-    // Parse date: "Jan 6, 2026"
-    const dateMatch = dateStr?.match(/(\w+)\s+(\d+),\s+(\d+)/);
-    if (!dateMatch) {
-      console.warn(`[Appointments] Failed to parse date: "${dateStr}"`);
-      return new Date(0); // Invalid date fallback (epoch = past)
+    let year = 0, month = 0, day = 0, hours = 0, minutes = 0;
+
+    // Parse date
+    const isoDateMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDateMatch) {
+      year = parseInt(isoDateMatch[1]);
+      month = parseInt(isoDateMatch[2]) - 1;
+      day = parseInt(isoDateMatch[3]);
+    } else {
+      const months: Record<string, number> = {
+        "Jan": 0, "Feb": 1, "Mar": 2, "Apr": 3, "May": 4, "Jun": 5,
+        "Jul": 6, "Aug": 7, "Sep": 8, "Oct": 9, "Nov": 10, "Dec": 11,
+        "January": 0, "February": 1, "March": 2, "April": 3, "August": 7, "September": 8, "October": 9, "November": 10, "December": 11
+      };
+
+      const dateMatch = dateStr.match(/(\w+)\s+(\d+),?\s+(\d+)/);
+      if (!dateMatch) {
+        console.warn(`[Appointments] Failed to parse date: "${dateStr}"`);
+        return new Date(0);
+      }
+      month = months[dateMatch[1]] ?? 0;
+      day = parseInt(dateMatch[2]);
+      year = parseInt(dateMatch[3]);
     }
 
-    const month = months[dateMatch[1]] ?? 0;
-    const day = parseInt(dateMatch[2]);
-    const year = parseInt(dateMatch[3]);
+    // Parse time
+    const ampmTimeMatch = timeStr.match(/(\d+):(\d+)\s*(AM|PM)/i);
+    const isoTimeMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
 
-    // Parse time: "3:00 PM"
-    const timeMatch = timeStr?.match(/(\d+):(\d+)\s*(AM|PM)/i);
-    if (!timeMatch) {
+    if (ampmTimeMatch) {
+      hours = parseInt(ampmTimeMatch[1]);
+      minutes = parseInt(ampmTimeMatch[2]);
+      const ampm = ampmTimeMatch[3].toUpperCase();
+      if (ampm === "PM" && hours !== 12) hours += 12;
+      if (ampm === "AM" && hours === 12) hours = 0;
+    } else if (isoTimeMatch) {
+      hours = parseInt(isoTimeMatch[1]);
+      minutes = parseInt(isoTimeMatch[2]);
+    } else {
       console.warn(`[Appointments] Failed to parse time: "${timeStr}"`);
-      return new Date(year, month, day, 23, 59); // End of day fallback
+      return new Date(year, month, day, 23, 59);
     }
-
-    let hours = parseInt(timeMatch[1]);
-    const minutes = parseInt(timeMatch[2]);
-    const ampm = timeMatch[3].toUpperCase();
-
-    if (ampm === "PM" && hours !== 12) hours += 12;
-    if (ampm === "AM" && hours === 12) hours = 0;
 
     return new Date(year, month, day, hours, minutes);
+  };
+
+  // UI Format Helpers
+  const formatDisplayDate = (dateStr: string) => {
+    const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoMatch) {
+      const d = new Date(parseInt(isoMatch[1]), parseInt(isoMatch[2]) - 1, parseInt(isoMatch[3]));
+      const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+    }
+    return dateStr;
+  };
+
+  const formatDisplayTime = (timeStr: string) => {
+    const isoMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+    if (isoMatch) {
+      let h = parseInt(isoMatch[1]);
+      const m = isoMatch[2];
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      h = h % 12;
+      h = h ? h : 12; // 0 -> 12
+      return `${h}:${m} ${ampm}`;
+    }
+    return timeStr;
   };
 
   // Compute effective status based on date/time + stored status
@@ -333,11 +372,11 @@ const Appointments: React.FC<AppointmentsProps> = ({ navigation }) => {
           <View style={styles.appointmentDetails}>
             <View style={styles.detailChip}>
               <Ionicons name="calendar" size={14} color="#0D9488" />
-              <Text style={styles.detailText}>{appointment.date}</Text>
+              <Text style={styles.detailText}>{formatDisplayDate(appointment.date)}</Text>
             </View>
             <View style={styles.detailChip}>
               <Ionicons name="time" size={14} color="#0891B2" />
-              <Text style={styles.detailText}>{appointment.time}</Text>
+              <Text style={styles.detailText}>{formatDisplayTime(appointment.time)}</Text>
             </View>
           </View>
 

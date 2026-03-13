@@ -22,18 +22,24 @@ export interface ClinicalVitals {
     pp?: string;
     tsh?: string;
     ft4?: string;
+    others?: string;
     [key: string]: string | undefined;
 }
 
 export interface ClinicalData {
     historyText: string;
+    reportNotes: string;
     vitals: ClinicalVitals;
     reports: Array<{
-        s3Key: string;
+        s3Key?: string;
+        fileId?: string;
         fileName: string;
+        fileType?: string;
         fileSize: number;
         category: string;
         timestamp: string;
+        fileUrl?: string; // Optional local preview URL or signed URL
+        isPending?: boolean; // True if file is only stored locally
     }>;
 }
 

@@ -33,37 +33,40 @@ export const sendToWaitingRoom = createAsyncThunk<any, any>(
             // sendToWaitingRoom is the FINAL submit. It overwrites status → WAITING.
             const resolvedPatientId = isDraftId
                 ? (patientData.cloudPatientId || null)   // promote draft to real record
-                : patientData.patientId;
+                : (patientData.patientId || patientData.cloudPatientId);
 
             const payload: any = {
                 // Basic Info
-                name: patientData.basic?.fullName || '',
-                age: patientData.basic?.age ? Number(patientData.basic.age) : 0,
-                sex: patientData.basic?.sex || 'Male',
-                mobile: patientData.basic?.mobileNumber || '',
-                address: patientData.basic?.address || '',
+                name: patientData.name || patientData.basic?.fullName || '',
+                age: patientData.age || (patientData.basic?.age ? Number(patientData.basic.age) : 0),
+                sex: patientData.sex || patientData.basic?.sex || 'Male',
+                mobile: patientData.mobile || patientData.basic?.mobileNumber || '',
+                address: patientData.address || patientData.basic?.address || '',
 
                 // Clinical Info
-                medicalHistory: patientData.clinical?.historyText || '',
-                clinicalParameters: patientData.clinical?.vitals || {},
-                reportFiles: patientData.clinical?.reports || [],
+                medicalHistory: patientData.medicalHistory || patientData.clinical?.historyText || '',
+                clinicalParameters: patientData.clinicalParameters || patientData.clinical?.vitals || {},
+                reportFiles: patientData.reportFiles || patientData.clinical?.reports || [],
 
                 // Diagnosis Info
-                diagnosis: patientData.diagnosis?.diagnosisText || '',
-                advisedInvestigations: JSON.stringify([
+                diagnosis: patientData.diagnosis || patientData.diagnosis?.diagnosisText || '',
+                advisedInvestigations: patientData.advisedInvestigations || JSON.stringify([
                     ...(patientData.diagnosis?.selectedInvestigations || []),
                     ...(patientData.diagnosis?.customInvestigations ? [patientData.diagnosis.customInvestigations] : [])
                 ]),
 
                 // ── FINAL STATUS: promotes draft to live queue ────────────
                 status: "WAITING",
-                treatment: "WAITING",
-
-                medications: [],
+                treatment: patientData.treatment || "WAITING",
+                medications: patientData.medications || [],
+                
+                // Identify this record as pre-filled by the Assistant
+                sentByAssistant: true,
             };
 
-            if (resolvedPatientId) {
-                payload.patientId = resolvedPatientId;
+            const finalPatientId = resolvedPatientId || patientData.cloudPatientId;
+            if (finalPatientId) {
+                payload.patientId = finalPatientId;
                 payload.updateMode = true;
                 payload.action = "updatePatientData";
             } else {

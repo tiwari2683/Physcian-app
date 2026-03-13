@@ -261,6 +261,54 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
     );
   }, []);
 
+  // Intercept navigation to save a Draft and update status
+  const handleStartConsultation = async (patient: Patient & { sentByAssistant?: boolean }) => {
+    try {
+      if (patient.status === 'WAITING' || patient.sentByAssistant) {
+        console.log(`🚀 Starting consultation for ${patient.name}`);
+        
+        // 1. Force a local draft save so NewPatientForm.tsx pulls in visit-specific data reliably
+        const draftPayload: Partial<DraftPatient> = {
+          patientId: patient.patientId,
+          lastUpdatedAt: Date.now(),
+          status: "DRAFT",
+          patientData: patient, // usePatientForm.ts will merge this entire object!
+          clinicalParameters: (patient as any).clinicalParameters || {},
+          medications: patient.medications || [],
+          reportData: (patient as any).reportData || {},
+          reportFiles: patient.reportFiles || [],
+          savedSections: {
+            basic: true,
+            clinical: true,
+            prescription: false,
+            diagnosis: false,
+          }
+        };
+        await DraftService.saveDraft(patient.patientId, draftPayload);
+
+        // 2. Transmit status change to backend (WAITING -> IN_PROGRESS)
+        fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "updatePatientData",
+            patientId: patient.patientId,
+            status: "IN_PROGRESS",
+          }),
+        }).catch(err => console.error("❌ background status update failed", err));
+      }
+    } catch (error) {
+      console.error("❌ Error starting consultation setup", error);
+    }
+
+    navigation.navigate("NewPatientForm", {
+      patient,
+      initialTab: "clinical",
+      prefillMode: true,
+      hideBasicTab: true,
+    });
+  };
+
   // Logout functionality
   const handleLogout = useCallback(async () => {
     Alert.alert("Logout", "Are you sure you want to logout?", [
@@ -341,10 +389,11 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
           typeof data.body === "string" ? JSON.parse(data.body) : data;
 
         if (isComponentMounted) {
-          // Sort and update patient data
-          const sortedPatients = sortPatientsByDate(
-            responseData.patients || []
+          // Filter out DRAFT patients before sorting and updating
+          const livePatients = (responseData.patients || []).filter(
+            (p) => p.status !== "DRAFT" && p.treatment !== "DRAFT"
           );
+          const sortedPatients = sortPatientsByDate(livePatients);
           setPatientData(sortedPatients);
           // Update last fetch timestamp
           setLastUpdate(new Date());
@@ -402,8 +451,11 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
 
         // Only update if we got valid data and component is still mounted
         if (responseData && responseData.patients && isComponentMounted) {
-          // Sort patients by date
-          const sortedPatients = sortPatientsByDate(responseData.patients);
+          // Filter out DRAFT patients before sorting
+          const livePatients = responseData.patients.filter(
+            (p) => p.status !== "DRAFT" && p.treatment !== "DRAFT"
+          );
+          const sortedPatients = sortPatientsByDate(livePatients);
 
           // Compare with current data to see if it's changed
           const currentData = JSON.stringify(patientData);
@@ -1012,6 +1064,11 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                           <Text style={{ fontSize: 10, color: '#0070D6', fontWeight: '600' }}>PRE-REG</Text>
                         </View>
                       )}
+                      {(patient as any).sentByAssistant && (
+                        <View style={{ backgroundColor: '#EBF4FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, borderWidth: 1, borderColor: '#BEE3F8' }}>
+                          <Text style={{ fontSize: 10, color: '#2B6CB0', fontWeight: 'bold' }}>ASSISTANT NOTES</Text>
+                        </View>
+                      )}
                     </View>
                     <View style={styles.patientInfoItem}>
                       <Ionicons name="time-outline" size={14} color="#718096" />
@@ -1151,14 +1208,7 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
                   <TouchableOpacity
                     key={index}
                     style={styles.footerButton} // Changed from styles.patientCard to styles.footerButton
-                    onPress={() =>
-                      navigation.navigate("NewPatientForm", {
-                        patient,
-                        initialTab: "clinical",
-                        prefillMode: true,
-                        hideBasicTab: true,
-                      })
-                    }
+                    onPress={() => handleStartConsultation(patient)}
                   >
                     <Ionicons name="create-outline" size={16} color="#0070D6" />
                     <Text style={styles.footerButtonText}>Prescribe</Text>
