@@ -82,7 +82,9 @@ export const OverviewTab: React.FC = () => {
                 clinical: {
                     ...clinical,
                     reports: finalizedReports
-                }
+                },
+                diagnosis: diagnosis,
+                medications: patientVisitState.prescription.medications
             })).unwrap();
             
             // Clear pending files context on success

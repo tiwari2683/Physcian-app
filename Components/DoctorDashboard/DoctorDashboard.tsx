@@ -24,6 +24,7 @@ import { API_ENDPOINTS } from "../../Config";
 import { handleApiError } from "../../Utils/ApiErrorHandler";
 import { useFocusEffect } from "@react-navigation/native";
 import { DraftService, DraftPatient } from "../NewPatientForm/Services/DraftService";
+import { startConsultation, fetchActiveVisit } from "../../Services/apiService";
 
 const { width, height } = Dimensions.get("window");
 const API_URL = API_ENDPOINTS.DOCTOR_DASHBOARD;
@@ -60,6 +61,7 @@ interface Patient {
   updatedAt: string;
   reports: string;
   status?: string;
+  visitId?: string;
 }
 
 interface APIResponse {
@@ -94,6 +96,42 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   );
   const [drafts, setDrafts] = useState<DraftPatient[]>([]);
   const [isLoadingDrafts, setIsLoadingDrafts] = useState(false);
+  const [activeVisits, setActiveVisits] = useState<{ [patientId: string]: any }>({});
+
+  // Phase 3: Dashboard Hydration
+  useEffect(() => {
+    const hydrateDashboard = async () => {
+      const latest = getLatestPatients();
+      const needsHydration = latest.filter(p => !activeVisits[p.patientId] && (p.status === 'WAITING' || (p as any).sentByAssistant));
+      
+      if (needsHydration.length === 0) return;
+
+      console.log(`[Phase 3] Hydrating ${needsHydration.length} dashboard items...`);
+      
+      const newActiveVisits = { ...activeVisits };
+      let changed = false;
+
+      for (const p of needsHydration) {
+        try {
+          const visit = await fetchActiveVisit(p.patientId);
+          if (visit) {
+            newActiveVisits[p.patientId] = visit;
+            changed = true;
+          }
+        } catch (e) {
+          console.error(`Failed to hydrate patient ${p.patientId}`, e);
+        }
+      }
+
+      if (changed) {
+        setActiveVisits(newActiveVisits);
+      }
+    };
+
+    if (patientData.length > 0) {
+      hydrateDashboard();
+    }
+  }, [patientData]);
 
   useEffect(() => {
     console.log('dashboard', isAuthenticated);
@@ -265,37 +303,41 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
   const handleStartConsultation = async (patient: Patient & { sentByAssistant?: boolean }) => {
     try {
       if (patient.status === 'WAITING' || patient.sentByAssistant) {
+        // Consultation start logic
         console.log(`🚀 Starting consultation for ${patient.name}`);
-        
-        // 1. Force a local draft save so NewPatientForm.tsx pulls in visit-specific data reliably
-        const draftPayload: Partial<DraftPatient> = {
-          patientId: patient.patientId,
-          lastUpdatedAt: Date.now(),
-          status: "DRAFT",
-          patientData: patient, // usePatientForm.ts will merge this entire object!
-          clinicalParameters: (patient as any).clinicalParameters || {},
-          medications: patient.medications || [],
-          reportData: (patient as any).reportData || {},
-          reportFiles: patient.reportFiles || [],
-          savedSections: {
-            basic: true,
-            clinical: true,
-            prescription: false,
-            diagnosis: false,
-          }
-        };
-        await DraftService.saveDraft(patient.patientId, draftPayload);
 
         // 2. Transmit status change to backend (WAITING -> IN_PROGRESS)
-        fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "updatePatientData",
-            patientId: patient.patientId,
-            status: "IN_PROGRESS",
-          }),
-        }).catch(err => console.error("❌ background status update failed", err));
+        // Phase 3 UX: Real-time status transition
+        let targetVisitId = patient.visitId;
+        
+        // If visitId is missing from the list item, fetch it dynamically
+        if (!targetVisitId) {
+          console.log(`🔍 No visitId in list, fetching active visit for ${patient.patientId}...`);
+          const activeVisit = await fetchActiveVisit(patient.patientId);
+          if (activeVisit) {
+            targetVisitId = activeVisit.visitId;
+            console.log(`✅ Found active visit: ${targetVisitId}`);
+          }
+        }
+
+        if (targetVisitId) {
+          console.log(`📡 Transitioning visit ${targetVisitId} to IN_PROGRESS...`);
+          startConsultation(targetVisitId).catch(err => 
+            console.error("❌ background status update failed", err)
+          );
+        } else {
+          console.warn("⚠️ No visitId found for status transition. Fallback to patient-level status.");
+          
+          fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "updatePatientData",
+              patientId: patient.patientId,
+              status: "IN_PROGRESS",
+            }),
+          }).catch(err => console.error("❌ fallback status update failed", err));
+        }
       }
     } catch (error) {
       console.error("❌ Error starting consultation setup", error);
@@ -1028,229 +1070,235 @@ const DoctorDashboard: React.FC<DoctorDashboardProps> = ({ navigation, route }) 
 
           {/* Patient Cards - Now showing only latest 5 patients */}
           {latestPatients.length > 0 ? (
-            latestPatients.map((patient, index) => (
-              <TouchableOpacity
-                key={index}
-                style={styles.patientCard}
-                onPress={() =>
-                  navigation.navigate("PatientDetails", {
-                    patient,
-                  })
-                }
-              >
-                <View style={styles.patientCardHeader}>
-                  <View style={styles.patientNameRow}>
-                    <Text style={styles.patientName}>{patient.name}</Text>
-                    {patient.patientId ? (
-                      <View style={styles.patientIdBadge}>
-                        <Text style={styles.patientIdText}>
-                          ID: #{patient.patientId.slice(-6).toUpperCase()}
+            latestPatients.map((p, index) => {
+              // Phase 3: Merge active visit data for rendering
+              const hydratedPatient = {
+                ...p,
+                ...(activeVisits[p.patientId] || {})
+              };
+
+              return (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.patientCard}
+                  onPress={() =>
+                    navigation.navigate("PatientDetails", {
+                      patient: hydratedPatient,
+                    })
+                  }
+                >
+                  <View style={styles.patientCardHeader}>
+                    <View style={styles.patientNameRow}>
+                      <Text style={styles.patientName}>{hydratedPatient.name}</Text>
+                      {hydratedPatient.patientId ? (
+                        <View style={styles.patientIdBadge}>
+                          <Text style={styles.patientIdText}>
+                            ID: #{hydratedPatient.patientId.slice(-6).toUpperCase()}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <View style={styles.patientInfo}>
+                      <View style={styles.patientInfoItem}>
+                        <Ionicons
+                          name="person-outline"
+                          size={14}
+                          color="#718096"
+                        />
+                        <Text style={styles.patientInfoText}>
+                          {hydratedPatient.age} years • {hydratedPatient.sex}
+                        </Text>
+                        {hydratedPatient.status === 'PRE_REGISTERED' && (
+                          <View style={{ backgroundColor: '#E3F2FD', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 }}>
+                            <Text style={{ fontSize: 10, color: '#0070D6', fontWeight: '600' }}>PRE-REG</Text>
+                          </View>
+                        )}
+                        {(hydratedPatient as any).sentByAssistant && (
+                          <View style={{ backgroundColor: '#EBF4FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, borderWidth: 1, borderColor: '#BEE3F8' }}>
+                            <Text style={{ fontSize: 10, color: '#2B6CB0', fontWeight: 'bold' }}>ASSISTANT NOTES</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View style={styles.patientInfoItem}>
+                        <Ionicons name="time-outline" size={14} color="#718096" />
+                        <Text style={styles.patientInfoText}>
+                          {formatDate(hydratedPatient.createdAt)}
                         </Text>
                       </View>
-                    ) : null}
-                  </View>
-                  <View style={styles.patientInfo}>
-                    <View style={styles.patientInfoItem}>
-                      <Ionicons
-                        name="person-outline"
-                        size={14}
-                        color="#718096"
-                      />
-                      <Text style={styles.patientInfoText}>
-                        {patient.age} years • {patient.sex}
-                      </Text>
-                      {patient.status === 'PRE_REGISTERED' && (
-                        <View style={{ backgroundColor: '#E3F2FD', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8 }}>
-                          <Text style={{ fontSize: 10, color: '#0070D6', fontWeight: '600' }}>PRE-REG</Text>
-                        </View>
-                      )}
-                      {(patient as any).sentByAssistant && (
-                        <View style={{ backgroundColor: '#EBF4FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginLeft: 8, borderWidth: 1, borderColor: '#BEE3F8' }}>
-                          <Text style={{ fontSize: 10, color: '#2B6CB0', fontWeight: 'bold' }}>ASSISTANT NOTES</Text>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.patientInfoItem}>
-                      <Ionicons name="time-outline" size={14} color="#718096" />
-                      <Text style={styles.patientInfoText}>
-                        {formatDate(patient.createdAt)}
-                      </Text>
                     </View>
                   </View>
-                </View>
 
-                <View style={styles.patientCardBody}>
-                  <View style={styles.diagnosisSection}>
-                    <Text style={styles.sectionLabel}>Diagnosis:</Text>
-                    <Text style={styles.diagnosisText}>
-                      {patient.diagnosis}
-                    </Text>
-                  </View>
+                  <View style={styles.patientCardBody}>
+                    <View style={styles.diagnosisSection}>
+                      <Text style={styles.sectionLabel}>Diagnosis:</Text>
+                      <Text style={styles.diagnosisText}>
+                        {hydratedPatient.diagnosis || "No diagnosis recorded"}
+                      </Text>
+                    </View>
 
-                  {patient.medications && patient.medications.length > 0 && (
-                    <View style={styles.medicationSection}>
-                      <Text style={styles.sectionLabel}>Last Medication:</Text>
+                    {hydratedPatient.medications && hydratedPatient.medications.length > 0 && (
+                      <View style={styles.medicationSection}>
+                        <Text style={styles.sectionLabel}>Last Medication:</Text>
 
-                      {(() => {
-                        // Get the last prescribed medication
-                        const lastMed = getLastPrescribedMedication(
-                          patient.medications
-                        );
+                        {(() => {
+                          // Get the last prescribed medication
+                          const lastMed = getLastPrescribedMedication(
+                            hydratedPatient.medications
+                          );
 
-                        if (lastMed) {
-                          return (
-                            <View style={styles.medicationDateGroup}>
-                              {/* Date header */}
-                              {lastMed.datePrescribed && (
-                                <View style={styles.medicationDateHeader}>
-                                  <Ionicons
-                                    name="calendar-outline"
-                                    size={12}
-                                    color="#718096"
-                                  />
-                                  <Text style={styles.medicationDateText}>
-                                    {formatDate(lastMed.datePrescribed)}
+                          if (lastMed) {
+                            return (
+                              <View style={styles.medicationDateGroup}>
+                                {/* Date header */}
+                                {lastMed.datePrescribed && (
+                                  <View style={styles.medicationDateHeader}>
+                                    <Ionicons
+                                      name="calendar-outline"
+                                      size={12}
+                                      color="#718096"
+                                    />
+                                    <Text style={styles.medicationDateText}>
+                                      {formatDate(lastMed.datePrescribed)}
+                                    </Text>
+                                  </View>
+                                )}
+
+                                {/* Medication details */}
+                                <View style={styles.medicationItem}>
+                                  <Text style={styles.medicationName}>
+                                    {lastMed.name}
+                                  </Text>
+                                  <Text style={styles.medicationDetails}>
+                                    {lastMed.timingValues &&
+                                      lastMed.timingValues !== "{}" &&
+                                      JSON.parse(lastMed.timingValues).morning}
+                                    {lastMed.unit} •{" "}
+                                    {lastMed.timing &&
+                                      lastMed.timing.replace(",", "/")}{" "}
+                                    • {lastMed.duration}
                                   </Text>
                                 </View>
-                              )}
-
-                              {/* Medication details */}
-                              <View style={styles.medicationItem}>
-                                <Text style={styles.medicationName}>
-                                  {lastMed.name}
-                                </Text>
-                                <Text style={styles.medicationDetails}>
-                                  {lastMed.timingValues &&
-                                    lastMed.timingValues !== "{}" &&
-                                    JSON.parse(lastMed.timingValues).morning}
-                                  {lastMed.unit} •{" "}
-                                  {lastMed.timing &&
-                                    lastMed.timing.replace(",", "/")}{" "}
-                                  • {lastMed.duration}
-                                </Text>
                               </View>
-                            </View>
-                          );
-                        } else {
-                          return (
-                            <Text style={styles.noMedicationText}>
-                              No medication information available
-                            </Text>
-                          );
-                        }
-                      })()}
-                    </View>
-                  )}
-
-                  {/* Reports Section */}
-                  {patient.reportFiles && patient.reportFiles.length > 0 && (
-                    <View style={styles.reportsSection}>
-                      <Text style={styles.sectionLabel}>Reports:</Text>
-                      <View style={styles.reportsList}>
-                        {patient.reportFiles.map((report, idx) => (
-                          <View key={idx}>
-                            {report.type && report.type.startsWith("image") ? (
-                              <TouchableOpacity
-                                style={styles.reportImageContainer}
-                                onPress={() => handleViewImage(report)}
-                                accessibilityLabel={`View image ${report.name}`}
-                              >
-                                <Image
-                                  source={{ uri: report.url }}
-                                  style={styles.reportThumbnail}
-                                  resizeMode="cover"
-                                />
-                                <Text
-                                  style={styles.reportImageName}
-                                  numberOfLines={1}
-                                >
-                                  {(() => {
-                                    const cleanName = report.name.replace(/^\d+-\d+-/, '');
-                                    return cleanName.length > 20
-                                      ? cleanName.substring(0, 20) + "..."
-                                      : cleanName;
-                                  })()}
-                                </Text>
-                              </TouchableOpacity>
-                            ) : (
-                              <TouchableOpacity
-                                style={styles.reportItem}
-                                onPress={() =>
-                                  Alert.alert(
-                                    "View Document",
-                                    `Opening ${report.name}`
-                                  )
-                                }
-                                accessibilityLabel={`Open document ${report.name}`}
-                              >
-                                <Ionicons
-                                  name="document-outline"
-                                  size={16}
-                                  color="#0070D6"
-                                />
-                                <Text
-                                  style={styles.reportName}
-                                  numberOfLines={1}
-                                  ellipsizeMode="middle"
-                                >
-                                  {report.name}
-                                </Text>
-                              </TouchableOpacity>
-                            )}
-                          </View>
-                        ))}
+                            );
+                          } else {
+                            return (
+                              <Text style={styles.noMedicationText}>
+                                No medication information available
+                              </Text>
+                            );
+                          }
+                        })()}
                       </View>
-                    </View>
-                  )}
-                </View>
-
-                <View style={styles.patientCardFooter}>
-                  <TouchableOpacity
-                    key={index}
-                    style={styles.footerButton} // Changed from styles.patientCard to styles.footerButton
-                    onPress={() => handleStartConsultation(patient)}
-                  >
-                    <Ionicons name="create-outline" size={16} color="#0070D6" />
-                    <Text style={styles.footerButtonText}>Prescribe</Text>
-                  </TouchableOpacity>
-
-                  {/* REPLACED: Message button with Delete button */}
-                  <TouchableOpacity
-                    style={styles.footerButton}
-                    onPress={() => handleDeletePatient(patient)}
-                    disabled={isDeletingPatient === patient.patientId}
-                  >
-                    {isDeletingPatient === patient.patientId ? (
-                      <ActivityIndicator size="small" color="#E53935" />
-                    ) : (
-                      <Ionicons
-                        name="trash-outline"
-                        size={16}
-                        color="#E53935"
-                      />
                     )}
-                    <Text
-                      style={[styles.footerButtonText, { color: "#E53935" }]}
-                    >
-                      {isDeletingPatient === patient.patientId
-                        ? "Deleting..."
-                        : "Delete"}
-                    </Text>
-                  </TouchableOpacity>
 
-                  {/* NEW: Fitness Certificate Button */}
-                  <TouchableOpacity
-                    style={styles.footerButton}
-                    onPress={() => handleFitnessCertificate(patient)}
-                  >
-                    <Ionicons name="ribbon-outline" size={16} color="#4CAF50" />
-                    <Text style={[styles.footerButtonText, { fontSize: 12 }]}>
-                      Fitness
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </TouchableOpacity>
-            ))
+                    {/* Reports Section */}
+                    {hydratedPatient.reportFiles && hydratedPatient.reportFiles.length > 0 && (
+                      <View style={styles.reportsSection}>
+                        <Text style={styles.sectionLabel}>Reports:</Text>
+                        <View style={styles.reportsList}>
+                          {hydratedPatient.reportFiles.map((report: any, idx: number) => (
+                            <View key={idx}>
+                              {report.type && report.type.startsWith("image") ? (
+                                <TouchableOpacity
+                                  style={styles.reportImageContainer}
+                                  onPress={() => handleViewImage(report)}
+                                  accessibilityLabel={`View image ${report.name}`}
+                                >
+                                  <Image
+                                    source={{ uri: report.url }}
+                                    style={styles.reportThumbnail}
+                                    resizeMode="cover"
+                                  />
+                                  <Text
+                                    style={styles.reportImageName}
+                                    numberOfLines={1}
+                                  >
+                                    {(() => {
+                                      const cleanName = report.name.replace(/^\d+-\d+-/, '');
+                                      return cleanName.length > 20
+                                        ? cleanName.substring(0, 20) + "..."
+                                        : cleanName;
+                                    })()}
+                                  </Text>
+                                </TouchableOpacity>
+                              ) : (
+                                <TouchableOpacity
+                                  style={styles.reportItem}
+                                  onPress={() =>
+                                    Alert.alert(
+                                      "View Document",
+                                      `Opening ${report.name}`
+                                    )
+                                  }
+                                  accessibilityLabel={`Open document ${report.name}`}
+                                >
+                                  <Ionicons
+                                    name="document-outline"
+                                    size={16}
+                                    color="#0070D6"
+                                  />
+                                  <Text
+                                    style={styles.reportName}
+                                    numberOfLines={1}
+                                    ellipsizeMode="middle"
+                                  >
+                                    {report.name}
+                                  </Text>
+                                </TouchableOpacity>
+                              )}
+                            </View>
+                          ))}
+                        </View>
+                      </View>
+                    )}
+                  </View>
+
+                  <View style={styles.patientCardFooter}>
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.footerButton}
+                      onPress={() => handleStartConsultation(hydratedPatient)}
+                    >
+                      <Ionicons name="create-outline" size={16} color="#0070D6" />
+                      <Text style={styles.footerButtonText}>Prescribe</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.footerButton}
+                      onPress={() => handleDeletePatient(hydratedPatient)}
+                      disabled={isDeletingPatient === hydratedPatient.patientId}
+                    >
+                      {isDeletingPatient === hydratedPatient.patientId ? (
+                        <ActivityIndicator size="small" color="#E53935" />
+                      ) : (
+                        <Ionicons
+                          name="trash-outline"
+                          size={16}
+                          color="#E53935"
+                        />
+                      )}
+                      <Text
+                        style={[styles.footerButtonText, { color: "#E53935" }]}
+                      >
+                        {isDeletingPatient === hydratedPatient.patientId
+                          ? "Deleting..."
+                          : "Delete"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.footerButton}
+                      onPress={() => handleFitnessCertificate(hydratedPatient)}
+                    >
+                      <Ionicons name="ribbon-outline" size={16} color="#4CAF50" />
+                      <Text style={[styles.footerButtonText, { fontSize: 12 }]}>
+                        Fitness
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              );
+            })
           ) : (
             // No patients placeholder - neutral message with no loading indicators
             <View style={styles.noPatientCard}>

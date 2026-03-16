@@ -22,6 +22,8 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import { API_ENDPOINTS } from "../../Config";
+import { startConsultation, fetchActiveVisit } from "../../Services/apiService";
+import { DraftService } from "../NewPatientForm/Services/DraftService";
 
 const { width } = Dimensions.get("window");
 const API_URL = API_ENDPOINTS.PATIENT_PROCESSOR;
@@ -56,11 +58,15 @@ interface Patient {
   createdAt: string;
   updatedAt: string;
   reports: string;
+  mobile?: string;
+  address?: string;
+  clinicalParameters?: any;
   generatedPrescription?: string;
   reportData?: Record<string, string>;
   firstVisit?: Record<string, any>;
   existingData?: string;
   status?: string;
+  visitId?: string;
 }
 
 interface APIResponse {
@@ -96,6 +102,40 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
   const [isImageLoading, setIsImageLoading] = useState<boolean>(false);
   const [imageError, setImageError] = useState<boolean>(false);
   const [sortModalVisible, setSortModalVisible] = useState<boolean>(false);
+  const [activeVisits, setActiveVisits] = useState<{ [patientId: string]: any }>({});
+
+  // Phase 3: Patients List Hydration
+  useEffect(() => {
+    const hydratePatients = async () => {
+      // Hydrate visible/recent patients (e.g., top 10)
+      const needsHydration = filteredPatients.slice(0, 10).filter(p => !activeVisits[p.patientId] && (p.status === 'WAITING' || (p as any).sentByAssistant));
+      
+      if (needsHydration.length === 0) return;
+
+      const newActiveVisits = { ...activeVisits };
+      let changed = false;
+
+      for (const p of needsHydration) {
+        try {
+          const visit = await fetchActiveVisit(p.patientId);
+          if (visit) {
+            newActiveVisits[p.patientId] = visit;
+            changed = true;
+          }
+        } catch (e) {
+          console.error(`Failed to hydrate patient ${p.patientId}`, e);
+        }
+      }
+
+      if (changed) {
+        setActiveVisits(newActiveVisits);
+      }
+    };
+
+    if (filteredPatients.length > 0) {
+      hydratePatients();
+    }
+  }, [filteredPatients]);
 
   // Fade animation for modals
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -305,6 +345,64 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
     applyFiltersAndSort(patients, searchQuery, filterBy, sortBy);
   }, [searchQuery, filterBy, sortBy, patients]);
 
+  // Handle clinical consultation start
+  const handleStartConsultation = async (patient: Patient) => {
+    try {
+      // Consultation start logic
+      console.log(`🚀 Preparing consultation for ${patient.name}...`);
+
+      // 2. Transmit status change to backend (WAITING -> IN_PROGRESS)
+      let targetVisitId = patient.visitId;
+      
+      // If visitId is missing from the list item, fetch it dynamically
+      if (!targetVisitId) {
+        console.log(`🔍 No visitId in list, fetching active visit for ${patient.patientId}...`);
+        const activeVisit = await fetchActiveVisit(patient.patientId);
+        if (activeVisit) {
+          targetVisitId = activeVisit.visitId;
+          console.log(`✅ Found active visit: ${targetVisitId}`);
+        }
+      }
+
+      if (targetVisitId) {
+        console.log(`📡 Transitioning visit ${targetVisitId} to IN_PROGRESS...`);
+        startConsultation(targetVisitId).catch(err => 
+          console.error("❌ background status update failed", err)
+        );
+      } else {
+        console.warn("⚠️ No visitId found for status transition. Fallback to patient-level status.");
+        
+        fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "updatePatientData",
+            patientId: patient.patientId,
+            status: "IN_PROGRESS",
+          }),
+        }).catch(err => console.error("❌ fallback status update failed", err));
+      }
+      
+      // Navigate to form
+      navigation.navigate("NewPatientForm", {
+        patient,
+        initialTab: "clinical",
+        prefillMode: true,
+        hideBasicTab: true,
+      });
+      
+    } catch (error) {
+      console.error("❌ Error starting consultation setup", error);
+      // Fallback navigation if logic fails
+      navigation.navigate("NewPatientForm", {
+        patient,
+        initialTab: "clinical",
+        prefillMode: true,
+        hideBasicTab: true,
+      });
+    }
+  };
+
   // Pull-to-refresh handler
   const onRefresh = () => {
     setIsRefreshing(true);
@@ -377,30 +475,36 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
 
   // Render a patient card with improved touch feedback
   const renderPatientCard = ({ item }: { item: Patient }) => {
-    const isDraft = item.status === "DRAFT" || item.treatment === "DRAFT";
+    // Phase 3: Merge active visit data for rendering
+    const hydratedItem = {
+      ...item,
+      ...(activeVisits[item.patientId] || {})
+    };
+    
+    const isDraft = hydratedItem.status === "DRAFT" || hydratedItem.treatment === "DRAFT";
     
     return (
     <TouchableOpacity
       style={styles.patientCard}
-      onPress={() => isDraft ? null : handleViewPatient(item)}
+      onPress={() => isDraft ? null : handleViewPatient(hydratedItem)}
       activeOpacity={isDraft ? 1 : 0.85}
-      accessibilityLabel={`View details for patient ${item.name}`}
+      accessibilityLabel={`View details for patient ${hydratedItem.name}`}
     >
       <View style={styles.patientCardHeader}>
         <View style={styles.patientNameContainer}>
-          <Text style={styles.patientName}>{item.name}</Text>
+          <Text style={styles.patientName}>{hydratedItem.name}</Text>
           <View style={styles.patientMetaContainer}>
             <Text style={styles.patientMeta}>
-              {item.age} yrs • {item.sex}
+              {hydratedItem.age} yrs • {hydratedItem.sex}
             </Text>
           </View>
         </View>
         <Text style={styles.patientId}>
-          ID: {item.patientId.substring(0, 8)}
+          ID: {hydratedItem.patientId.substring(0, 8)}
         </Text>
       </View>
       <View style={styles.patientCardBody}>
-        {item.reportFiles && item.reportFiles.length > 0 && (
+        {hydratedItem.reportFiles && hydratedItem.reportFiles.length > 0 && (
           <View style={[styles.reportsIndicator, { marginBottom: 8 }]}>
             <Ionicons
               name="document-attach-outline"
@@ -408,28 +512,28 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
               color="#4CAF50"
             />
             <Text style={styles.reportsCount}>
-              {item.reportFiles.length} reports
+              {hydratedItem.reportFiles.length} reports
             </Text>
           </View>
         )}
         <View style={styles.infoRow}>
           <Ionicons name="medical" size={16} color="#718096" />
           <Text style={styles.diagnosisText} numberOfLines={1}>
-            {item.diagnosis}
+            {hydratedItem.diagnosis || "No diagnosis recorded"}
           </Text>
         </View>
         <View style={styles.infoRow}>
           <Ionicons name="calendar-outline" size={16} color="#718096" />
           <Text style={styles.dateText}>
-            Added: {formatDate(item.createdAt)}
+            Added: {formatDate(hydratedItem.createdAt)}
           </Text>
         </View>
-        {item.medications && item.medications.length > 0 && (
+        {hydratedItem.medications && hydratedItem.medications.length > 0 && (
           <View style={styles.medicationRow}>
             <Ionicons name="medical-outline" size={16} color="#0070D6" />
             <Text style={styles.medicationText} numberOfLines={1}>
               {formatMedicationInfo(
-                getLastPrescribedMedication(item.medications)
+                getLastPrescribedMedication(hydratedItem.medications)
               )}
             </Text>
           </View>
@@ -464,14 +568,9 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
               style={styles.cardButton}
               onPress={(e) => {
                 e.stopPropagation();
-                navigation.navigate("NewPatientForm", {
-                  patient: item,
-                  initialTab: "clinical", // Changed from "basic" to "clinical"
-                  prefillMode: true,
-                  hideBasicTab: true, // Add this new parameter
-                });
+                handleStartConsultation(hydratedItem);
               }}
-              accessibilityLabel={`Prescribe for ${item.name}`}
+              accessibilityLabel={`Prescribe for ${hydratedItem.name}`}
             >
               <Ionicons name="create-outline" size={16} color="#0070D6" />
               <Text style={styles.cardButtonText}>Prescribe</Text>
@@ -481,9 +580,9 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
               style={styles.cardButton}
               onPress={(e) => {
                 e.stopPropagation();
-                navigation.navigate("FitnessCertificate", { patient: item });
+                navigation.navigate("FitnessCertificate", { patient: hydratedItem });
               }}
-              accessibilityLabel={`Certificate for ${item.name}`}
+              accessibilityLabel={`Certificate for ${hydratedItem.name}`}
             >
               <Ionicons name="ribbon-outline" size={16} color="#0070D6" />
               <Text style={styles.cardButtonText}>Certificate</Text>
@@ -493,18 +592,18 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
               style={[styles.cardButton, styles.deleteButton]}
               onPress={(e) => {
                 e.stopPropagation();
-                handleDeletePatient(item);
+                handleDeletePatient(hydratedItem);
               }}
-              disabled={isDeletingPatient === item.patientId}
-              accessibilityLabel={`Delete ${item.name}`}
+              disabled={isDeletingPatient === hydratedItem.patientId}
+              accessibilityLabel={`Delete ${hydratedItem.name}`}
             >
-              {isDeletingPatient === item.patientId ? (
+              {isDeletingPatient === hydratedItem.patientId ? (
                 <ActivityIndicator size="small" color="#E53935" />
               ) : (
                 <Ionicons name="trash-outline" size={16} color="#E53935" />
               )}
               <Text style={[styles.cardButtonText, styles.deleteButtonText]}>
-                {isDeletingPatient === item.patientId ? "Deleting..." : "Delete"}
+                {isDeletingPatient === hydratedItem.patientId ? "Deleting..." : "Delete"}
               </Text>
             </TouchableOpacity>
           </>
@@ -641,9 +740,24 @@ const PatientsData: React.FC<PatientsDataProps> = ({ navigation }) => {
                       <Text style={styles.patientInfoLabel}>
                         Advised Tests:
                       </Text>
-                      <Text style={styles.patientInfoValue}>
-                        {selectedPatient.advisedInvestigations}
-                      </Text>
+                      <View style={{ flex: 1 }}>
+                        {(() => {
+                          try {
+                            const invs = typeof selectedPatient.advisedInvestigations === 'string' 
+                              ? JSON.parse(selectedPatient.advisedInvestigations) 
+                              : selectedPatient.advisedInvestigations;
+                            
+                            if (Array.isArray(invs)) {
+                              return invs.map((inv, idx) => (
+                                <Text key={idx} style={styles.patientInfoValue}>• {inv}</Text>
+                              ));
+                            }
+                          } catch (e) {
+                            // Not JSON
+                          }
+                          return <Text style={styles.patientInfoValue}>{selectedPatient.advisedInvestigations}</Text>;
+                        })()}
+                      </View>
                     </View>
                   )}
                 </View>

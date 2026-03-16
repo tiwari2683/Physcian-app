@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks';
 import { fetchPatients } from '../../../controllers/apiThunks';
 import { PatientProfileModal } from './PatientProfileModal';
-import { Search, Activity, Upload, Eye, FileText } from 'lucide-react';
+import { Search, Activity, Eye, FileText, Users as UsersIcon, Clock, Filter, Calendar } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { Patient } from '../../../models';
 
 type SortOption = 'Newest First' | 'Oldest First' | 'Name (A-Z)';
@@ -17,15 +18,12 @@ const PatientsDirectory = () => {
     const [searchQuery, setSearchQuery] = useState('');
     const [activeFilter, setActiveFilter] = useState<FilterOption>('All');
     const [sortOption, setSortOption] = useState<SortOption>('Newest First');
-
-    // Modal State
     const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
 
     useEffect(() => {
         dispatch(fetchPatients());
     }, [dispatch]);
 
-    // Format helpers
     const getInitials = (name: string) => {
         return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || '?';
     };
@@ -33,15 +31,12 @@ const PatientsDirectory = () => {
     const formatDate = (dateString?: string) => {
         if (!dateString) return 'Unknown Date';
         const date = new Date(dateString);
-        if (isNaN(date.getTime())) return dateString; // fallback if unparseable
+        if (isNaN(date.getTime())) return dateString; 
         return date.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
     };
 
-    // Filter and Sort Logic (Memoized for performance)
     const processedPatients = useMemo(() => {
         let result = [...patients];
-
-        // 1. Search Filter (matches name, patientId, diagnosis)
         if (searchQuery.trim() !== '') {
             const query = searchQuery.toLowerCase();
             result = result.filter(p =>
@@ -50,78 +45,78 @@ const PatientsDirectory = () => {
                 (p.diagnosis && p.diagnosis.toLowerCase().includes(query))
             );
         }
-
-        // 2. Tab Filter
         switch (activeFilter) {
             case 'Male':
             case 'Female':
                 result = result.filter(p => p.sex === activeFilter);
                 break;
             case 'Critical':
-                // Check if diagnosis string contains "critical" ignoring case
                 result = result.filter(p => p.diagnosis && p.diagnosis.toLowerCase().includes('critical'));
                 break;
             case 'All':
             default:
-                break; // No further filtering
+                break;
         }
-
-        // 3. Sort Logic
         result.sort((a, b) => {
-            if (sortOption === 'Name (A-Z)') {
-                return a.name.localeCompare(b.name);
-            }
-
-            // For Date sorting
+            if (sortOption === 'Name (A-Z)') return a.name.localeCompare(b.name);
             const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
             const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-
-            if (sortOption === 'Newest First') {
-                return dateB - dateA; // Descending
-            } else if (sortOption === 'Oldest First') {
-                return dateA - dateB; // Ascending
-            }
-
-            return 0;
+            return sortOption === 'Newest First' ? dateB - dateA : dateA - dateB;
         });
-
         return result;
     }, [patients, searchQuery, activeFilter, sortOption]);
 
     const filterTabs: FilterOption[] = ['All', 'Male', 'Female', 'Critical'];
 
+    const containerVariants = {
+        hidden: { opacity: 0 },
+        visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
+    };
+
+    const itemVariants = {
+        hidden: { y: 20, opacity: 0 },
+        visible: { y: 0, opacity: 1 }
+    };
+
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-6">
+        <motion.div 
+            initial="hidden"
+            animate="visible"
+            variants={containerVariants}
+            className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8"
+        >
             {/* Header */}
-            <div>
-                <h1 className="text-3xl font-bold text-[#374151]">Patients Directory</h1>
-                <p className="text-[#6B7280] mt-1">View and manage all registered patients.</p>
-            </div>
+            <motion.div variants={itemVariants}>
+                <h1 className="text-2xl md:text-3xl lg:text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
+                    Patients Directory
+                </h1>
+                <p className="text-type-body flex items-center gap-2 mt-1 font-medium text-sm md:text-base">
+                    <UsersIcon size={16} className="text-primary-base" />
+                    Secure access to your medical records and patient data.
+                </p>
+            </motion.div>
 
-            {/* Filter, Search & Sort Bar */}
-            <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-3 rounded-xl border border-[#E5E7EB] shadow-sm">
-
-                {/* Search */}
-                <div className="w-full lg:w-96 relative shrink-0">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
+            {/* Toolbar */}
+            <motion.div variants={itemVariants} className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white/60 backdrop-blur-md p-3 rounded-2xl border border-borderColor shadow-glass-sm overflow-hidden">
+                <div className="w-full lg:w-80 relative group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-base transition-colors" size={18} />
                     <input
                         type="text"
-                        placeholder="Search name, ID, or diagnosis..."
+                        placeholder="Search name or ID..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:border-transparent outline-none bg-[#F9FAFB] text-sm"
+                        className="input-field pl-11 py-2.5 text-sm"
                     />
                 </div>
 
-                {/* Tabs */}
-                <div className="flex w-full lg:w-auto overflow-x-auto gap-2 lg:flex-row flex-nowrap shrink-0">
+                <div className="flex w-full lg:w-auto overflow-x-auto gap-2 p-1 no-scrollbar border-y lg:border-y-0 border-borderColor/30 py-3 lg:py-0">
                     {filterTabs.map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveFilter(tab)}
-                            className={`px-5 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition-colors duration-200 ${activeFilter === tab
-                                    ? 'bg-[#2563EB] text-white shadow'
-                                    : 'text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#374151]'
+                            className={`px-5 py-2 rounded-xl font-bold text-sm whitespace-nowrap transition-all duration-300 ${activeFilter === tab
+                                    ? 'bg-slate-900 text-white shadow-xl shadow-slate-900/10'
+                                    : 'text-slate-500 hover:bg-slate-100'
                                 }`}
                         >
                             {tab}
@@ -129,116 +124,119 @@ const PatientsDirectory = () => {
                     ))}
                 </div>
 
-                {/* Sort Dropdown */}
-                <div className="w-full lg:w-auto shrink-0 flex items-center justify-end">
-                    <select
-                        className="px-4 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] outline-none text-sm text-[#374151] font-medium"
-                        value={sortOption}
-                        onChange={(e) => setSortOption(e.target.value as SortOption)}
-                    >
-                        <option value="Newest First">Sort: Newest First</option>
-                        <option value="Oldest First">Sort: Oldest First</option>
-                        <option value="Name (A-Z)">Sort: Name (A-Z)</option>
-                    </select>
+                <div className="w-full lg:w-auto flex items-center gap-3">
+                    <div className="relative w-full sm:w-auto">
+                        <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <select
+                            className="w-full sm:w-auto pl-10 pr-8 py-2.5 bg-slate-50 border border-borderColor rounded-xl focus:ring-4 focus:ring-primary-base/10 outline-none text-sm text-type-contrast font-bold appearance-none"
+                            value={sortOption}
+                            onChange={(e) => setSortOption(e.target.value as SortOption)}
+                        >
+                            <option value="Newest First">Newest First</option>
+                            <option value="Oldest First">Oldest First</option>
+                            <option value="Name (A-Z)">Name (A-Z)</option>
+                        </select>
+                    </div>
                 </div>
-            </div>
+            </motion.div>
 
-            {/* Patients List/Grid */}
-            <div className="space-y-4">
-                {isLoading ? (
-                    <div className="py-16 text-center flex flex-col items-center">
-                        <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p className="text-[#6B7280]">Loading patient records...</p>
-                    </div>
-                ) : processedPatients.length === 0 ? (
-                    <div className="py-20 text-center bg-white rounded-xl border border-dashed border-[#D1D5DB]">
-                        <div className="bg-[#F3F4F6] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Search className="text-[#9CA3AF]" size={32} />
+            {/* List */}
+            <motion.div variants={itemVariants} className="space-y-4">
+                <AnimatePresence mode="popLayout">
+                    {isLoading ? (
+                        <div className="py-20 text-center flex flex-col items-center gap-4">
+                            <div className="w-12 h-12 border-4 border-primary-base border-t-transparent rounded-full animate-spin"></div>
+                            <p className="text-type-body font-black uppercase tracking-widest text-xs animate-pulse">Loading Archives...</p>
                         </div>
-                        <h3 className="text-lg font-bold text-[#374151] mb-1">No patients found</h3>
-                        <p className="text-[#6B7280]">Try adjusting your search query or filters.</p>
-                    </div>
-                ) : (
-                    <div className="grid grid-cols-1 gap-4">
-                        {processedPatients.map((patient) => (
-                            <div key={patient.patientId} className="bg-white rounded-xl shadow-sm border border-[#E5E7EB] p-4 lg:p-6 flex flex-col lg:flex-row justify-between items-start lg:items-center hover:shadow-md transition duration-200 gap-6">
-
-                                <div className="flex items-start gap-4 lg:gap-6 flex-1 min-w-0 w-full">
-                                    {/* Avatar */}
-                                    <div className="w-14 h-14 rounded-full bg-[#DBEAFE] text-[#2563EB] flex items-center justify-center font-bold text-lg shrink-0 shadow-inner">
-                                        {getInitials(patient.name)}
-                                    </div>
-
-                                    {/* Basic Info */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-3">
-                                            <h3 className="font-bold text-[#1F2937] text-lg lg:text-xl truncate">{patient.name}</h3>
-                                            <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-[#F3F4F6] text-[#4B5563] shrink-0 border border-[#E5E7EB]">
-                                                #{patient.patientId}
-                                            </span>
-                                            {(patient.reportFiles && patient.reportFiles.length > 0) && (
-                                                <span className="text-xs font-semibold px-2 py-1 flex items-center gap-1 rounded-full bg-blue-50 text-blue-600 shrink-0 border border-blue-100" title={`${patient.reportFiles.length} uploaded reports`}>
-                                                    <FileText size={12} /> {patient.reportFiles.length}
-                                                </span>
-                                            )}
+                    ) : processedPatients.length === 0 ? (
+                        <motion.div 
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            className="py-20 text-center glass-card border-dashed border-slate-300"
+                        >
+                            <Search className="mx-auto text-slate-200 mb-4" size={64} />
+                            <h3 className="text-xl font-black text-type-heading">No results found</h3>
+                            <p className="text-type-body text-sm mt-1">Try refining your search or filter parameters.</p>
+                        </motion.div>
+                    ) : (
+                        <div className="grid grid-cols-1 gap-4 lg:gap-6">
+                            {processedPatients.map((patient) => (
+                                <motion.div 
+                                    key={patient.patientId}
+                                    layout
+                                    initial={{ opacity: 0, x: -20 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    whileHover={{ y: -3 }}
+                                    className="glass-card p-4 md:p-6 lg:p-7 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 group border-l-4 border-l-primary-base/20 hover:border-l-primary-base transition-all duration-300"
+                                >
+                                    <div className="flex items-start gap-5 lg:gap-8 flex-1 min-w-0 w-full">
+                                        <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-slate-100 to-slate-200 text-slate-700 flex items-center justify-center font-black text-2xl shrink-0 shadow-inner group-hover:from-primary-base group-hover:to-indigo-500 group-hover:text-white transition-all duration-500">
+                                            {getInitials(patient.name)}
                                         </div>
 
-                                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 lg:mt-2 text-sm text-[#6B7280] font-medium">
-                                            <span>{patient.age} years</span>
-                                            <span className="w-1 h-1 rounded-full bg-[#D1D5DB]"></span>
-                                            <span>{patient.sex}</span>
-                                            <span className="w-1 h-1 rounded-full bg-[#D1D5DB]"></span>
-                                            <span>Added {formatDate(patient.createdAt)}</span>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                                                <h3 className="font-black text-type-heading text-xl lg:text-2xl truncate">{patient.name}</h3>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-slate-100 text-slate-500 border border-slate-200 uppercase tracking-tighter">
+                                                        ID: {patient.patientId}
+                                                    </span>
+                                                    {patient.reportFiles && patient.reportFiles.length > 0 && (
+                                                        <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 uppercase tracking-tighter flex items-center gap-1">
+                                                            <FileText size={10} /> {patient.reportFiles.length} FILES
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-3 text-xs md:text-sm text-type-body font-bold uppercase tracking-tight">
+                                                <span className="flex items-center gap-1.5"><Clock size={14} className="text-slate-400" /> {patient.age}Y · {patient.sex}</span>
+                                                <span className="flex items-center gap-1.5"><Calendar size={14} className="text-slate-400" /> Registered {formatDate(patient.createdAt)}</span>
+                                            </div>
+
+                                            <div className="mt-4 bg-slate-50/80 rounded-2xl p-4 border border-slate-100 flex items-center gap-4 group/box relative overflow-hidden">
+                                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-primary-base/10"></div>
+                                                <div className="bg-white p-2 rounded-xl shadow-sm">
+                                                    <Activity size={18} className="text-primary-base" />
+                                                </div>
+                                                <p className="text-sm font-bold text-type-contrast truncate">
+                                                    <span className="text-slate-400 uppercase text-[10px] tracking-widest block mb-0.5 font-black">Latest Diagnosis</span>
+                                                    {patient.diagnosis || "No records found."}
+                                                </p>
+                                            </div>
                                         </div>
-
-                                        {/* Diagnosis snippet */}
-                                        <p className="mt-3 text-sm text-[#4B5563] truncate lg:whitespace-normal lg:line-clamp-1 max-w-2xl bg-[#F9FAFB] p-2 rounded-lg border border-[#F3F4F6]">
-                                            <span className="font-bold text-[#374151]">Diagnosis: </span>
-                                            {patient.diagnosis || "No diagnosis provided."}
-                                        </p>
                                     </div>
-                                </div>
 
-                                {/* Assistant Actions (RESTRICTED ROLE: No Prescribe, No Delete) */}
-                                <div className="flex items-center gap-2 lg:gap-3 shrink-0 w-full lg:w-auto justify-end border-t lg:border-t-0 border-[#E5E7EB] pt-4 lg:pt-0">
-                                    <button
-                                        onClick={() => setSelectedPatient(patient)}
-                                        className="text-[#6B7280] bg-white border border-[#D1D5DB] px-3 lg:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#F9FAFB] hover:text-[#374151] transition flex items-center gap-2"
-                                    >
-                                        <Eye size={16} /> <span className="hidden sm:inline">Profile</span>
-                                    </button>
+                                    <div className="flex flex-row lg:flex-col items-center gap-2 lg:gap-3 shrink-0 w-full lg:w-auto justify-end border-t lg:border-t-0 border-borderColor/30 pt-5 lg:pt-0">
+                                        <button
+                                            onClick={() => setSelectedPatient(patient)}
+                                            className="flex-1 lg:flex-none p-3 lg:aspect-square rounded-2xl bg-white border border-borderColor text-slate-600 hover:border-primary-base hover:text-primary-base hover:shadow-lg transition-all active:scale-90"
+                                            title="View Profile"
+                                        >
+                                            <Eye size={20} className="mx-auto" />
+                                        </button>
 
-                                    <button
-                                        onClick={() => {
-                                            // Trigger placeholder upload functionality
-                                            alert(`Upload flow triggered for ${patient.name}`);
-                                        }}
-                                        className="text-[#2563EB] bg-[#DBEAFE] px-3 lg:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#BFDBFE] transition flex items-center gap-2"
-                                    >
-                                        <Upload size={16} /> <span className="hidden sm:inline">Upload</span>
-                                    </button>
+                                        <button
+                                            onClick={() => navigate(`/visit/${patient.patientId}`)}
+                                            className="flex-[2] lg:flex-none px-6 py-3 rounded-2xl transition-all active:scale-95 btn-primary text-sm whitespace-nowrap"
+                                        >
+                                            Add Vitals
+                                        </button>
+                                    </div>
+                                </motion.div>
+                            ))}
+                        </div>
+                    )}
+                </AnimatePresence>
+            </motion.div>
 
-                                    <button
-                                        onClick={() => navigate(`/visit/${patient.patientId}`)}
-                                        className="text-white bg-[#2563EB] px-3 lg:px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#1E40AF] transition shadow-sm flex items-center gap-2"
-                                    >
-                                        <Activity size={16} /> <span>Add Vitals</span>
-                                    </button>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-
-            {/* Profile Modal */}
             {selectedPatient && (
                 <PatientProfileModal
                     patient={selectedPatient}
                     onClose={() => setSelectedPatient(null)}
                 />
             )}
-        </div>
+        </motion.div>
     );
 };
 

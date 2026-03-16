@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { fetchActiveVisit } from "../../Services/apiService";
 
 // Get screen dimensions
 const { width, height } = Dimensions.get("window");
@@ -27,12 +28,42 @@ interface PatientDetailsProps {
 
 const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) => {
     const { patient } = route.params;
+    const [mergedPatient, setMergedPatient] = useState(patient);
+    const [isLoading, setIsLoading] = useState(false);
 
     // State for Image Viewer
     const [modalVisible, setModalVisible] = useState<boolean>(false);
     const [selectedImage, setSelectedImage] = useState<string>("");
     const [imageScale, setImageScale] = useState<number>(1);
     const [lastDistance, setLastDistance] = useState<number>(0);
+
+    // Phase 3: Dual-Query Hydration for Profile View
+    React.useEffect(() => {
+        const hydrateProfile = async () => {
+            if (!patient || !patient.patientId) return;
+            
+            setIsLoading(true);
+            try {
+                const activeVisit = await fetchActiveVisit(patient.patientId);
+                if (activeVisit) {
+                    console.log(`[Phase 3] Hydrating profile with active visit: ${activeVisit.visitId}`);
+                    setMergedPatient({
+                        ...patient,
+                        ...activeVisit,
+                        clinicalParameters: activeVisit.clinicalParameters || (patient as any).clinicalParameters,
+                        medications: activeVisit.medications || patient.medications,
+                        reportFiles: activeVisit.reportFiles || patient.reportFiles
+                    });
+                }
+            } catch (error) {
+                console.error("Error hydrating profile:", error);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        hydrateProfile();
+    }, [patient.patientId]);
 
     // Helper to format date
     const formatDate = (dateString: string) => {
@@ -51,7 +82,7 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
 
     const handleEdit = () => {
         navigation.navigate("NewPatientForm", {
-            patient,
+            patient: mergedPatient,
             initialTab: "clinical",
             prefillMode: true,
             hideBasicTab: true,
@@ -59,24 +90,16 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
     };
 
     const handleCertificate = () => {
-        navigation.navigate("FitnessCertificate", { patient });
+        navigation.navigate("FitnessCertificate", { patient: mergedPatient });
     };
 
     // Image Viewer Handler
     const handleViewImage = (file: any) => {
-        // Try multiple possible URL properties
         const imageUrl = file.url || file.uri || file.fileUrl || file.s3Url;
-
-        // Debug logging
-        console.log("File object:", JSON.stringify(file, null, 2));
-        console.log("Using imageUrl:", imageUrl);
-
         if (!imageUrl) {
-            Alert.alert("Error", "Image URL not found. Please check the file data.");
-            console.error("No valid URL found in file:", file);
+            Alert.alert("Error", "Image URL not found.");
             return;
         }
-
         setSelectedImage(imageUrl);
         setImageScale(1);
         setLastDistance(0);
@@ -223,13 +246,13 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
                     <View style={styles.avatarRow}>
                         <View style={styles.avatarContainer}>
                             <Text style={styles.avatarText}>
-                                {patient.name ? patient.name.substring(0, 1).toUpperCase() : "P"}
+                                {mergedPatient.name ? mergedPatient.name.substring(0, 1).toUpperCase() : "P"}
                             </Text>
                         </View>
                         <View style={styles.profileInfo}>
-                            <Text style={styles.profileName}>{patient.name}</Text>
+                            <Text style={styles.profileName}>{mergedPatient.name}</Text>
                             <View style={styles.idBadge}>
-                                <Text style={styles.idText}>ID: #{patient.patientId?.slice(-6).toUpperCase()}</Text>
+                                <Text style={styles.idText}>ID: #{mergedPatient.patientId?.slice(-6).toUpperCase()}</Text>
                             </View>
                         </View>
                     </View>
@@ -237,12 +260,12 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
                     <View style={styles.statsRow}>
                         <View style={styles.statItem}>
                             <Text style={styles.statLabel}>Age</Text>
-                            <Text style={styles.statValue}>{patient.age} Yrs</Text>
+                            <Text style={styles.statValue}>{mergedPatient.age} Yrs</Text>
                         </View>
                         <View style={styles.statDivider} />
                         <View style={styles.statItem}>
                             <Text style={styles.statLabel}>Gender</Text>
-                            <Text style={styles.statValue}>{patient.sex}</Text>
+                            <Text style={styles.statValue}>{mergedPatient.sex}</Text>
                         </View>
                         <View style={styles.statDivider} />
                         <View style={styles.statItem}>
@@ -254,55 +277,70 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
 
                 {/* Contact Information */}
                 <View style={styles.gridContainer}>
-                    <InfoItem icon="call-outline" label="Phone" value={patient.mobile} />
+                    <InfoItem icon="call-outline" label="Phone" value={mergedPatient.mobile} />
                     <InfoItem icon="calendar-outline" label="Registered" value={formattedDate} />
-                    <InfoItem icon="location-outline" label="Address" value={patient.address} isLong />
+                    <InfoItem icon="location-outline" label="Address" value={mergedPatient.address} isLong />
                 </View>
 
                 {/* Clinical Info - Diagnosis & History */}
                 <Section title="Diagnosis & History" icon="pulse-outline">
                     <View style={styles.clinicalItem}>
                         <Text style={styles.clinicalLabel}>Current Diagnosis</Text>
-                        <Text style={styles.clinicalValue}>{patient.diagnosis || "No diagnosis recorded"}</Text>
+                        <Text style={styles.clinicalValue}>{mergedPatient.diagnosis || "No diagnosis recorded"}</Text>
                     </View>
 
-                    {patient.medicalHistory && (
+                    {mergedPatient.medicalHistory && (
                         <View style={[styles.clinicalItem, styles.topBorder]}>
                             <Text style={styles.clinicalLabel}>Medical History</Text>
-                            <Text style={styles.clinicalValue}>{patient.medicalHistory}</Text>
+                            <Text style={styles.clinicalValue}>{mergedPatient.medicalHistory}</Text>
                         </View>
                     )}
 
-                    {patient.symptoms && (
+                    {mergedPatient.symptoms && (
                         <View style={[styles.clinicalItem, styles.topBorder]}>
                             <Text style={styles.clinicalLabel}>Symptoms</Text>
-                            <Text style={styles.clinicalValue}>{patient.symptoms}</Text>
+                            <Text style={styles.clinicalValue}>{mergedPatient.symptoms}</Text>
                         </View>
                     )}
                 </Section>
 
                 {/* Treatment & Investigations */}
-                {(patient.treatment || patient.advisedInvestigations) && (
+                {(mergedPatient.treatment || mergedPatient.advisedInvestigations) && (
                     <Section title="Plan & Instructions" icon="medkit-outline">
-                        {patient.treatment && (
+                        {mergedPatient.treatment && (
                             <View style={styles.clinicalItem}>
                                 <Text style={styles.clinicalLabel}>Treatment Plan</Text>
-                                <Text style={styles.clinicalValue}>{patient.treatment}</Text>
+                                <Text style={styles.clinicalValue}>{mergedPatient.treatment}</Text>
                             </View>
                         )}
-                        {patient.advisedInvestigations && (
-                            <View style={[styles.clinicalItem, patient.treatment && styles.topBorder]}>
+                        {mergedPatient.advisedInvestigations && (
+                            <View style={[styles.clinicalItem, mergedPatient.treatment && styles.topBorder]}>
                                 <Text style={styles.clinicalLabel}>Advised Investigations</Text>
-                                <Text style={styles.clinicalValue}>{patient.advisedInvestigations}</Text>
+                                {(() => {
+                                    try {
+                                        const invs = typeof mergedPatient.advisedInvestigations === 'string' 
+                                            ? JSON.parse(mergedPatient.advisedInvestigations) 
+                                            : mergedPatient.advisedInvestigations;
+                                        
+                                        if (Array.isArray(invs)) {
+                                            return invs.map((inv, idx) => (
+                                                <Text key={idx} style={styles.clinicalValue}>• {inv}</Text>
+                                            ));
+                                        }
+                                    } catch (e) {
+                                        // Not a JSON string, just show the raw value
+                                    }
+                                    return <Text style={styles.clinicalValue}>{mergedPatient.advisedInvestigations}</Text>
+                                })()}
                             </View>
                         )}
                     </Section>
                 )}
 
                 {/* Medications Section */}
-                {patient.medications && patient.medications.length > 0 && (
+                {mergedPatient.medications && mergedPatient.medications.length > 0 && (
                     <Section title="Prescribed Medications" icon="bandage-outline">
-                        {patient.medications.map((med: any, index: number) => (
+                        {mergedPatient.medications.map((med: any, index: number) => (
                             <View key={index} style={[styles.medItem, index > 0 && styles.topBorder]}>
                                 <View style={styles.medHeader}>
                                     <Text style={styles.medName}>{med.name}</Text>
@@ -322,9 +360,9 @@ const PatientDetails: React.FC<PatientDetailsProps> = ({ navigation, route }) =>
                 )}
 
                 {/* Reports Section */}
-                {patient.reportFiles && patient.reportFiles.length > 0 && (
+                {mergedPatient.reportFiles && mergedPatient.reportFiles.length > 0 && (
                     <Section title="Attached Reports" icon="document-text-outline">
-                        {patient.reportFiles.map((file: any, index: number) => {
+                        {mergedPatient.reportFiles.map((file: any, index: number) => {
                             // Determine if it's an image
                             const isImage = file.type?.includes('image') ||
                                 file.type?.startsWith('image/') ||

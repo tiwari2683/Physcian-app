@@ -8,6 +8,7 @@ import { isFileAlreadyUploaded } from "../../../Utils/FileUtils";
 import { uploadFilesWithPresignedUrls, FileToUpload } from "../../../Utils/UploadService";
 import { DraftService, DraftPatient } from "../Services/DraftService";
 import { unmarshallDynamoDBObject } from "../../../Utils/DynamoDbUtils";
+import { fetchActiveVisit } from "../../../Services/apiService";
 
 // ============================================
 // FILE DEDUPLICATION HELPER
@@ -77,6 +78,7 @@ export const usePatientForm = ({
         diagnosis: false,
     });
     const [permanentPatientId, setPermanentPatientId] = useState<string | null>(null);
+    const [activeVisitId, setActiveVisitId] = useState<string | null>(null);
     const [isSavingHistory, setIsSavingHistory] = useState(false);
 
     // Draft ID ref to persist across renders
@@ -241,78 +243,87 @@ export const usePatientForm = ({
                     if (draft.reportFiles) setReportFiles(draft.reportFiles);
                     if (draft.savedSections) setSavedSections(draft.savedSections);
                 } else if (prefillMode && patientId) {
-                    // No draft found. Fetch the full patient record from the server to fill sparse props.
-                    console.log(`[usePatientForm] No draft found. Fetching full patient record for ${patientId}...`);
+                    // Phase 3: Dual-Query Hydration (Master + Active Visit)
+                    console.log(`[Phase 3] Dual-Query Hydration for ${patientId}...`);
                     try {
-                        const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json", Accept: "application/json", "Cache-Control": "no-cache" },
-                            body: JSON.stringify({ action: "getPatient", patientId: patientId }),
-                        });
-                        const result = await response.json();
-                        const data = result.body ? (typeof result.body === "string" ? JSON.parse(result.body) : result.body) : result;
+                        const headers = { "Content-Type": "application/json", Accept: "application/json", "Cache-Control": "no-cache" };
+                        
+                        // 1. Fetch BOTH data sources concurrently
+                        const [patientResult, activeVisit] = await Promise.all([
+                            fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+                                method: "POST",
+                                headers,
+                                body: JSON.stringify({ action: "getPatient", patientId: patientId }),
+                            }).then(res => res.json()),
+                            fetchActiveVisit(patientId)
+                        ]);
 
+                        const data = patientResult.body ? (typeof patientResult.body === "string" ? JSON.parse(patientResult.body) : patientResult.body) : patientResult;
+
+                        // 2. Hydrate Master Demographics
                         if (data.success && data.patient) {
-                            console.log("[usePatientForm] Successfully fetched full patient record.");
+                            console.log("[Phase 3] Hydrating Master demographics.");
                             const sp = data.patient;
-                            
-                            // Merge fetched data into state
-                            setPatientData(prev => {
-                                const isWaiting = sp.treatment === "WAITING" || sp.status === "WAITING";
-                                
-                                // PRE-FILL FIX: When patient is WAITING, medicalHistory IS the new entry.
-                                // We promote it to newHistoryEntry and clear medicalHistory to avoid "Has Data" label.
-                                const historyToPromote = (isWaiting && !prev.newHistoryEntry && sp.medicalHistory) ? sp.medicalHistory : "";
-                                const historicData = isWaiting ? "" : (sp.medicalHistory || prev.medicalHistory);
+                            setPatientData(prev => ({
+                                ...prev,
+                                // Demographics always from Master
+                                name: sp.name || prev.name,
+                                age: sp.age?.toString() || prev.age,
+                                sex: sp.sex || prev.sex,
+                                mobile: sp.mobile || prev.mobile,
+                                address: sp.address || prev.address,
+                                medicalHistory: sp.medicalHistory || prev.medicalHistory,
+                                existingData: sp.existingData || prev.existingData,
+                            }));
+                        }
 
-                                return {
-                                    ...prev,
-                                    medicalHistory: historicData,
-                                    diagnosis: sp.diagnosis || prev.diagnosis,
-                                    prescription: sp.prescription || prev.prescription,
-                                    treatment: sp.treatment || prev.treatment,
-                                    reports: sp.reports || prev.reports,
-                                    advisedInvestigations: sp.advisedInvestigations || prev.advisedInvestigations,
-                                    existingData: sp.existingData || prev.existingData,
-                                    newHistoryEntry: historyToPromote || prev.newHistoryEntry
-                                };
-                            });
+                        // 3. Hydrate Acute Visit Data (If active visit exists)
+                        if (activeVisit) {
+                            console.log(`[Phase 3] Hydrating Acute data from Visit: ${activeVisit.visitId}`);
+                            setActiveVisitId(activeVisit.visitId);
 
-                            // Hydrate clinical parameters
-                            if (sp.clinicalParameters) {
-                                let cParams = sp.clinicalParameters.M 
-                                    ? unmarshallDynamoDBObject(sp.clinicalParameters) 
-                                    : sp.clinicalParameters;
-                                
+                            // Overwrite acute fields with data from the specific visit record
+                            setPatientData(prev => ({
+                                ...prev,
+                                diagnosis: activeVisit.diagnosis || "",
+                                advisedInvestigations: activeVisit.advisedInvestigations || "",
+                                reports: activeVisit.reports || "",
+                                // Promote WAITING history if present in visit
+                                newHistoryEntry: (activeVisit.status === "WAITING" && activeVisit.medicalHistory) 
+                                    ? activeVisit.medicalHistory 
+                                    : prev.newHistoryEntry
+                            }));
+
+                            if (activeVisit.clinicalParameters) {
+                                let cParams = { ...activeVisit.clinicalParameters };
                                 if (typeof cParams.date === "string") cParams.date = new Date(cParams.date);
                                 if (!cParams.date || isNaN(cParams.date.getTime())) cParams.date = new Date();
                                 setClinicalParameters(cParams);
                             }
 
-                            // Hydrate medications
-                            if (sp.medications && Array.isArray(sp.medications)) {
-                                setMedications(sp.medications);
+                            if (activeVisit.medications && Array.isArray(activeVisit.medications)) {
+                                setMedications(activeVisit.medications);
                             }
 
-                            // Hydrate report files
-                            if (sp.reportFiles && Array.isArray(sp.reportFiles)) {
-                                const mappedFiles = sp.reportFiles.map((file: any) => ({
+                            if (activeVisit.reportFiles && Array.isArray(activeVisit.reportFiles)) {
+                                const mappedFiles = activeVisit.reportFiles.map((file: any) => ({
                                     uri: file.url || file.signedUrl || "",
                                     name: file.name || file.fileName || "",
                                     type: file.type || file.fileType || "application/pdf",
                                     category: file.category || "",
                                     s3Key: file.s3Key || file.key || null,
-                                    uploadedToS3: file.uploadedToS3 || !!file.s3Key || !!file.key,
+                                    uploadedToS3: true,
                                     uploadDate: file.uploadDate || file.uploadedAt || null,
-                                    fileId: file.s3Key || file.key || `pending_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+                                    fileId: file.s3Key || file.key || `visit_${activeVisit.visitId}_${Math.random().toString(36).substring(2, 7)}`,
                                 }));
                                 setReportFiles(deduplicateFiles(mappedFiles));
                             }
                         } else {
-                            console.warn("[usePatientForm] API returned success=false or no patient data", data);
+                            console.log("[Phase 3] No active visit found. Acute fields remain blank.");
+                            setActiveVisitId(null);
                         }
                     } catch (error) {
-                        console.error("[usePatientForm] Error fetching patient record:", error);
+                        console.error("[usePatientForm] Error in Phase 3 hydration:", error);
                     }
                 } else {
                     console.log(`[usePatientForm] No draft found for ${idToUse}`);
@@ -726,6 +737,7 @@ export const usePatientForm = ({
         savedSections, setSavedSections,
         permanentPatientId, setPermanentPatientId,
         patientId, // Export the derived patientId
+        activeVisitId, setActiveVisitId,
         isSavingHistory, setIsSavingHistory,
         patientData, setPatientData,
         clinicalParameters, setClinicalParameters,

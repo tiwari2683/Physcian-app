@@ -176,21 +176,69 @@ const patientVisitSlice = createSlice({
             diagnosisHistory: any[];
             investigationsHistory: any[];
             patientData: Partial<PatientBasic>;
+            activeVisit?: any;
             lastLockedVisitDate?: string;
         }>) => {
             state.clinicalHistory = action.payload.clinicalHistory;
             state.medicalHistory = action.payload.medicalHistory;
             state.diagnosisHistory = action.payload.diagnosisHistory;
             state.investigationsHistory = action.payload.investigationsHistory;
+            
+            // Hydrate demographics
             state.basic = { ...state.basic, ...action.payload.patientData };
 
+            // Phase 3: Hydrate Active Visit Data if present
+            if (action.payload.activeVisit) {
+                const av = action.payload.activeVisit;
+                state.visitId = av.visitId;
+                state.visitStatus = (av.status as any) || 'WAITING';
+
+                // Clinical Vitals
+                if (av.clinicalParameters) {
+                    state.clinical.vitals = av.clinicalParameters;
+                }
+                
+                // History text
+                if (av.medicalHistory) {
+                    state.clinical.historyText = av.medicalHistory;
+                }
+
+                // Diagnosis
+                if (av.diagnosis) {
+                    state.diagnosis.diagnosisText = av.diagnosis;
+                }
+
+                // Investigations
+                if (av.advisedInvestigations) {
+                    try {
+                        const invs = JSON.parse(av.advisedInvestigations);
+                        if (Array.isArray(invs)) {
+                            state.diagnosis.selectedInvestigations = invs;
+                        }
+                    } catch (e) {
+                        console.warn("Failed to parse investigations", e);
+                    }
+                }
+
+                // Medications
+                if (av.medications && Array.isArray(av.medications)) {
+                    state.prescription.medications = av.medications;
+                }
+                
+                // Reports
+                if (av.reportFiles && Array.isArray(av.reportFiles)) {
+                    state.clinical.reports = av.reportFiles;
+                }
+            }
+
             // Automatic Lock Detection
-            if (action.payload.lastLockedVisitDate) {
+            const lockDate = action.payload.lastLockedVisitDate || (action.payload.activeVisit?.status === 'COMPLETED' ? action.payload.activeVisit.updatedAt : null);
+            if (lockDate) {
                 const today = new Date().toISOString().split('T')[0];
-                const lockedDate = action.payload.lastLockedVisitDate.split('T')[0];
-                if (lockedDate >= today) {
+                const cleanLockedDate = lockDate.split('T')[0];
+                if (cleanLockedDate >= today) {
                     state.isVisitLocked = true;
-                    state.lastLockedVisitDate = action.payload.lastLockedVisitDate;
+                    state.lastLockedVisitDate = lockDate;
                     state.visitStatus = 'COMPLETED';
                 }
             }

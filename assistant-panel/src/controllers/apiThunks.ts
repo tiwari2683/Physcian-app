@@ -77,17 +77,24 @@ export const fetchPatientDataThunk = createAsyncThunk<
     async (patientId, { dispatch, rejectWithValue }) => {
         try {
             const headers = await getAuthHeaders();
-            const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, {
-                action: 'getPatient',
-                patientId
-            }, { headers });
+            // Dual-Query Hydration: Fetch Master + Active Visit concurrently
+            const [patientResponse, activeVisitResponse] = await Promise.all([
+                axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getPatient', patientId }, { headers }),
+                axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getActiveVisit', patientId }, { headers })
+            ]);
+ 
+            const responseData = typeof patientResponse.data.body === 'string'
+                ? JSON.parse(patientResponse.data.body)
+                : patientResponse.data;
 
-            const responseData = typeof response.data.body === 'string'
-                ? JSON.parse(response.data.body)
-                : response.data;
-
+            const activeVisitData = typeof activeVisitResponse.data.body === 'string'
+                ? JSON.parse(activeVisitResponse.data.body)
+                : activeVisitResponse.data;
+ 
             if (responseData.success && responseData.patient) {
                 const p = responseData.patient;
+                const activeVisit = activeVisitData.success ? activeVisitData.activeVisit : null;
+
                 dispatch(setFullPatientHistory({
                     clinicalHistory: responseData.clinicalHistory || [],
                     medicalHistory: responseData.medicalHistory || [],
@@ -100,8 +107,13 @@ export const fetchPatientDataThunk = createAsyncThunk<
                         mobileNumber: p.mobile || '',
                         address: p.address || '',
                     },
-                    lastLockedVisitDate: p.lastLockedVisitDate
+                    activeVisit: activeVisit
                 }));
+
+                if (activeVisit) {
+                    dispatch(setVisitId(activeVisit.visitId));
+                }
+
                 return responseData;
             } else {
                 throw new Error(responseData.message || 'Failed to fetch patient data');
@@ -130,7 +142,7 @@ export const sendToWaitingRoom = createAsyncThunk<any, any, { state: RootState }
                 reportFiles: patientData.reportFiles || patientData.clinical?.reports || [],
 
                 // Diagnosis Info
-                diagnosis: patientData.diagnosis || patientData.diagnosis?.diagnosisText || '',
+                diagnosis: patientData.diagnosis?.diagnosisText || (typeof patientData.diagnosis === 'string' ? patientData.diagnosis : ''),
                 advisedInvestigations: patientData.advisedInvestigations || JSON.stringify([
                     ...(patientData.diagnosis?.selectedInvestigations || []),
                     ...(patientData.diagnosis?.customInvestigations ? [patientData.diagnosis.customInvestigations] : [])

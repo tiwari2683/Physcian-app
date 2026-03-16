@@ -25,6 +25,7 @@ import { logStateUpdate } from "../../Utils/Logger";
 import { isFileAlreadyUploaded } from "../../Utils/FileUtils";
 import { usePatientForm } from "./hooks/usePatientForm";
 import { DraftService } from "./Services/DraftService";
+import { initiateVisit, completeVisit } from "../../Services/apiService";
 
 interface NewPatientFormProps {
   navigation: any;
@@ -45,7 +46,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
     isNormalFlow,
     savedSections, setSavedSections,
     permanentPatientId, setPermanentPatientId,
-    patientId, // Now available from hook
+    patientId, activeVisitId, setActiveVisitId,
     isSavingHistory, setIsSavingHistory,
     patientData, setPatientData,
     clinicalParameters, setClinicalParameters,
@@ -406,6 +407,7 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           processedReportFiles = await uploadFilesToS3(reportFiles, resolvedPatientId || "temp-patient");
           console.log(`✅ Processed ${processedReportFiles.length} files`);
         }
+
         const processedMedications = medications.map((med: any) => ({
           name: med.name || "",
           duration: med.duration || "",
@@ -415,99 +417,62 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           datePrescribed: med.datePrescribed || new Date().toISOString(),
         }));
 
-        // 3. Construct FULL Payload
-        const finalPayload: any = {
-          // Basic Info
-          name: patientData.name,
-          age: patientData.age,
-          sex: patientData.sex,
-          mobile: patientData.mobile,
-          address: patientData.address,
-
-          // Clinical Info
-          // MERGE NEW HISTORY ENTRY IF EXISTS (Phase 3 Fix)
-          medicalHistory: (patientData.newHistoryEntry && patientData.newHistoryEntry.trim())
-            ? `--- New Entry (${new Date().toLocaleString()}) ---\n${patientData.newHistoryEntry}\n\n${patientData.medicalHistory || ""}`
-            : patientData.medicalHistory,
-
-          diagnosis: patientData.diagnosis, // Separate field
-          advisedInvestigations: patientData.advisedInvestigations,
-          reports: patientData.reports,
-          reportData: reportData, // For backward compatibility?
-          clinicalParameters: {
-            ...clinicalParameters,
-            date: new Date().toISOString(),
-          },
-
-          // Prescription
+        // 3. Construct Phase 3 Payload (Acute Data)
+        const acuteData = {
+          diagnosis: patientData.diagnosis,
           medications: processedMedications,
-
-          // Files
+          clinicalParameters: clinicalParameters,
           reportFiles: processedReportFiles,
-
-          // Flags
-          createParameterHistory: true,
-          createMedicalHistoryEntry: isSavingHistory, // Only if we added history? Or always?
-          createDiagnosisHistory: true, // Always track history on save
-          forceHistoryUpdate: true,
-
-          // Metadata
-          saveSection: "prescription", // Technically we are in prescription, but sending everything
-          isPartialSave: false, // This is a FULL save
+          advisedInvestigations: patientData.advisedInvestigations
         };
 
-        // 4. Handle ID (Update vs Create) - Phase 4 Hardening
-        // resolvedPatientId already determined above
-
-        if (resolvedPatientId) {
-          console.log(`🔑 Updating existing patient: ${resolvedPatientId}`);
-          finalPayload.patientId = resolvedPatientId;
-          finalPayload.updateMode = true;
-          finalPayload.action = "updatePatientData";
-          // No updateSection means "Full Update" in backend logic
-        } else {
-          console.log("🆕 Creating new patient (Fallback)");
-          finalPayload.patientId = null;
-          // Logic will fall through to processPatientData in backend
+        // 4. Handle Visit ID (Auto-initiate if missing)
+        let resolvedVisitId = activeVisitId;
+        
+        if (!resolvedVisitId) {
+          console.log("🆕 [Phase 3] No active visit found. Initiating fresh visit before completion...");
+          const initResult = await initiateVisit({
+            patientId: resolvedPatientId!,
+            name: patientData.name,
+            age: patientData.age,
+            sex: patientData.sex,
+            mobile: patientData.mobile,
+            address: patientData.address
+          });
+          
+          if (initResult.success && initResult.visitId) {
+            resolvedVisitId = initResult.visitId;
+            setActiveVisitId(resolvedVisitId);
+          } else {
+            throw new Error("Failed to initiate visit for completion.");
+          }
         }
 
-        console.log("🚀 Sending consolidated payload to API...");
-        const apiUrl = API_ENDPOINTS.PATIENT_PROCESSOR;
-
-        const response = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-            "Cache-Control": "no-cache",
-          },
-          body: JSON.stringify(finalPayload)
+        // 5. Atomic Completion
+        console.log(`🚀 [Phase 3] Dispatching completion for visit: ${resolvedVisitId}`);
+        const completionResult = await completeVisit({
+          patientId: resolvedPatientId!,
+          visitId: resolvedVisitId as string,
+          ...acuteData
         });
 
-        console.log(`status: ${response.status}`);
-        const responseText = await response.text();
-        const result = JSON.parse(responseText);
-
-        if (!result.success && !responseText.includes('"success":true')) {
-          throw new Error(result.message || result.error || "Server responded with failure");
+        if (!completionResult.success) {
+          throw new Error(completionResult.error || "Failed to complete visit");
         }
 
-        console.log("✅ Patient saved successfully!");
+        console.log("✅ [Phase 3] Visit completed and locked successfully!");
 
-        // 5. Cleanup Draft - use the most current draft ID
-        // In Phase 4, resolvedPatientId is the definitive ID
+        // 6. Cleanup Draft
         const draftIdToDelete = resolvedPatientId;
         console.log(`🧹 Deleting draft with ID: ${draftIdToDelete}`);
 
         if (draftIdToDelete) {
           await DraftService.deleteDraft(draftIdToDelete);
           console.log(`✅ Draft deleted successfully`);
-        } else {
-          console.warn("⚠️ No draft ID available for deletion");
         }
 
-        // 6. Navigate
-        Alert.alert("Success", "Patient record saved successfully!", [
+        // 7. Navigate
+        Alert.alert("Success", "Visit completed and locked successfully!", [
           {
             text: "OK",
             onPress: () => {

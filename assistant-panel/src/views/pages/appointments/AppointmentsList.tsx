@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '../../../controllers/hooks';
 import { fetchAppointments } from '../../../controllers/apiThunks';
-import { Calendar, Clock, Plus, Search, MoreVertical } from 'lucide-react';
+import { Calendar, Clock, Plus, Search, MoreVertical, ChevronRight } from 'lucide-react';
 import { NewAppointmentModal } from './NewAppointmentModal';
+import { motion, AnimatePresence } from 'framer-motion';
 import type { Appointment } from '../../../models';
 
 const AppointmentsList = () => {
@@ -18,18 +19,11 @@ const AppointmentsList = () => {
         dispatch(fetchAppointments());
     }, [dispatch]);
 
-    // Format helpers
     const getInitials = (name: string) => {
         return name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     };
 
-    /**
-     * Smart Status Logic (matching mobile app):
-     * Parses "Jan 6, 2026" and Time "3:00 PM" (or other formats depending on backend).
-     * If strictly past new Date(), and status is "Upcoming", mark strictly as completed on frontend.
-     */
     const getSmartStatusAndDate = (apt: Appointment) => {
-        // Normalize incoming status to Title Case for UI consistency
         const rawStatus = apt.status?.toLowerCase() || 'upcoming';
         let smartStatus = rawStatus.charAt(0).toUpperCase() + rawStatus.slice(1);
         let aptDateObj: Date | null = null;
@@ -51,7 +45,6 @@ const AppointmentsList = () => {
         return { smartStatus, aptDateObj };
     };
 
-    // Filter appointments into buckets
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -59,19 +52,14 @@ const AppointmentsList = () => {
 
     const filteredAppointments = appointments.filter(apt => {
         const { smartStatus, aptDateObj } = getSmartStatusAndDate(apt);
-
-        // Search filter
         if (searchQuery && !apt.patientName.toLowerCase().includes(searchQuery.toLowerCase())) {
             return false;
         }
-
-        // Tab filter
         switch (activeTab) {
             case 'Today':
                 if (aptDateObj) {
                     return aptDateObj >= today && aptDateObj < tomorrow && smartStatus !== 'Canceled';
                 }
-                // Fallback string matching if date parse failed
                 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
                 const todayStr = `${months[today.getMonth()]} ${today.getDate()}, ${today.getFullYear()}`;
                 return apt.date === todayStr && smartStatus !== 'Canceled';
@@ -89,56 +77,72 @@ const AppointmentsList = () => {
         }
     });
 
-    // Style helpers based on status
     const getStatusStyles = (status: string) => {
         switch (status) {
             case 'Upcoming':
-                return { badge: 'bg-[#DBEAFE] text-[#2563EB]', border: 'border-l-[#2563EB]', avatarBg: 'bg-[#2563EB]' };
+                return { badge: 'bg-primary-light text-primary-base border-primary-base/10', avatar: 'from-primary-base to-indigo-600', icon: 'text-primary-base' };
             case 'Completed':
-                return { badge: 'bg-[#D1FAE5] text-[#10B981]', border: 'border-l-[#10B981]', avatarBg: 'bg-[#10B981]' };
+                return { badge: 'bg-secondary-light text-secondary-base border-secondary-base/10', avatar: 'from-secondary-base to-emerald-600', icon: 'text-secondary-base' };
             case 'Canceled':
-                return { badge: 'bg-red-100 text-red-600', border: 'border-l-red-500', avatarBg: 'bg-red-500' };
+                return { badge: 'bg-rose-50 text-rose-500 border-rose-100', avatar: 'from-rose-500 to-orange-600', icon: 'text-rose-500' };
             default:
-                return { badge: 'bg-gray-100 text-gray-600', border: 'border-l-gray-400', avatarBg: 'bg-gray-400' };
+                return { badge: 'bg-slate-100 text-slate-500 border-slate-200', avatar: 'from-slate-400 to-slate-600', icon: 'text-slate-400' };
         }
     };
 
     const tabs: ('Today' | 'Upcoming' | 'Completed' | 'Canceled')[] = ['Today', 'Upcoming', 'Completed', 'Canceled'];
 
+    const containerVariants = {
+        hidden: { opacity: 0 },
+        visible: { opacity: 1, transition: { staggerChildren: 0.1 } }
+    };
+
+    const itemVariants = {
+        hidden: { y: 20, opacity: 0 },
+        visible: { y: 0, opacity: 1 }
+    };
+
     return (
-        <div className="p-8 max-w-7xl mx-auto space-y-6">
-            {/* Header & Actions */}
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <motion.div 
+            initial="hidden"
+            animate="visible"
+            variants={containerVariants}
+            className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto space-y-6 md:space-y-8"
+        >
+            {/* Header */}
+            <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-[#374151]">Appointments Manager</h1>
-                    <p className="text-[#6B7280] mt-1">Manage and view all patient appointments.</p>
+                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
+                        Appointments Manager
+                    </h1>
+                    <p className="text-type-body flex items-center gap-2 mt-1 font-medium">
+                        <Calendar size={16} className="text-primary-base" />
+                        Manage and view all patient appointments.
+                    </p>
                 </div>
-                <div className="flex gap-3">
-                    <button
-                        onClick={() => {
-                            setSelectedAppointment(null);
-                            setIsModalOpen(true);
-                        }}
-                        className="bg-[#2563EB] text-white px-5 py-2.5 rounded-lg flex items-center gap-2 hover:bg-[#1E40AF] transition shadow-md"
-                    >
-                        <Plus size={20} />
-                        New Appointment
-                    </button>
-                </div>
-            </div>
+                <button
+                    onClick={() => {
+                        setSelectedAppointment(null);
+                        setIsModalOpen(true);
+                    }}
+                    className="btn-primary w-full md:w-auto overflow-hidden group relative"
+                >
+                    <div className="absolute inset-0 bg-white/10 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-500 skew-x-12"></div>
+                    <Plus size={20} />
+                    <span>New Appointment</span>
+                </button>
+            </motion.div>
 
-            {/* Filters & Search */}
-            <div className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white p-2 rounded-xl border border-[#E5E7EB] shadow-sm">
-
-                {/* Tabs */}
-                <div className="flex w-full lg:w-auto overflow-x-auto gap-2 p-1">
+            {/* Filters Bar */}
+            <motion.div variants={itemVariants} className="flex flex-col lg:flex-row justify-between items-center gap-4 bg-white/60 backdrop-blur-md p-3 rounded-2xl border border-borderColor shadow-glass-sm">
+                <div className="flex w-full lg:w-auto overflow-x-auto gap-2 p-1 no-scrollbar">
                     {tabs.map((tab) => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
-                            className={`px-5 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition-colors duration-200 ${activeTab === tab
-                                ? 'bg-[#2563EB] text-white shadow'
-                                : 'text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#374151]'
+                            className={`px-5 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap transition-all duration-300 ${activeTab === tab
+                                ? 'bg-primary-base text-white shadow-lg shadow-primary-base/20'
+                                : 'text-slate-500 hover:bg-slate-100 hover:text-type-heading'
                                 }`}
                         >
                             {tab}
@@ -146,103 +150,129 @@ const AppointmentsList = () => {
                     ))}
                 </div>
 
-                {/* Search */}
-                <div className="w-full lg:w-96 relative">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
+                <div className="w-full lg:w-96 relative group">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary-base transition-colors" size={18} />
                     <input
                         type="text"
-                        placeholder="Search by patient name..."
+                        placeholder="Search patient name..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="w-full pl-10 pr-4 py-2 border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:border-transparent outline-none bg-[#F9FAFB] text-sm"
+                        className="input-field pl-11 py-3 text-sm"
                     />
                 </div>
-            </div>
+            </motion.div>
 
-            {/* Appointments Grid/List */}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {isLoading ? (
-                    <div className="col-span-full py-12 text-center flex flex-col items-center">
-                        <div className="w-8 h-8 border-4 border-[#2563EB] border-t-transparent rounded-full animate-spin mb-4"></div>
-                        <p className="text-[#6B7280]">Loading appointments...</p>
-                    </div>
-                ) : filteredAppointments.length === 0 ? (
-                    <div className="col-span-full py-16 text-center bg-white rounded-xl border border-dashed border-[#D1D5DB]">
-                        <div className="bg-[#F3F4F6] w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <Calendar className="text-[#9CA3AF]" size={32} />
+            {/* Grid */}
+            <motion.div variants={itemVariants} className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <AnimatePresence mode="popLayout">
+                    {isLoading ? (
+                        <div className="col-span-full py-20 text-center flex flex-col items-center gap-4">
+                            <div className="w-10 h-10 border-4 border-primary-base border-t-transparent rounded-full animate-spin"></div>
+                            <p className="text-type-body font-bold animate-pulse">Fetching records...</p>
                         </div>
-                        <h3 className="text-lg font-bold text-[#374151] mb-1">No appointments found</h3>
-                        <p className="text-[#6B7280]">There are no appointments matching your current filters.</p>
-                    </div>
-                ) : (
-                    filteredAppointments.map((apt) => {
-                        const { smartStatus } = getSmartStatusAndDate(apt);
-                        const styles = getStatusStyles(smartStatus);
+                    ) : filteredAppointments.length === 0 ? (
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.9 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="col-span-full py-20 text-center glass-card border-dashed border-slate-300"
+                        >
+                            <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4 border border-slate-100">
+                                <Calendar className="text-slate-300" size={40} />
+                            </div>
+                            <h3 className="text-xl font-bold text-type-heading mb-1">Queue Clear</h3>
+                            <p className="text-type-body text-sm">No matches found for "{activeTab}" filter.</p>
+                        </motion.div>
+                    ) : (
+                        filteredAppointments.map((apt) => {
+                            const { smartStatus } = getSmartStatusAndDate(apt);
+                            const styles = getStatusStyles(smartStatus);
 
-                        return (
-                            <div key={apt.id} className={`bg-white rounded-xl shadow-sm border border-[#E5E7EB] border-l-4 ${styles.border} p-5 hover:shadow-md transition duration-200 group relative`}>
-
-                                <div className="absolute top-4 right-4">
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setMenuOpenId(menuOpenId === apt.id ? null : apt.id);
-                                        }}
-                                        className="text-[#9CA3AF] hover:text-[#374151] p-1 rounded-md hover:bg-[#F3F4F6] transition"
-                                    >
-                                        <MoreVertical size={20} />
-                                    </button>
-                                    {menuOpenId === apt.id && (
-                                        <div className="absolute right-0 mt-1 w-36 bg-white border border-[#E5E7EB] rounded-lg shadow-lg z-10 py-1">
+                            return (
+                                <motion.div 
+                                    key={apt.id}
+                                    layout
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.9 }}
+                                    whileHover={{ y: -5 }}
+                                    className="glass-card p-6 group cursor-default"
+                                >
+                                    <div className="flex justify-between items-start mb-6">
+                                        <div className="flex items-center gap-4 min-w-0">
+                                            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${styles.avatar} text-white flex items-center justify-center font-black text-xl shadow-lg shrink-0`}>
+                                                {getInitials(apt.patientName)}
+                                            </div>
+                                            <div className="min-w-0 pr-4">
+                                                <h3 className="font-bold text-type-heading text-lg leading-tight truncate">{apt.patientName}</h3>
+                                                <div className="flex items-center gap-2 mt-2">
+                                                    <span className="text-[10px] font-black text-slate-400 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">
+                                                        {apt.type || 'Consultation'}
+                                                    </span>
+                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase tracking-tighter ${styles.badge}`}>
+                                                        {smartStatus}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="relative">
                                             <button
-                                                className="w-full text-left px-4 py-2 hover:bg-[#F3F4F6] text-sm text-[#374151] font-medium transition"
                                                 onClick={(e) => {
                                                     e.stopPropagation();
-                                                    setSelectedAppointment(apt);
-                                                    setIsModalOpen(true);
-                                                    setMenuOpenId(null);
+                                                    setMenuOpenId(menuOpenId === apt.id ? null : apt.id);
                                                 }}
+                                                className="text-slate-400 hover:text-type-heading p-2 rounded-xl hover:bg-slate-50 transition-colors"
                                             >
-                                                Edit Appointment
+                                                <MoreVertical size={20} />
                                             </button>
+                                            <AnimatePresence>
+                                                {menuOpenId === apt.id && (
+                                                    <motion.div 
+                                                        initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                                                        exit={{ opacity: 0, scale: 0.95 }}
+                                                        className="absolute right-0 mt-2 w-48 bg-white border border-borderColor rounded-2xl shadow-tier-dark z-20 overflow-hidden"
+                                                    >
+                                                        <button
+                                                            className="w-full text-left px-5 py-3.5 hover:bg-slate-50 text-sm text-type-contrast font-bold transition flex items-center justify-between group"
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setSelectedAppointment(apt);
+                                                                setIsModalOpen(true);
+                                                                setMenuOpenId(null);
+                                                            }}
+                                                        >
+                                                            <span>Edit Schedule</span>
+                                                            <ChevronRight size={14} className="text-slate-300 group-hover:text-primary-base transition-colors" />
+                                                        </button>
+                                                    </motion.div>
+                                                )}
+                                            </AnimatePresence>
                                         </div>
-                                    )}
-                                </div>
-
-                                <div className="flex items-start gap-4">
-                                    <div className={`w-12 h-12 rounded-full ${styles.avatarBg} text-white flex items-center justify-center font-bold shadow-sm shrink-0`}>
-                                        {getInitials(apt.patientName)}
                                     </div>
-                                    <div className="flex-1 pr-6">
-                                        <h3 className="font-bold text-[#1F2937] text-lg truncate">{apt.patientName}</h3>
-                                        <div className="flex flex-wrap items-center gap-2 mt-1">
-                                            <span className="text-xs font-semibold text-[#6B7280] bg-[#F3F4F6] px-2 py-0.5 rounded-md">
-                                                {apt.type || 'Consultation'}
-                                            </span>
-                                            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${styles.badge}`}>
-                                                {smartStatus}
-                                            </span>
+
+                                    <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50/50 rounded-2xl p-4 border border-slate-100/50">
+                                        <div className="flex flex-col gap-1.5">
+                                            <div className="flex items-center gap-1.5 text-slate-400">
+                                                <Calendar size={14} />
+                                                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Date</span>
+                                            </div>
+                                            <span className="font-bold text-type-contrast">{apt.date}</span>
+                                        </div>
+                                        <div className="flex flex-col gap-1.5 pl-4 border-l border-slate-200">
+                                            <div className="flex items-center gap-1.5 text-slate-400">
+                                                <Clock size={14} />
+                                                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Time</span>
+                                            </div>
+                                            <span className="font-bold text-type-contrast">{apt.time}</span>
                                         </div>
                                     </div>
-                                </div>
+                                </motion.div>
+                            );
+                        })
+                    )}
+                </AnimatePresence>
+            </motion.div>
 
-                                <div className="mt-5 grid grid-cols-2 gap-3 text-sm border-t border-[#F3F4F6] pt-4">
-                                    <div className="flex items-center gap-2 text-[#6B7280]">
-                                        <Calendar size={16} className="text-[#9CA3AF]" />
-                                        <span className="font-medium">{apt.date}</span>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-[#6B7280]">
-                                        <Clock size={16} className="text-[#9CA3AF]" />
-                                        <span className="font-medium">{apt.time}</span>
-                                    </div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </div>
-
-            {/* Modals */}
             {isModalOpen && (
                 <NewAppointmentModal
                     onClose={() => {
@@ -252,7 +282,7 @@ const AppointmentsList = () => {
                     initialData={selectedAppointment}
                 />
             )}
-        </div>
+        </motion.div>
     );
 };
 

@@ -518,6 +518,9 @@ export const handler = async (event, context) => {
             case 'completeVisit':
                 return await completeVisit(requestData);
 
+            case 'updateVisitStatus':
+                return await updateVisitStatus(requestData);
+
             case 'getClinicalHistory':
                 return await fetchClinicalHistory(requestData.patientId);
 
