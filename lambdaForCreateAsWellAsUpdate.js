@@ -1,5 +1,5 @@
 import { DynamoDBClient, GetItemCommand } from "@aws-sdk/client-dynamodb";
-import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand } from "@aws-sdk/lib-dynamodb";
+import { DynamoDBDocumentClient, PutCommand, GetCommand, UpdateCommand, QueryCommand, ScanCommand, DeleteCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, HeadObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "crypto";
@@ -23,6 +23,7 @@ const MEDICAL_HISTORY_TABLE = 'MedicalHistoryEntries';
 const DIAGNOSIS_HISTORY_TABLE = 'DiagnosisHistoryEntries';
 const INVESTIGATIONS_HISTORY_TABLE = 'InvestigationsHistoryEntries';
 const REPORTS_BUCKET = 'dr-gawli-patient-files-use2-5694';
+const VISITS_TABLE = 'Visits';
 
 // ============================================
 // PRESIGNED URL GENERATION FOR UPLOADS
@@ -425,12 +426,13 @@ async function deletePatientFile(requestData) {
 
 export const handler = async (event, context) => {
     try {
-        console.log("� RAW EVENT:", JSON.stringify(event));
-        console.log("�📥 Lambda invoked");
+        console.log("LOG: Lambda invoked");
+        console.log("LOG: HTTP method:", event.httpMethod || event.requestContext?.http?.method);
         context.callbackWaitsForEmptyEventLoop = false;
 
         // Handle CORS preflight
-        if (event.httpMethod === "OPTIONS" || event.requestContext?.http?.method === "OPTIONS") {
+        const method = event.httpMethod || event.requestContext?.http?.method || '';
+        if (method === "OPTIONS") {
             return {
                 statusCode: 200,
                 headers: {
@@ -443,18 +445,43 @@ export const handler = async (event, context) => {
             };
         }
 
-        // Parse request body
-        let requestData;
-        if (event.body) {
-            const rawBody = event.isBase64Encoded
-                ? Buffer.from(event.body, 'base64').toString('utf8')
-                : event.body;
-            requestData = JSON.parse(rawBody);
-        } else {
-            requestData = event;
+        // ============================================================
+        // HARDENED BODY PARSING
+        // Handles API Gateway proxy v1/v2, CloudFront, and direct invoke
+        // ============================================================
+        let requestData = {};
+
+        try {
+            if (event.body) {
+                // API Gateway proxy integration — body is always a string here
+                const rawBody = event.isBase64Encoded
+                    ? Buffer.from(event.body, 'base64').toString('utf8')
+                    : event.body;
+
+                // Handle double-stringified body (some CloudFront configs wrap it)
+                const parsed = JSON.parse(rawBody);
+                requestData = typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
+
+            } else if (event.action || event.patientId || event.name) {
+                // Direct Lambda invocation — event IS the payload already
+                requestData = event;
+
+            } else if (event.requestContext && !event.body) {
+                // API Gateway proxy with empty body — treat as empty object
+                requestData = {};
+
+            } else {
+                // Last resort fallback
+                requestData = event;
+            }
+        } catch (parseError) {
+            console.error('❌ Body parse error:', parseError.message);
+            console.error('❌ Raw event.body was:', event.body);
+            return formatErrorResponse(`Invalid JSON in request body: ${parseError.message}`);
         }
 
-        console.log("🧾 requestData:", requestData);
+        console.log("🧾 requestData action:", requestData.action);
+        console.log("🧾 requestData keys:", Object.keys(requestData));
 
         const action = requestData.action;
         console.log(`🎯 Action: ${action}`);
@@ -479,6 +506,18 @@ export const handler = async (event, context) => {
             case 'deletePatientFile':
                 return await deletePatientFile(requestData);
 
+            case 'initiateVisit':
+                return await initiateVisit(requestData);
+
+            case 'getActiveVisit':
+                return await getActiveVisit(requestData.patientId);
+
+            case 'updateVisit':
+                return await updateVisit(requestData);
+
+            case 'completeVisit':
+                return await completeVisit(requestData);
+
             case 'getClinicalHistory':
                 return await fetchClinicalHistory(requestData.patientId);
 
@@ -494,21 +533,24 @@ export const handler = async (event, context) => {
             case 'getAllPatients':
                 return await getAllPatients();
 
+            case 'getWaitingRoom':
+                return await handleGetWaitingRoom();
+
             case 'searchPatients':
                 return await searchPatients(requestData);
 
             case "deleteDraft":
                 return await deleteDraft(requestData);
 
-            // FITNESS CERTIFICATE APIS
             case "saveFitnessCertificate":
                 return await saveFitnessCertificate(requestData);
+
             case "getFitnessCertificates":
                 return await getFitnessCertificates(requestData.patientId);
 
-            // MEDICINE MASTER APIS
             case "searchMedicines":
                 return await searchMedicines(requestData);
+
             case "addMedicine":
                 return await addMedicine(requestData);
 
@@ -516,13 +558,19 @@ export const handler = async (event, context) => {
                 return await deletePatient(requestData);
 
             default:
-                // Handle legacy create/update operations
+                // Legacy create/update operations (no action field)
                 if (requestData.patientId && requestData.updateMode) {
                     return await updatePatientData(requestData);
                 } else if (requestData.isPartialSave) {
                     return await processSectionSave(requestData);
-                } else {
+                } else if (requestData.name && requestData.age && requestData.sex) {
+                    // Plain patient creation — no action field
                     return await processPatientData(requestData);
+                } else {
+                    // Unknown action — log it clearly so CloudWatch shows the problem
+                    console.error(`❌ Unknown or missing action: "${action}"`);
+                    console.error(`❌ Full requestData:`, JSON.stringify(requestData));
+                    return formatErrorResponse(`Unknown action: "${action}". Received keys: ${Object.keys(requestData).join(', ')}`);
                 }
         }
     } catch (error) {
@@ -660,7 +708,8 @@ function unmarshallDynamoDBItem(item) {
     return result;
 }
 
-function formatErrorResponse(message) {
+function formatErrorResponse(message, error = null) {
+    console.error(`ERROR: ${message}`, error ? error : "");
     return {
         statusCode: 400,
         headers: {
@@ -670,7 +719,9 @@ function formatErrorResponse(message) {
         },
         body: JSON.stringify({
             success: false,
-            error: message
+            error: message,
+            details: error ? error.message : undefined,
+            code: error ? error.name : undefined
         })
     };
 }
@@ -927,22 +978,14 @@ async function getAllPatients() {
             })
         );
 
-        return {
-            statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Credentials': true
-            },
-            body: JSON.stringify({
-                success: true,
-                patients: enrichedPatients,
-                count: enrichedPatients.length
-            })
-        };
+        return formatSuccessResponse({
+            success: true,
+            patients: enrichedPatients,
+            count: enrichedPatients.length
+        });
     } catch (error) {
-        console.error('❌ Error getting all patients:', error);
-        return formatErrorResponse(`Failed to get patients: ${error.message}`);
+        console.error('ERROR getting all patients:', error);
+        return formatErrorResponse(`Failed to get patients: ${error.message}`, error);
     }
 }
 
@@ -1244,9 +1287,9 @@ async function processPatientData(requestData) {
     try {
         const { name, age, sex, mobile, address, patientId: providedPatientId } = requestData;
 
-        // Validate required fields
-        if (!name || !age || !sex) {
-            return formatErrorResponse("Missing required fields: name, age, sex");
+        // Validate required fields - only 'name' is strictly required for the initial record
+        if (!name) {
+            return formatErrorResponse("Missing required field: name (fullName)");
         }
 
         console.log("🆕 Creating new patient...");
@@ -1289,6 +1332,251 @@ async function processPatientData(requestData) {
     } catch (error) {
         console.error('❌ Error creating patient:', error);
         return formatErrorResponse(`Failed to create patient: ${error.message}`);
+    }
+}
+
+/**
+ * Initiate a new visit (Assistant Intake)
+ * Creates a record in the Visits table with status WAITING
+ */
+async function initiateVisit(requestData) {
+    try {
+        const { patientId, name, age, sex, mobile, address } = requestData;
+        
+        if (!patientId) {
+            return formatErrorResponse("Missing patientId");
+        }
+
+        const visitId = `visit_${randomUUID()}`;
+        
+        const visitItem = {
+            visitId,
+            patientId,
+            status: 'WAITING',
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            // Chronic data context
+            name,
+            age: age ? parseInt(age) : 0,
+            sex,
+            mobile: mobile || "",
+            address: address || "",
+            // Acute fields initialized
+            diagnosis: "",
+            medications: [],
+            clinicalParameters: {},
+            reportFiles: [],
+            advisedInvestigations: []
+        };
+
+        console.log(`🎬 Initiating visit ${visitId} for patient ${patientId}`);
+
+        await dynamodb.send(new PutCommand({
+            TableName: VISITS_TABLE,
+            Item: visitItem
+        }));
+
+        return formatSuccessResponse({
+            success: true,
+            visitId,
+            message: "Visit initiated successfully"
+        });
+    } catch (error) {
+        console.error('❌ Error initiating visit:', error);
+        return formatErrorResponse(`Failed to initiate visit: ${error.message}`);
+    }
+}
+
+/**
+ * Retrieves the active visit for a patient
+ * Queries for WAITING or IN_PROGRESS status
+ */
+async function handleGetWaitingRoom() {
+    try {
+        console.log(`📡 Fetching Waiting Room Queue from Visits table...`);
+
+        const params = {
+            TableName: VISITS_TABLE,
+            FilterExpression: "#s = :waiting",
+            ExpressionAttributeNames: {
+                "#s": "status"
+            },
+            ExpressionAttributeValues: {
+                ":waiting": "WAITING"
+            }
+        };
+
+        const result = await dynamodb.send(new ScanCommand(params));
+        const visits = result.Items || [];
+
+        console.log(`✅ Found ${visits.length} patients in Waiting Room`);
+
+        return formatSuccessResponse({
+            success: true,
+            patients: visits,
+            count: visits.length
+        });
+    } catch (error) {
+        console.error('ERROR getting waiting room:', error);
+        return formatErrorResponse(`Failed to get waiting room: ${error.message}`, error);
+    }
+}
+
+async function getActiveVisit(patientId) {
+    try {
+        if (!patientId) return formatErrorResponse("Missing patientId");
+
+        console.log(`🔍 Checking for active visit for patient: ${patientId}`);
+
+        // We check for WAITING or IN_PROGRESS using the GSI
+        const statuses = ['WAITING', 'IN_PROGRESS'];
+        let activeVisit = null;
+
+        for (const status of statuses) {
+            const result = await dynamodb.send(new QueryCommand({
+                TableName: VISITS_TABLE,
+                IndexName: 'patientId-status-index',
+                KeyConditionExpression: 'patientId = :pid AND #status = :s',
+                ExpressionAttributeNames: { '#status': 'status' },
+                ExpressionAttributeValues: { ':pid': patientId, ':s': status }
+            }));
+
+            if (result.Items && result.Items.length > 0) {
+                activeVisit = result.Items[0];
+                break;
+            }
+        }
+
+        return formatSuccessResponse({
+            success: true,
+            activeVisit
+        });
+    } catch (error) {
+        console.error('❌ Error getting active visit:', error);
+        return formatErrorResponse(`Failed to get active visit: ${error.message}`);
+    }
+}
+
+/**
+ * Completes a visit (Doctor Consultation)
+ * Atomically marks visit as COMPLETED and appends snapshot to Master record
+ */
+async function completeVisit(requestData) {
+    try {
+        const { visitId, patientId, ...acuteData } = requestData;
+
+        if (!visitId || !patientId) {
+            return formatErrorResponse("Missing visitId or patientId");
+        }
+
+        const timestamp = new Date().toISOString();
+        console.log(`🏁 Completing visit ${visitId} for patient ${patientId}`);
+
+        // Prepare snapshot for Master record
+        const visitSummary = {
+            visitId,
+            date: timestamp,
+            diagnosis: acuteData.diagnosis || "",
+            medications: acuteData.medications || [],
+            vitalsSummary: acuteData.clinicalParameters || {}
+        };
+
+        const params = {
+            TransactItems: [
+                {
+                    // 1. Mark Visit as COMPLETED
+                    Update: {
+                        TableName: VISITS_TABLE,
+                        Key: { visitId },
+                        UpdateExpression: 'SET #status = :c, updatedAt = :t, completedAt = :t',
+                        ExpressionAttributeNames: { '#status': 'status' },
+                        ExpressionAttributeValues: { ':c': 'COMPLETED', ':t': timestamp }
+                    }
+                },
+                {
+                    // 2. Append to Patient Master visitHistory (Safe null handling)
+                    Update: {
+                        TableName: PATIENTS_TABLE,
+                        Key: { patientId },
+                        UpdateExpression: 'SET visitHistory = list_append(if_not_exists(visitHistory, :empty_list), :new_visit), updatedAt = :t',
+                        ExpressionAttributeValues: {
+                            ':new_visit': [visitSummary],
+                            ':empty_list': [],
+                            ':t': timestamp
+                        }
+                    }
+                }
+            ]
+        };
+
+        await dynamodb.send(new TransactWriteCommand(params));
+        console.log(`✅ Visit ${visitId} completed and archived to master`);
+
+        return formatSuccessResponse({
+            success: true,
+            message: "Visit completed and archived successfully"
+        });
+    } catch (error) {
+        console.error('❌ Error completing visit:', error);
+        return formatErrorResponse(`Failed to complete visit: ${error.message}`);
+    }
+}
+
+/**
+ * Updates an existing visit record
+ */
+async function updateVisit(requestData) {
+    try {
+        const { visitId, ...updateData } = requestData;
+
+        if (!visitId) {
+            return formatErrorResponse("Missing visitId for update");
+        }
+
+        console.log(`🔄 Updating visit: ${visitId}`);
+
+        const updateExpression = [];
+        const expressionAttributeNames = {};
+        const expressionAttributeValues = {};
+
+        Object.keys(updateData).forEach((key) => {
+            if (key !== 'action' && key !== 'visitId' && key !== 'patientId') {
+                const attrName = `#${key}`;
+                const attrValue = `:${key}`;
+                updateExpression.push(`${attrName} = ${attrValue}`);
+                expressionAttributeNames[attrName] = key;
+                expressionAttributeValues[attrValue] = updateData[key];
+            }
+        });
+
+        if (updateExpression.length === 0) {
+            return formatSuccessResponse({ success: true, message: "No changes to update" });
+        }
+
+        updateExpression.push('#updatedAt = :updatedAt');
+        expressionAttributeNames['#updatedAt'] = 'updatedAt';
+        expressionAttributeValues[':updatedAt'] = new Date().toISOString();
+
+        const params = {
+            TableName: VISITS_TABLE,
+            Key: { visitId },
+            UpdateExpression: `SET ${updateExpression.join(', ')}`,
+            ExpressionAttributeNames: expressionAttributeNames,
+            ExpressionAttributeValues: expressionAttributeValues,
+            ReturnValues: 'ALL_NEW'
+        };
+
+        const result = await dynamodb.send(new UpdateCommand(params));
+        console.log(`✅ Visit updated: ${visitId}`);
+
+        return formatSuccessResponse({
+            success: true,
+            visitId,
+            updatedVisit: result.Attributes
+        });
+    } catch (error) {
+        console.error('❌ Error updating visit:', error);
+        return formatErrorResponse(`Failed to update visit: ${error.message}`);
     }
 }
 

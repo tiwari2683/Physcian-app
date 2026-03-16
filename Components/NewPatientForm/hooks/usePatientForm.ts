@@ -96,7 +96,7 @@ export const usePatientForm = ({
         sex: prefillMode && patient ? patient.sex || "Male" : "Male",
         mobile: prefillMode && patient ? patient.mobile || "" : "",
         address: prefillMode && patient ? patient.address || "" : "",
-        medicalHistory: prefillMode && patient ? patient.medicalHistory || "" : "",
+        medicalHistory: prefillMode && patient && !(patient.treatment === "WAITING" || patient.status === "WAITING") ? patient.medicalHistory || "" : "",
         existingData: prefillMode && patient ? patient.existingData || "" : "",
 
         // ── Visit-Specific Fields (Hydrate from patient if editing) ──
@@ -106,7 +106,7 @@ export const usePatientForm = ({
         reports: prefillMode && patient ? patient.reports || "" : "",
         advisedInvestigations: prefillMode && patient ? patient.advisedInvestigations || "" : "",
 
-        newHistoryEntry: "", // Phase 3: Unified Clinical History Draft Field
+        newHistoryEntry: prefillMode && patient && (patient.treatment === "WAITING" || patient.status === "WAITING") ? patient.medicalHistory || "" : "", // Pre-fill from Assistant's data if waiting
     });
 
     // Clinical parameters state
@@ -257,16 +257,26 @@ export const usePatientForm = ({
                             const sp = data.patient;
                             
                             // Merge fetched data into state
-                            setPatientData(prev => ({
-                                ...prev,
-                                medicalHistory: sp.medicalHistory || prev.medicalHistory,
-                                diagnosis: sp.diagnosis || prev.diagnosis,
-                                prescription: sp.prescription || prev.prescription,
-                                treatment: sp.treatment || prev.treatment,
-                                reports: sp.reports || prev.reports,
-                                advisedInvestigations: sp.advisedInvestigations || prev.advisedInvestigations,
-                                existingData: sp.existingData || prev.existingData,
-                            }));
+                            setPatientData(prev => {
+                                const isWaiting = sp.treatment === "WAITING" || sp.status === "WAITING";
+                                
+                                // PRE-FILL FIX: When patient is WAITING, medicalHistory IS the new entry.
+                                // We promote it to newHistoryEntry and clear medicalHistory to avoid "Has Data" label.
+                                const historyToPromote = (isWaiting && !prev.newHistoryEntry && sp.medicalHistory) ? sp.medicalHistory : "";
+                                const historicData = isWaiting ? "" : (sp.medicalHistory || prev.medicalHistory);
+
+                                return {
+                                    ...prev,
+                                    medicalHistory: historicData,
+                                    diagnosis: sp.diagnosis || prev.diagnosis,
+                                    prescription: sp.prescription || prev.prescription,
+                                    treatment: sp.treatment || prev.treatment,
+                                    reports: sp.reports || prev.reports,
+                                    advisedInvestigations: sp.advisedInvestigations || prev.advisedInvestigations,
+                                    existingData: sp.existingData || prev.existingData,
+                                    newHistoryEntry: historyToPromote || prev.newHistoryEntry
+                                };
+                            });
 
                             // Hydrate clinical parameters
                             if (sp.clinicalParameters) {

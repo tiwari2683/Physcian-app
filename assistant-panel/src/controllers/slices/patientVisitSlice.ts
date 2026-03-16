@@ -21,6 +21,7 @@ export interface PatientVisitState {
      * a brand-new DynamoDB record every time.
      */
     cloudPatientId: string | null;
+    visitId: string | null;
     activeTab: number;
     visitStatus: 'DRAFT' | 'WAITING' | 'COMPLETED';
 
@@ -60,6 +61,7 @@ const getInitialState = (): PatientVisitState => ({
     patientId: null,
     draftId: null,
     cloudPatientId: null,
+    visitId: null,
     activeTab: 0,
     visitStatus: 'DRAFT',
 
@@ -152,6 +154,10 @@ const patientVisitSlice = createSlice({
          */
         setCloudPatientId: (state, action: PayloadAction<string>) => {
             state.cloudPatientId = action.payload;
+        },
+
+        setVisitId: (state, action: PayloadAction<string | null>) => {
+            state.visitId = action.payload;
         },
 
         // Visit Lock Logic
@@ -248,6 +254,7 @@ export const {
     setIsSubmitting,
     setSaveStatus,
     setCloudPatientId,
+    setVisitId,
     setVisitLock,
     setFullPatientHistory,
     initializeNewVisit,

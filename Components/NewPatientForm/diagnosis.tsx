@@ -377,7 +377,21 @@ const InvestigationsSelector: React.FC<InvestigationsSelectorProps> = ({ value, 
     );
 
     if (value) {
-      const lines = value.split("\n");
+      // PRE-FILL FIX: Detect and parse JSON arrays (sent from Assistant panel)
+      let normalizedValue = value;
+      if (typeof value === 'string' && value.trim().startsWith('[') && value.trim().endsWith(']')) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) {
+            normalizedValue = parsed.map(item => `- ${item}`).join('\n');
+            logInfo("InvestigationsSelector - Detected and parsed JSON array value");
+          }
+        } catch (e) {
+          // Fallback to original value if parsing fails
+        }
+      }
+
+      const lines = normalizedValue.split("\n");
 
       // Extract which common investigations are already selected
       const selected = commonInvestigations.filter((investigation) =>

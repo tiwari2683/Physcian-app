@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
 import { useNavigate } from 'react-router-dom';
 import { Users, Calendar, Activity, FilePlus, Save, Trash2 } from 'lucide-react';
-import { fetchPatients, fetchAppointments } from '../../../controllers/apiThunks';
+import { fetchPatients, fetchAppointments, fetchWaitingRoom } from '../../../controllers/apiThunks';
 import { loadDraftIntoState } from '../../../controllers/slices/patientVisitSlice';
 import { DraftService, type DraftPatient } from '../../../services/draftService';
 import type { RootState, AppDispatch } from '../../../controllers/store';
@@ -12,14 +12,19 @@ const Dashboard = () => {
     const navigate = useNavigate();
 
     // Remote Data
-    const { patients, isLoading: loadingPatients } = useSelector((state: RootState) => state.patients);
+    const { patients, waitingRoom, isLoading: loadingPatients } = useSelector((state: RootState) => state.patients);
     const { appointments, isLoading: loadingAppointments } = useSelector((state: RootState) => state.appointments);
 
     // Local Data
     const [localDrafts, setLocalDrafts] = useState<DraftPatient[]>([]);
+    const hasFetched = useRef(false);
 
     useEffect(() => {
+        if (hasFetched.current) return;
+        hasFetched.current = true;
+
         dispatch(fetchPatients());
+        dispatch(fetchWaitingRoom());
         dispatch(fetchAppointments());
         setLocalDrafts(DraftService.getAllDrafts());
 
@@ -125,8 +130,8 @@ const Dashboard = () => {
     });
 
     // Cloud Waiting Room: Patients who have been sent over and are WAITING for docs
-    // "status" in patient refers to the remote status in patient profile or an explicit waitlist (assuming backend map correctly).
-    const waitingRoomPatients = patients.filter(p => (p as any).status === 'WAITING' || p.treatment === 'WAITING');
+    // Now pulled directly from the Visits table via fetchWaitingRoom
+    const waitingRoomPatients = waitingRoom;
 
     return (
         <div className="p-8 max-w-7xl mx-auto space-y-8">
@@ -198,17 +203,20 @@ const Dashboard = () => {
                             ) : waitingRoomPatients.length === 0 ? (
                                 <div className="p-5 text-center text-gray-500 text-sm">No patients are currently waiting for the doctor.</div>
                             ) : (
-                                waitingRoomPatients.map((patient) => (
-                                    <div key={patient.patientId} className="p-5 flex justify-between items-center bg-amber-50/30 hover:bg-amber-50 transition border-l-4 border-l-amber-400">
+                                waitingRoomPatients.map((patient: any) => (
+                                    <div key={patient.visitId || patient.patientId} className="p-5 flex justify-between items-center bg-amber-50/30 hover:bg-amber-50 transition border-l-4 border-l-amber-400">
                                         <div>
                                             <p className="font-bold text-[#1F2937]">{patient.name}</p>
-                                            <span className="text-xs text-[#6B7280]">#{patient.patientId}</span>
+                                            <div className="flex items-center gap-2 mt-0.5">
+                                                <span className="text-[10px] bg-white border border-amber-200 text-amber-700 px-1.5 py-0.5 rounded font-mono">ID: {patient.patientId}</span>
+                                                {patient.visitId && <span className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded font-mono">Visit: {patient.visitId}</span>}
+                                            </div>
                                         </div>
                                         <button
-                                            onClick={() => navigate(`/patients`)}
+                                            onClick={() => navigate(`/visit/${patient.patientId}`)}
                                             className="text-amber-700 bg-amber-100 px-4 py-2 rounded-md text-sm font-medium hover:bg-amber-200 transition"
                                         >
-                                            View Details
+                                            View Form
                                         </button>
                                     </div>
                                 ))

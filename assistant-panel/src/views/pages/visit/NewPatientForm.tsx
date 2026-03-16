@@ -9,7 +9,7 @@ import {
     setSaveStatus,
     setCloudPatientId,
 } from '../../../controllers/slices/patientVisitSlice';
-import { autoSaveDraftToCloud } from '../../../controllers/apiThunks';
+import { autoSaveDraftToCloud, initiateVisitThunk, fetchPatientDataThunk } from '../../../controllers/apiThunks';
 import { BasicTab } from './BasicTab';
 import { ClinicalTab } from './ClinicalTab';
 import { DiagnosisTab } from './DiagnosisTab';
@@ -36,7 +36,7 @@ export const NewPatientForm: React.FC = () => {
     const navigate = useNavigate();
     const dispatch = useAppDispatch();
     const patientVisitState = useAppSelector((state) => state.patientVisit);
-    const { activeTab, isVisitLocked, patientId, draftId, cloudPatientId, basic, saveStatus, isHistoryDrawerOpen, isSubmitting } = patientVisitState;
+    const { activeTab, isVisitLocked, visitId, patientId, draftId, cloudPatientId, basic, saveStatus, isHistoryDrawerOpen, isSubmitting } = patientVisitState;
 
     // Helper for Save Status UI
     const getSaveStatusDisplay = () => {
@@ -123,9 +123,10 @@ export const NewPatientForm: React.FC = () => {
                 // ── STEP C: New local draft with no saved data ───────────────
                 console.log('[Form] Step C: New local draft — initializing blank form:', id);
                 dispatch(initializeNewVisit(id));
-            } else {
-                console.log('[Form] Step C: Server patient ID — loading fresh state:', id);
+            } else { // This means `id` is NOT a local draft ID, so it's an existing server patient ID
+                console.log('[Form] Existing server patient detected — loading master record:', id);
                 dispatch(initializeExistingVisit(id));
+                dispatch(fetchPatientDataThunk(id));
             }
 
             isInitialized.current = true;
@@ -137,6 +138,29 @@ export const NewPatientForm: React.FC = () => {
         }
 
     }, [id, draftId, patientId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    useEffect(() => {
+        const isExistingServerPatient = patientId && !isLocalDraftId(patientId);
+        const hasDemographics = !!basic.fullName;
+
+        if (isInitialized.current && patientId && !visitId && !isVisitLocked) {
+            // For existing server patients, wait for fetchPatientDataThunk to hydrate demographics
+            if (isExistingServerPatient && !hasDemographics) {
+                console.log('[Form] Waiting for demographics before initiating visit...');
+                return;
+            }
+
+            console.log('[Form] Initiating visit for:', basic.fullName || 'New Patient');
+            dispatch(initiateVisitThunk({
+                patientId,
+                name: basic.fullName,
+                age: basic.age,
+                sex: basic.sex,
+                mobile: basic.mobileNumber,
+                address: basic.address
+            }));
+        }
+    }, [isInitialized.current, patientId, visitId, basic.fullName]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
     // =========================================================================
@@ -282,14 +306,20 @@ export const NewPatientForm: React.FC = () => {
                         {TABS.map((tab) => {
                             const Icon = tab.icon;
                             const isActive = activeTab === tab.id;
+                            const isClinicalTab = tab.id === 1 || tab.id === 2;
+                            const isBlocked = isClinicalTab && !visitId && !isVisitLocked;
+
                             return (
                                 <button
                                     key={tab.id}
-                                    onClick={() => dispatch(setActiveTab(tab.id))}
-                                    className={`tab-button flex items-center gap-2 whitespace-nowrap ${isActive ? 'tab-button-active' : 'tab-button-inactive'}`}
+                                    onClick={() => !isBlocked && dispatch(setActiveTab(tab.id))}
+                                    disabled={isBlocked}
+                                    title={isBlocked ? "Please fill Basic details to initiate visit" : ""}
+                                    className={`tab-button flex items-center gap-2 whitespace-nowrap ${isActive ? 'tab-button-active' : 'tab-button-inactive'} ${isBlocked ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
                                 >
                                     <Icon size={18} />
                                     {tab.label}
+                                    {isBlocked && <Clock size={12} className="animate-pulse" />}
                                 </button>
                             );
                         })}

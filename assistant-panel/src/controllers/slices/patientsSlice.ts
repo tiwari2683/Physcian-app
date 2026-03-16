@@ -1,16 +1,18 @@
 import { createSlice } from '@reduxjs/toolkit';
 import type { PayloadAction } from '@reduxjs/toolkit';
 import type { Patient } from '../../models';
-import { fetchPatients } from '../apiThunks';
+import { fetchPatients, fetchWaitingRoom } from '../apiThunks';
 
 interface PatientsState {
     patients: Patient[];
+    waitingRoom: Patient[];
     isLoading: boolean;
     error: string | null;
 }
 
 const initialState: PatientsState = {
     patients: [],
+    waitingRoom: [],
     isLoading: false,
     error: null,
 };
@@ -30,6 +32,18 @@ const patientsSlice = createSlice({
                 state.patients = action.payload;
             })
             .addCase(fetchPatients.rejected, (state, action) => {
+                state.isLoading = false;
+                state.error = action.payload as string;
+            })
+            .addCase(fetchWaitingRoom.pending, (state) => {
+                state.isLoading = true;
+                state.error = null;
+            })
+            .addCase(fetchWaitingRoom.fulfilled, (state, action: PayloadAction<Patient[]>) => {
+                state.isLoading = false;
+                state.waitingRoom = action.payload;
+            })
+            .addCase(fetchWaitingRoom.rejected, (state, action) => {
                 state.isLoading = false;
                 state.error = action.payload as string;
             });

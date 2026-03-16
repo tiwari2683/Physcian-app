@@ -21,7 +21,8 @@ export const OverviewTab: React.FC = () => {
         isVisitLocked,
         patientId,
         draftId,
-        cloudPatientId
+        cloudPatientId,
+        visitId,
     } = patientVisitState;
 
     const { pendingFiles, clearPendingFiles } = usePendingFiles();
@@ -74,34 +75,15 @@ export const OverviewTab: React.FC = () => {
                 }
             }
 
-            // 2. Build Payload
-            const payload: any = {
-                name: basic.fullName,
-                age: basic.age ? Number(basic.age) : 0,
-                sex: basic.sex,
-                mobile: basic.mobileNumber,
-                address: basic.address,
-
-                medicalHistory: clinical.historyText,
-                clinicalParameters: clinical.vitals,
-                reportFiles: finalizedReports,
-
-                diagnosis: diagnosis.diagnosisText,
-                advisedInvestigations: JSON.stringify([
-                    ...diagnosis.selectedInvestigations,
-                    ...(diagnosis.customInvestigations ? [diagnosis.customInvestigations] : [])
-                ]),
-
-                status: 'WAITING',
-                treatment: 'WAITING',
-                medications: [],
-
-                // Required so backend updates the existing DRAFT row instead of creating a duplicate DRAFT vs WAITING row
-                cloudPatientId: resolvedId || cloudPatientId || undefined
-            };
-
-            // 3. Send to Waiting Room
-            await dispatch(sendToWaitingRoom(payload)).unwrap();
+            // 2. Send to Waiting Room (Thunk handles payload construction from Redux state)
+            await dispatch(sendToWaitingRoom({
+                visitId: visitId || patientVisitState.visitId,
+                patientId: resolvedId || patientVisitState.patientId || patientVisitState.cloudPatientId,
+                clinical: {
+                    ...clinical,
+                    reports: finalizedReports
+                }
+            })).unwrap();
             
             // Clear pending files context on success
             clearPendingFiles();

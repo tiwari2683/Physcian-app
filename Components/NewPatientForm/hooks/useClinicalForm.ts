@@ -425,6 +425,19 @@ export const useClinicalForm = (props: any) => {
     }, [patientId, savedSections?.clinical, fetchHistoricalData]);
 
 
+    const clearClinicalDraft = useCallback(async () => {
+        console.log("🧹 Clearing clinical draft data");
+        setClinicalParameters({
+            date: new Date(),
+            inr: "", hb: "", wbc: "", platelet: "", bilirubin: "",
+            sgot: "", sgpt: "", alt: "", tprAlb: "", ureaCreat: "",
+            sodium: "", fastingHBA1C: "", pp: "", tsh: "", ft4: "", others: "",
+        });
+        // Clear history modal state if open
+        setHistoryModalVisible(false);
+        setDataFetched(false);
+    }, [setClinicalParameters]);
+
     return {
         tableModalVisible, setTableModalVisible,
         historicalData, setHistoricalData,
@@ -445,5 +458,6 @@ export const useClinicalForm = (props: any) => {
         handleParameterUpdate,
         fetchCurrentPatientData,
         fetchHistoricalData,
+        clearClinicalDraft,
     };
 };

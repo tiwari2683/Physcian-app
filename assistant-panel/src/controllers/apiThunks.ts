@@ -4,44 +4,125 @@ import { fetchAuthSession } from 'aws-amplify/auth';
 import type { Patient, Appointment } from '../models';
 import { API_ENDPOINTS } from '../config';
 import type { RootState } from './store';
+import { setVisitId, setCloudPatientId, setFullPatientHistory } from './slices/patientVisitSlice';
 
-// Helper to get auth token
+// ============================================================================
+// AUTH HELPER
+// Returns headers with Bearer token, or throws if no valid session exists.
+// This prevents unauthenticated requests from hitting the API and getting 400s.
+// ============================================================================
 const getAuthHeaders = async () => {
     try {
         const session = await fetchAuthSession();
         const token = session.tokens?.idToken?.toString();
+
+        if (!token) {
+            // No token means user is not authenticated — abort instead of sending
+            // a bare request that the API Gateway will reject with 400/401
+            throw new Error('No auth token available — user is not authenticated');
+        }
+
         return {
             'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+            'Authorization': `Bearer ${token}`
         };
-    } catch (e) {
-        console.warn("Could not fetch auth session token", e);
-        return { 'Content-Type': 'application/json' };
+    } catch (e: any) {
+        console.warn('getAuthHeaders failed:', e?.message || e);
+        // Re-throw so callers can rejectWithValue instead of sending bad requests
+        throw e;
     }
 };
 
-export const sendToWaitingRoom = createAsyncThunk<any, any>(
-    'patients/sendToWaitingRoom',
-    async (patientData, { rejectWithValue }) => {
+// ============================================================================
+// VISIT THUNKS
+// ============================================================================
+
+export const initiateVisitThunk = createAsyncThunk<
+    { visitId: string },
+    { patientId: string; name: string; age: string; sex: string; mobile: string; address: string },
+    { state: RootState }
+>(
+    'patientVisit/initiate',
+    async (basicInfo, { dispatch, rejectWithValue }) => {
         try {
             const headers = await getAuthHeaders();
+            const payload = {
+                action: 'initiateVisit',
+                ...basicInfo
+            };
 
-            const isDraftId = patientData.patientId?.startsWith('draft_') ||
-                patientData.patientId?.startsWith('checkin_');
+            const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, payload, { headers });
+            const responseData = typeof response.data.body === 'string'
+                ? JSON.parse(response.data.body)
+                : response.data;
 
-            // ── GUARDRAIL: Use actual cloudPatientId if available ──────────
-            // sendToWaitingRoom is the FINAL submit. It overwrites status → WAITING.
-            const resolvedPatientId = isDraftId
-                ? (patientData.cloudPatientId || null)   // promote draft to real record
-                : (patientData.patientId || patientData.cloudPatientId);
+            if (responseData.success && responseData.visitId) {
+                dispatch(setVisitId(responseData.visitId));
+                return { visitId: responseData.visitId };
+            } else {
+                throw new Error(responseData.message || 'Failed to initiate visit');
+            }
+        } catch (error: any) {
+            return rejectWithValue(error.message || 'Failed to initiate visit');
+        }
+    }
+);
+
+export const fetchPatientDataThunk = createAsyncThunk<
+    any,
+    string,
+    { state: RootState }
+>(
+    'patientVisit/fetchPatient',
+    async (patientId, { dispatch, rejectWithValue }) => {
+        try {
+            const headers = await getAuthHeaders();
+            const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, {
+                action: 'getPatient',
+                patientId
+            }, { headers });
+
+            const responseData = typeof response.data.body === 'string'
+                ? JSON.parse(response.data.body)
+                : response.data;
+
+            if (responseData.success && responseData.patient) {
+                const p = responseData.patient;
+                dispatch(setFullPatientHistory({
+                    clinicalHistory: responseData.clinicalHistory || [],
+                    medicalHistory: responseData.medicalHistory || [],
+                    diagnosisHistory: responseData.diagnosisHistory || [],
+                    investigationsHistory: responseData.investigationsHistory || [],
+                    patientData: {
+                        fullName: p.name || '',
+                        age: p.age ? String(p.age) : '',
+                        sex: (p.sex as any) || 'Male',
+                        mobileNumber: p.mobile || '',
+                        address: p.address || '',
+                    },
+                    lastLockedVisitDate: p.lastLockedVisitDate
+                }));
+                return responseData;
+            } else {
+                throw new Error(responseData.message || 'Failed to fetch patient data');
+            }
+        } catch (error: any) {
+            return rejectWithValue(error.message || 'Failed to fetch patient data');
+        }
+    }
+);
+
+export const sendToWaitingRoom = createAsyncThunk<any, any, { state: RootState }>(
+    'patients/sendToWaitingRoom',
+    async (patientData, { getState, rejectWithValue }) => {
+        try {
+            const headers = await getAuthHeaders();
+            const state = getState().patientVisit;
 
             const payload: any = {
-                // Basic Info
-                name: patientData.name || patientData.basic?.fullName || '',
-                age: patientData.age || (patientData.basic?.age ? Number(patientData.basic.age) : 0),
-                sex: patientData.sex || patientData.basic?.sex || 'Male',
-                mobile: patientData.mobile || patientData.basic?.mobileNumber || '',
-                address: patientData.address || patientData.basic?.address || '',
+                action: 'updateVisit',
+                visitId: patientData.visitId || state.visitId,
+                patientId: patientData.patientId || state.patientId || state.cloudPatientId,
 
                 // Clinical Info
                 medicalHistory: patientData.medicalHistory || patientData.clinical?.historyText || '',
@@ -55,23 +136,14 @@ export const sendToWaitingRoom = createAsyncThunk<any, any>(
                     ...(patientData.diagnosis?.customInvestigations ? [patientData.diagnosis.customInvestigations] : [])
                 ]),
 
-                // ── FINAL STATUS: promotes draft to live queue ────────────
-                status: "WAITING",
-                treatment: patientData.treatment || "WAITING",
+                // Final status: promotes draft to live queue
+                status: 'WAITING',
+                treatment: patientData.treatment || 'WAITING',
                 medications: patientData.medications || [],
-                
+
                 // Identify this record as pre-filled by the Assistant
                 sentByAssistant: true,
             };
-
-            const finalPatientId = resolvedPatientId || patientData.cloudPatientId;
-            if (finalPatientId) {
-                payload.patientId = finalPatientId;
-                payload.updateMode = true;
-                payload.action = "updatePatientData";
-            } else {
-                payload.patientId = null;
-            }
 
             const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, payload, { headers });
 
@@ -92,86 +164,90 @@ export const sendToWaitingRoom = createAsyncThunk<any, any>(
 // Sends the current visit state to DynamoDB with status='DRAFT'.
 // DRAFT records are filtered out of all live queues (Waiting Room, patients list).
 //
-// First call: creates a new record → returns patientId → stored as cloudPatientId
-// Subsequent calls: uses cloudPatientId in UPDATE mode (no duplicate records).
+// First call:       creates a new patient record → returns patientId → stored as cloudPatientId
+//                   then initiates a visit → returns visitId → stored in state
+// Subsequent calls: uses visitId to UPDATE the existing Visits record (no duplicates).
 // ============================================================================
 export const autoSaveDraftToCloud = createAsyncThunk<
-    { cloudPatientId: string },   // fulfilled return type
-    void,                          // thunk arg
+    { cloudPatientId: string; visitId?: string },
+    void,
     { state: RootState }
 >(
     'patientVisit/cloudSave',
-    async (_, { getState, rejectWithValue }) => {
+    async (_, { getState, dispatch, rejectWithValue }) => {
         try {
             const headers = await getAuthHeaders();
-            const patientData = getState().patientVisit;
+            const state = getState().patientVisit;
 
-            // Don't cloud-save if visit is completed or locked
-            if (patientData.isVisitLocked || patientData.visitStatus === 'COMPLETED') {
+            // Guard: do not save if visit is already locked or completed
+            if (state.isVisitLocked || state.visitStatus === 'COMPLETED') {
                 return rejectWithValue('Visit is locked — cloud save skipped');
             }
 
-            // Don't cloud-save if there's no meaningful data yet
-            if (!patientData.basic?.fullName) {
+            // Guard: do not save if there is no patient name yet
+            if (!state.basic?.fullName) {
                 return rejectWithValue('No patient name — cloud save skipped');
             }
 
-            const payload: any = {
-                name: patientData.basic?.fullName || '',
-                age: patientData.basic?.age ? Number(patientData.basic.age) : 0,
-                sex: patientData.basic?.sex || 'Male',
-                mobile: patientData.basic?.mobileNumber || '',
-                address: patientData.basic?.address || '',
-
-                medicalHistory: patientData.clinical?.historyText || '',
-                clinicalParameters: patientData.clinical?.vitals || {},
-                reportFiles: patientData.clinical?.reports || [],
-
-                diagnosis: patientData.diagnosis?.diagnosisText || '',
-                advisedInvestigations: JSON.stringify([
-                    ...(patientData.diagnosis?.selectedInvestigations || []),
-                    ...(patientData.diagnosis?.customInvestigations ? [patientData.diagnosis.customInvestigations] : [])
-                ]),
-
-                // ── GUARDRAIL: Always 'DRAFT' — never enters live queue ──
-                status: 'DRAFT',
-                treatment: 'DRAFT',
-
-                medications: [],
-            };
-
-            if (patientData.cloudPatientId) {
-                // UPDATE MODE: reuse the same DynamoDB record
-                payload.patientId = patientData.cloudPatientId;
-                payload.updateMode = true;
-                payload.action = 'updatePatientData';
-            } else {
-                // CREATE MODE: first cloud save — Lambda generates a new patientId
-                payload.patientId = null;
+            // ── SCENARIO A: We already have a visitId → update Visits table only ──
+            if (state.visitId) {
+                const payload = {
+                    action: 'updateVisit',
+                    visitId: state.visitId,
+                    clinicalParameters: state.clinical?.vitals || {},
+                    diagnosis: state.diagnosis?.diagnosisText || '',
+                    reportFiles: state.clinical?.reports || [],
+                    advisedInvestigations: JSON.stringify([
+                        ...(state.diagnosis?.selectedInvestigations || []),
+                        ...(state.diagnosis?.customInvestigations ? [state.diagnosis.customInvestigations] : [])
+                    ])
+                };
+                await axios.post(API_ENDPOINTS.PATIENT_DATA, payload, { headers });
+                return { cloudPatientId: state.cloudPatientId!, visitId: state.visitId };
             }
 
-            const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, payload, { headers });
-            const responseData = typeof response.data.body === 'string'
-                ? JSON.parse(response.data.body)
-                : response.data;
+            // ── SCENARIO B: No visitId yet ──
 
-            // Extract the DynamoDB-assigned patientId for subsequent UPDATE calls
-            const cloudPatientId =
-                responseData?.patientId ||
-                responseData?.patient?.patientId ||
-                patientData.cloudPatientId;
-
-            if (!cloudPatientId) {
-                throw new Error('No patientId returned from cloud save');
+            // B1: No cloudPatientId → create the Patient master record first
+            let resolvedPatientId = state.cloudPatientId;
+            if (!resolvedPatientId) {
+                // NOTE: No `action` field here — Lambda's default case handles plain
+                // patient creation via processPatientData() when action is absent.
+                // Field names must match what processPatientData() expects: name/age/sex/mobile/address
+                const createPayload = {
+                    name: state.basic.fullName,
+                    age: state.basic.age,
+                    sex: state.basic.sex,
+                    mobile: state.basic.mobileNumber,
+                    address: state.basic.address
+                };
+                const res = await axios.post(API_ENDPOINTS.PATIENT_DATA, createPayload, { headers });
+                const body = typeof res.data.body === 'string' ? JSON.parse(res.data.body) : res.data;
+                resolvedPatientId = body.patientId;
+                if (!resolvedPatientId) throw new Error('Failed to create patient — no patientId returned');
+                dispatch(setCloudPatientId(resolvedPatientId));
             }
 
-            console.log('[CloudSave] Saved draft to cloud:', cloudPatientId);
-            return { cloudPatientId };
+            // B2: Initiate a new Visit record for this patient
+            const initRes = await dispatch(initiateVisitThunk({
+                patientId: resolvedPatientId,
+                name: state.basic.fullName,
+                age: state.basic.age,
+                sex: state.basic.sex,
+                mobile: state.basic.mobileNumber,
+                address: state.basic.address
+            })).unwrap();
+
+            return { cloudPatientId: resolvedPatientId, visitId: initRes.visitId };
         } catch (error: any) {
-            return rejectWithValue(error.response?.data || error.message || 'Cloud save failed');
+            return rejectWithValue(error.message || 'Cloud save failed');
         }
     }
 );
+
+// ============================================================================
+// PATIENT LIST THUNKS
+// ============================================================================
 
 export const fetchPatients = createAsyncThunk<Patient[], void>(
     'patients/fetchAll',
@@ -182,21 +258,75 @@ export const fetchPatients = createAsyncThunk<Patient[], void>(
                 action: 'getAllPatients'
             }, { headers });
 
-            const responseData = typeof response.data.body === 'string'
-                ? JSON.parse(response.data.body)
-                : response.data;
+            const body = response.data.body;
+            let responseData;
 
-            // ── GUARDRAIL: Strip DRAFT records from the live patient list ──
-            // DRAFT patients must not appear in Waiting Room or Patients page.
-            const allPatients: Patient[] = responseData.patients || [];
+            if (typeof body === 'string') {
+                try {
+                    responseData = JSON.parse(body);
+                } catch (e) {
+                    console.error('Failed to parse Patients body', e);
+                    responseData = response.data;
+                }
+            } else {
+                responseData = body || response.data;
+            }
+
+            const allPatients: Patient[] = responseData.patients || (Array.isArray(responseData) ? responseData : []);
+
+            // Filter out DRAFT records from the main patients list
             return allPatients.filter((p: any) =>
                 p.status !== 'DRAFT' && p.treatment !== 'DRAFT'
             );
         } catch (error: any) {
-            return rejectWithValue(error.response?.data || 'Failed to fetch patients');
+            console.error('fetchPatients error details:', {
+                message: error.message,
+                status: error.response?.status,
+                data: error.response?.data
+            });
+            return rejectWithValue(error.response?.data || error.message || 'Failed to fetch patients');
         }
     }
 );
+
+export const fetchWaitingRoom = createAsyncThunk<Patient[], void>(
+    'patients/fetchWaitingRoom',
+    async (_, { rejectWithValue }) => {
+        try {
+            const headers = await getAuthHeaders();
+            const response = await axios.post(API_ENDPOINTS.PATIENT_DATA, {
+                action: 'getWaitingRoom'
+            }, { headers });
+
+            const body = response.data.body;
+            let responseData;
+
+            if (typeof body === 'string') {
+                try {
+                    responseData = JSON.parse(body);
+                } catch (e) {
+                    console.error('Failed to parse WaitingRoom body', e);
+                    responseData = response.data;
+                }
+            } else {
+                responseData = body || response.data;
+            }
+
+            return responseData.patients || (Array.isArray(responseData) ? responseData : []);
+        } catch (error: any) {
+            console.error('fetchWaitingRoom error details:', {
+                message: error.message,
+                status: error.response?.status,
+                data: error.response?.data
+            });
+            return rejectWithValue(error.response?.data || error.message || 'Failed to fetch waiting room');
+        }
+    }
+);
+
+// ============================================================================
+// APPOINTMENT THUNKS
+// ============================================================================
 
 export const fetchAppointments = createAsyncThunk<Appointment[], void>(
     'appointments/fetchAll',
