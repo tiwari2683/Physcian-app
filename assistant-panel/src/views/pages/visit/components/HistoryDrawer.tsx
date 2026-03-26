@@ -9,6 +9,8 @@ export const HistoryDrawer: React.FC = () => {
         isHistoryDrawerOpen, 
         historyDrawerType,
         clinicalHistory,
+        vitalsHistory,
+        reportsHistory,
         medicalHistory,
         diagnosisHistory,
         investigationsHistory
@@ -18,8 +20,13 @@ export const HistoryDrawer: React.FC = () => {
 
     const onClose = () => dispatch(toggleHistoryDrawer({ open: false }));
 
+    const patientVisit = useAppSelector((state) => state.patientVisit);
+    const hasPatientId = !!(patientVisit.patientId && !patientVisit.patientId.startsWith('draft_')) || !!patientVisit.cloudPatientId;
+
     const getHistoryData = () => {
         switch (historyDrawerType) {
+            case 'vitals': return vitalsHistory;
+            case 'reports': return reportsHistory;
             case 'clinical': return clinicalHistory;
             case 'medical': return medicalHistory;
             case 'diagnosis': return diagnosisHistory;
@@ -50,6 +57,7 @@ export const HistoryDrawer: React.FC = () => {
         const data = item.data;
         
         switch (historyDrawerType) {
+            case 'medical':
             case 'clinical':
                 return (
                     <div className="space-y-3">
@@ -59,6 +67,7 @@ export const HistoryDrawer: React.FC = () => {
                                 <p className="text-sm whitespace-pre-wrap">{data.historyText}</p>
                             </div>
                         )}
+                        {/* We keep vitals rendering here just in case old 'clinical' type is still used somewhere */}
                         {data.vitals && Object.keys(data.vitals).length > 0 && (
                             <div>
                                 <p className="text-xs font-bold text-gray-500 uppercase mb-2">Vital Parameters</p>
@@ -73,6 +82,50 @@ export const HistoryDrawer: React.FC = () => {
                                     ))}
                                 </div>
                             </div>
+                        )}
+                    </div>
+                );
+            case 'vitals':
+                return (
+                    <div className="space-y-3">
+                        {data.vitals && Object.keys(data.vitals).length > 0 ? (
+                            <div>
+                                <p className="text-xs font-bold text-gray-500 uppercase mb-2">Vital Parameters</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                    {Object.entries(data.vitals).map(([k, v]) => (
+                                        v ? (
+                                            <div key={k} className="flex justify-between p-2 bg-gray-50 rounded border border-gray-100 italic">
+                                                <span className="text-xs font-medium text-gray-600 uppercase">{k}</span>
+                                                <span className="text-xs font-bold text-primary-dark">{v as string}</span>
+                                            </div>
+                                        ) : null
+                                    ))}
+                                </div>
+                            </div>
+                        ) : (
+                            <p className="text-sm text-gray-500 italic">No vitals recorded.</p>
+                        )}
+                    </div>
+                );
+            case 'reports':
+                return (
+                    <div className="space-y-3">
+                        {data.reportNotes && (
+                            <div>
+                                <p className="text-xs font-bold text-gray-500 uppercase mb-1">Report Notes</p>
+                                <p className="text-sm whitespace-pre-wrap">{data.reportNotes}</p>
+                            </div>
+                        )}
+                        {data.reportsAttached > 0 && (
+                            <div className="mt-2">
+                                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 text-xs font-bold border border-blue-100">
+                                    <FileText size={12} />
+                                    {data.reportsAttached} File{data.reportsAttached > 1 ? 's' : ''} Uploaded
+                                </span>
+                            </div>
+                        )}
+                        {!data.reportNotes && !data.reportsAttached && (
+                            <p className="text-sm text-gray-500 italic">No reports or notes recorded.</p>
                         )}
                     </div>
                 );
@@ -110,9 +163,12 @@ export const HistoryDrawer: React.FC = () => {
 
     const getIcon = () => {
         switch (historyDrawerType) {
-            case 'clinical': return <Activity size={20} className="text-emerald-500" />;
+            case 'clinical':
+            case 'medical': return <Activity size={20} className="text-emerald-500" />;
+            case 'vitals': return <Activity size={20} className="text-blue-500" />;
+            case 'reports': return <FileText size={20} className="text-indigo-500" />;
             case 'diagnosis': return <ClipboardList size={20} className="text-purple-500" />;
-            default: return <FileText size={20} className="text-blue-500" />;
+            default: return <FileText size={20} className="text-gray-500" />;
         }
     };
 
@@ -161,7 +217,17 @@ export const HistoryDrawer: React.FC = () => {
 
                 {/* Scrollable Content */}
                 <div className="flex-1 overflow-y-auto px-6 py-6 scroll-smooth">
-                    {sortedDates.length === 0 ? (
+                    {!hasPatientId ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-20 px-6">
+                            <div className="p-6 bg-amber-50 rounded-full border border-dashed border-amber-200">
+                                <Search size={48} className="text-amber-300" />
+                            </div>
+                            <div>
+                                <p className="font-bold text-type-heading">Unsaved Patient Record</p>
+                                <p className="text-sm text-type-body">To view history, you must first proceed to the Overview tab or select an existing patient from the directory.</p>
+                            </div>
+                        </div>
+                    ) : sortedDates.length === 0 ? (
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-20">
                             <div className="p-6 bg-gray-50 rounded-full border border-dashed border-gray-200">
                                 <Clock size={48} className="text-gray-300" />

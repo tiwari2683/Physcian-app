@@ -8,7 +8,7 @@ const getAuthHeaders = async () => {
     try {
         const session = await fetchAuthSession();
         const token = session.tokens?.idToken?.toString();
-        
+
         return {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -31,7 +31,7 @@ export const fetchActiveVisit = async (patientId: string) => {
     try {
         console.log(`📡 Fetching active visit for patient: ${patientId}`);
         const headers = await getAuthHeaders();
-        
+
         const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
             method: "POST",
             headers,
@@ -61,17 +61,19 @@ export const fetchActiveVisit = async (patientId: string) => {
 export const completeVisit = async (payload: {
     patientId: string;
     visitId: string;
-    diagnosis: string;
-    medications: any[];
-    clinicalParameters: any;
-    reportFiles: any[];
-    advisedInvestigations?: string;
+    acuteData: {
+        diagnosis: string;
+        medications: any[];
+        clinicalParameters: any;
+        reportFiles: any[];
+        advisedInvestigations?: string;
+    }
 }) => {
     try {
-        const { patientId, visitId, ...acuteFields } = payload;
+        const { patientId, visitId, acuteData } = payload;
         console.log(`🚀 Completing visit ${visitId} for patient ${patientId}`);
         const headers = await getAuthHeaders();
-        
+
         const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
             method: "POST",
             headers,
@@ -79,9 +81,7 @@ export const completeVisit = async (payload: {
                 action: "completeVisit",
                 patientId,
                 visitId,
-                acuteData: {
-                    ...acuteFields
-                }
+                acuteData: acuteData
             }),
         });
 
@@ -115,7 +115,7 @@ export const initiateVisit = async (basicInfo: {
     try {
         console.log(`🎬 Initiating fresh visit for patient: ${basicInfo.patientId}`);
         const headers = await getAuthHeaders();
-        
+
         const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
             method: "POST",
             headers,
@@ -147,7 +147,7 @@ export const startConsultation = async (visitId: string) => {
     try {
         console.log(`🚀 Starting consultation for visit: ${visitId}`);
         const headers = await getAuthHeaders();
-        
+
         const response = await fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
             method: "POST",
             headers,

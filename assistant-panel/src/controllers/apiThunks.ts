@@ -77,10 +77,15 @@ export const fetchPatientDataThunk = createAsyncThunk<
     async (patientId, { dispatch, rejectWithValue }) => {
         try {
             const headers = await getAuthHeaders();
-            // Dual-Query Hydration: Fetch Master + Active Visit concurrently
-            const [patientResponse, activeVisitResponse] = await Promise.all([
+            // Dual-Query Hydration + Reports History: Fetch Master + Active Visit + Reports concurrently
+            const [patientResponse, activeVisitResponse, reportsResponse] = await Promise.all([
                 axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getPatient', patientId }, { headers }),
-                axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getActiveVisit', patientId }, { headers })
+                axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getActiveVisit', patientId }, { headers }),
+                // Fetch reports history separately since getPatient doesn't return it
+                axios.post(API_ENDPOINTS.PATIENT_DATA, { action: 'getReportsHistory', patientId }, { headers }).catch(e => {
+                    console.warn('Failed to fetch reports history silently', e);
+                    return { data: { success: true, reportsHistory: [] } };
+                })
             ]);
  
             const responseData = typeof patientResponse.data.body === 'string'
@@ -91,15 +96,60 @@ export const fetchPatientDataThunk = createAsyncThunk<
                 ? JSON.parse(activeVisitResponse.data.body)
                 : activeVisitResponse.data;
  
+            const reportsData = reportsResponse.data?.body
+                ? (typeof reportsResponse.data.body === 'string' ? JSON.parse(reportsResponse.data.body) : reportsResponse.data.body)
+                : reportsResponse.data;
+
             if (responseData.success && responseData.patient) {
                 const p = responseData.patient;
                 const activeVisit = activeVisitData.success ? activeVisitData.activeVisit : null;
 
+                // Helper to safely format history items for the HistoryDrawer wrapper
+                const mapHistoryItem = (arr: any[], mapper: (item: any) => any) => {
+                    if (!Array.isArray(arr)) return [];
+                    return arr.map(item => ({
+                        timestamp: item.createdAt || item.updatedAt || new Date().toISOString(),
+                        doctorName: item.doctorName || 'Dr. Tiwari',
+                        data: mapper(item)
+                    }));
+                };
+
+                const mappedMedicalHistory = mapHistoryItem(responseData.medicalHistory || [], item => ({
+                    historyText: item.historyDetails || item.medicalHistory || item.newHistoryEntry
+                }));
+
+                const vitalsArray = responseData.clinicalHistory || [];
+                const mappedVitalsHistory = mapHistoryItem(vitalsArray, item => {
+                    const metadataKeys = ['visitId', 'patientId', 'createdAt', 'updatedAt', 'doctorName'];
+                    const vitals: any = {};
+                    Object.keys(item).forEach(key => {
+                        if (!metadataKeys.includes(key)) vitals[key] = item[key];
+                    });
+                    return { vitals };
+                });
+
+                const rawReportsArray = reportsData.reportsHistory || reportsData.history || (Array.isArray(reportsData) ? reportsData : []);
+                const mappedReportsHistory = mapHistoryItem(rawReportsArray, item => ({
+                    reportNotes: item.reportNotes || item.reports,
+                    reportsAttached: item.filesAttached || (item.reportFiles ? item.reportFiles.length : 0)
+                }));
+
+                const mappedDiagnosisHistory = mapHistoryItem(responseData.diagnosisHistory || [], item => ({
+                    diagnosisText: item.diagnosis
+                }));
+
+                const mappedInvestigationsHistory = mapHistoryItem(responseData.investigationsHistory || [], item => ({
+                    selectedInvestigations: item.investigations || item.advisedInvestigations || [],
+                    customInvestigations: item.customInvestigations
+                }));
+
                 dispatch(setFullPatientHistory({
-                    clinicalHistory: responseData.clinicalHistory || [],
-                    medicalHistory: responseData.medicalHistory || [],
-                    diagnosisHistory: responseData.diagnosisHistory || [],
-                    investigationsHistory: responseData.investigationsHistory || [],
+                    clinicalHistory: mappedMedicalHistory, // fallback
+                    vitalsHistory: mappedVitalsHistory,
+                    reportsHistory: mappedReportsHistory,
+                    medicalHistory: mappedMedicalHistory,
+                    diagnosisHistory: mappedDiagnosisHistory,
+                    investigationsHistory: mappedInvestigationsHistory,
                     patientData: {
                         fullName: p.name || '',
                         age: p.age ? String(p.age) : '',
@@ -140,6 +190,7 @@ export const sendToWaitingRoom = createAsyncThunk<any, any, { state: RootState }
                 medicalHistory: patientData.medicalHistory || patientData.clinical?.historyText || '',
                 clinicalParameters: patientData.clinicalParameters || patientData.clinical?.vitals || {},
                 reportFiles: patientData.reportFiles || patientData.clinical?.reports || [],
+                reportNotes: patientData.reportNotes || patientData.clinical?.reportNotes || '',
 
                 // Diagnosis Info
                 diagnosis: patientData.diagnosis?.diagnosisText || (typeof patientData.diagnosis === 'string' ? patientData.diagnosis : ''),
@@ -223,12 +274,11 @@ export const autoSaveDraftToCloud = createAsyncThunk<
             // B1: No cloudPatientId → create the Patient master record first
             let resolvedPatientId = state.cloudPatientId;
             if (!resolvedPatientId) {
-                // NOTE: No `action` field here — Lambda's default case handles plain
-                // patient creation via processPatientData() when action is absent.
-                // Field names must match what processPatientData() expects: name/age/sex/mobile/address
+                // FIX: Explicitly route the action and provide a fallback for age
                 const createPayload = {
+                    action: 'processPatientData', 
                     name: state.basic.fullName,
-                    age: state.basic.age,
+                    age: state.basic.age || '0', 
                     sex: state.basic.sex,
                     mobile: state.basic.mobileNumber,
                     address: state.basic.address

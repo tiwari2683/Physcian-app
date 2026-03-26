@@ -32,9 +32,14 @@ export const DiagnosisTab: React.FC = () => {
         dispatch(updateDiagnosisDetails({ selectedInvestigations: current }));
     };
 
+    // ⚠️ These strings must EXACTLY match the PWA's DiagnosisTab.tsx COMMON_INVESTIGATIONS.
+    // If you add or rename any string here, update the PWA list too.
     const investigations = [
-        'CBC', 'Blood Sugar', 'HbA1c', 'Lipid Profile', 'LFT', 'KFT',
-        'Thyroid', 'Urine', 'X-Ray', 'Ultrasound', 'ECG', 'Vitamin D3'
+        'Complete Blood Count (CBC)', 'Blood Sugar - Fasting', 'Blood Sugar - Post Prandial',
+        'HbA1c', 'Lipid Profile', 'Liver Function Test (LFT)', 'Kidney Function Test (KFT)',
+        'Thyroid Profile', 'Urine Routine', 'X-Ray Chest', 'X-Ray - Other',
+        'Ultrasound Abdomen', 'ECG', '2D Echo', 'CT Scan', 'MRI',
+        'PFT (Pulmonary Function Test)', 'Blood Pressure Monitoring', 'Vitamin D3'
     ];
 
     return (

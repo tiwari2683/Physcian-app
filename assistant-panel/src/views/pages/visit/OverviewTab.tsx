@@ -47,11 +47,14 @@ export const OverviewTab: React.FC = () => {
         try {
             // 0. Ensure Cloud Record exists before uploading files
             let resolvedId = effectiveId;
-            if (!resolvedId && Object.keys(pendingFiles).length > 0) {
-                console.log('🔄 No Cloud ID found for pending files. Forcing immediate sync...');
+            let resolvedVisitId = visitId || patientVisitState.visitId;
+            
+            if (!resolvedId || !resolvedVisitId) {
+                console.log('🔄 No Cloud ID or Visit ID found. Forcing immediate sync...');
                 const syncResult = await dispatch(autoSaveDraftToCloud()).unwrap();
                 resolvedId = syncResult.cloudPatientId;
-                if (!resolvedId) throw new Error("Could not create cloud record. Please check your connection.");
+                resolvedVisitId = syncResult.visitId || null;
+                if (!resolvedId || !resolvedVisitId) throw new Error("Could not create cloud record. Please check your connection.");
             }
 
             // 1. Upload Pending Files sequentially (to avoid overwhelming network/lambda)
@@ -77,8 +80,8 @@ export const OverviewTab: React.FC = () => {
 
             // 2. Send to Waiting Room (Thunk handles payload construction from Redux state)
             await dispatch(sendToWaitingRoom({
-                visitId: visitId || patientVisitState.visitId,
-                patientId: resolvedId || patientVisitState.patientId || patientVisitState.cloudPatientId,
+                visitId: resolvedVisitId,
+                patientId: resolvedId,
                 clinical: {
                     ...clinical,
                     reports: finalizedReports
@@ -101,7 +104,24 @@ export const OverviewTab: React.FC = () => {
             navigate('/');
         } catch (error: any) {
             console.error('Error sending to Doctor or Uploading files:', error);
-            const msg = error.message || error || 'An unexpected error occurred.';
+            
+            // Extract a proper error message if error is an object
+            let msg = 'An unexpected error occurred.';
+            if (typeof error === 'string') {
+                msg = error;
+            } else if (error && typeof error === 'object') {
+                if (error.message) {
+                    msg = error.message;
+                } else if (error.error) {
+                    msg = error.error;
+                } else {
+                    try {
+                        msg = JSON.stringify(error);
+                    } catch (e) {
+                        msg = 'Unknown object error';
+                    }
+                }
+            }
             alert(`Submission Failed: ${msg}`);
             
             // Unlock UI so the user can try again, WITHOUT losing their local draft data

@@ -80,6 +80,24 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
   const clinicalTabRef = useRef<any>(null);
   const diagnosisTabRef = useRef<any>(null);
 
+  // =========================================================================
+  // UX FIX: Instantly mark visit as IN_PROGRESS so it drops off Assistant Queue
+  // =========================================================================
+  useEffect(() => {
+    if (activeVisitId) {
+      console.log(`🩺 Doctor opened visit ${activeVisitId}. Marking as IN_PROGRESS...`);
+      fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          action: "updateVisitStatus",
+          visitId: activeVisitId,
+          status: "IN_PROGRESS"
+        })
+      }).catch(err => console.error("Failed to update status to IN_PROGRESS", err));
+    }
+  }, [activeVisitId]);
+
   // Utility functions for date/time formatting
   const formatDate = (dateString: string) => {
     if (!dateString) return "N/A";
@@ -448,12 +466,12 @@ const NewPatientForm: React.FC<NewPatientFormProps> = ({
           }
         }
 
-        // 5. Atomic Completion
+        // 5. Atomic Completion (FIX: PASS ACUTEDATA PROPERLY NESTED)
         console.log(`🚀 [Phase 3] Dispatching completion for visit: ${resolvedVisitId}`);
         const completionResult = await completeVisit({
           patientId: resolvedPatientId!,
           visitId: resolvedVisitId as string,
-          ...acuteData
+          acuteData: acuteData // <-- FIX: Properly nest the acuteData payload!
         });
 
         if (!completionResult.success) {

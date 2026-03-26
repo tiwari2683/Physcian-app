@@ -9,7 +9,6 @@ import type {
     VisitHistoryItem
 } from '../../models';
 
-
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export interface PatientVisitState {
@@ -35,8 +34,10 @@ export interface PatientVisitState {
     };
 
     // History State (Independent arrays as per refinements)
-    clinicalHistory: VisitHistoryItem[];
-    medicalHistory: VisitHistoryItem[];
+    clinicalHistory: VisitHistoryItem[]; // Used for complaints history
+    vitalsHistory: VisitHistoryItem[];   // Used for vitals history
+    reportsHistory: VisitHistoryItem[];  // Used for reports history
+    medicalHistory: VisitHistoryItem[];  // Legacy/Fallback, actually Complaints
     diagnosisHistory: VisitHistoryItem[];
     investigationsHistory: VisitHistoryItem[];
 
@@ -54,7 +55,7 @@ export interface PatientVisitState {
 
     // ── Task 4: UI State ─────────────────────────────────────────────────────
     isHistoryDrawerOpen: boolean;
-    historyDrawerType: 'clinical' | 'medical' | 'diagnosis' | 'investigations';
+    historyDrawerType: 'clinical' | 'medical' | 'diagnosis' | 'investigations' | 'reports' | 'vitals';
 }
 
 const getInitialState = (): PatientVisitState => ({
@@ -89,6 +90,8 @@ const getInitialState = (): PatientVisitState => ({
     },
 
     clinicalHistory: [],
+    vitalsHistory: [],
+    reportsHistory: [],
     medicalHistory: [],
     diagnosisHistory: [],
     investigationsHistory: [],
@@ -172,6 +175,8 @@ const patientVisitSlice = createSlice({
         // Loading full history payload
         setFullPatientHistory: (state, action: PayloadAction<{
             clinicalHistory: any[];
+            vitalsHistory?: any[];
+            reportsHistory?: any[];
             medicalHistory: any[];
             diagnosisHistory: any[];
             investigationsHistory: any[];
@@ -180,10 +185,12 @@ const patientVisitSlice = createSlice({
             lastLockedVisitDate?: string;
         }>) => {
             state.clinicalHistory = action.payload.clinicalHistory;
+            state.vitalsHistory = action.payload.vitalsHistory || [];
+            state.reportsHistory = action.payload.reportsHistory || [];
             state.medicalHistory = action.payload.medicalHistory;
             state.diagnosisHistory = action.payload.diagnosisHistory;
             state.investigationsHistory = action.payload.investigationsHistory;
-            
+
             // Hydrate demographics
             state.basic = { ...state.basic, ...action.payload.patientData };
 
@@ -197,7 +204,7 @@ const patientVisitSlice = createSlice({
                 if (av.clinicalParameters) {
                     state.clinical.vitals = av.clinicalParameters;
                 }
-                
+
                 // History text
                 if (av.medicalHistory) {
                     state.clinical.historyText = av.medicalHistory;
@@ -208,15 +215,19 @@ const patientVisitSlice = createSlice({
                     state.diagnosis.diagnosisText = av.diagnosis;
                 }
 
-                // Investigations
+                // SAFE PARSE: Prevent JSON.parse crashes on empty strings
                 if (av.advisedInvestigations) {
-                    try {
-                        const invs = JSON.parse(av.advisedInvestigations);
-                        if (Array.isArray(invs)) {
-                            state.diagnosis.selectedInvestigations = invs;
+                    if (typeof av.advisedInvestigations === 'string' && av.advisedInvestigations.trim() !== '') {
+                        try {
+                            const invs = JSON.parse(av.advisedInvestigations);
+                            if (Array.isArray(invs)) {
+                                state.diagnosis.selectedInvestigations = invs;
+                            }
+                        } catch (e) {
+                            console.warn("Silent catch: Failed to parse investigations");
                         }
-                    } catch (e) {
-                        console.warn("Failed to parse investigations", e);
+                    } else if (Array.isArray(av.advisedInvestigations)) {
+                        state.diagnosis.selectedInvestigations = av.advisedInvestigations;
                     }
                 }
 
@@ -224,7 +235,7 @@ const patientVisitSlice = createSlice({
                 if (av.medications && Array.isArray(av.medications)) {
                     state.prescription.medications = av.medications;
                 }
-                
+
                 // Reports
                 if (av.reportFiles && Array.isArray(av.reportFiles)) {
                     state.clinical.reports = av.reportFiles;
@@ -272,6 +283,8 @@ const patientVisitSlice = createSlice({
             state.prescription = { ...patientData.prescription, isAssistant: true };
 
             state.clinicalHistory = patientData.clinicalHistory || [];
+            state.vitalsHistory = patientData.vitalsHistory || [];
+            state.reportsHistory = patientData.reportsHistory || [];
             state.medicalHistory = patientData.medicalHistory || [];
             state.diagnosisHistory = patientData.diagnosisHistory || [];
             state.investigationsHistory = patientData.investigationsHistory || [];

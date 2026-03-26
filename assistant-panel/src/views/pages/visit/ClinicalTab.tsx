@@ -158,7 +158,7 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
 // ─────────────────────────────────────────────────────────────────────────────
 export const ClinicalTab: React.FC = () => {
     const dispatch = useAppDispatch();
-    const { basic, clinical, clinicalHistory, patientId, cloudPatientId, isVisitLocked } = useAppSelector((state) => state.patientVisit);
+    const { basic, clinical, vitalsHistory, patientId, cloudPatientId, isVisitLocked } = useAppSelector((state) => state.patientVisit);
     const { addPendingFile } = usePendingFiles();
 
     // ── ID RESOLUTION STRATEGY ──────────────────────────────────────────────
@@ -249,7 +249,7 @@ export const ClinicalTab: React.FC = () => {
                     <Button
                         variant="secondary"
                         className="text-xs py-1 h-auto flex gap-1"
-                        onClick={() => dispatch(toggleHistoryDrawer({ open: true, type: 'clinical' }))}
+                        onClick={() => dispatch(toggleHistoryDrawer({ open: true, type: 'medical' }))}
                     >
                         <HistoryIcon size={14} /> View History
                     </Button>
@@ -272,25 +272,27 @@ export const ClinicalTab: React.FC = () => {
                             ? 'Longitudinal comparison — scroll horizontally for past visits'
                             : 'Enter vital parameters from reports'}
                     </p>
-                    <button
-                        onClick={() => setIsCompareMode(prev => !prev)}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${isCompareMode
-                            ? 'bg-[#2563EB] text-white border-[#1D4ED8] shadow-sm'
-                            : 'bg-white text-[#2563EB] border-[#2563EB] hover:bg-[#EFF6FF]'
-                            }`}
-                    >
-                        {isCompareMode
-                            ? <><X size={13} /> Close Compare</>
-                            : <><Table size={13} /> Compare Table</>
-                        }
-                    </button>
+                    <div className="flex gap-2">
+                        <button
+                            onClick={() => setIsCompareMode(prev => !prev)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${isCompareMode
+                                ? 'bg-[#2563EB] text-white border-[#1D4ED8] shadow-sm'
+                                : 'bg-white text-[#2563EB] border-[#2563EB] hover:bg-[#EFF6FF]'
+                                }`}
+                        >
+                            {isCompareMode
+                                ? <><X size={13} /> Close Compare</>
+                                : <><Table size={13} /> Compare Table</>
+                            }
+                        </button>
+                    </div>
                 </div>
 
                 {isCompareMode ? (
                     /* ── Compare Table View ─────────────────────────────── */
                     <CompareTable
                         vitals={clinical.vitals}
-                        history={clinicalHistory}
+                        history={vitalsHistory}
                         onVitalsChange={handleVitalsChange}
                         isLocked={isVisitLocked}
                     />
@@ -358,7 +360,16 @@ export const ClinicalTab: React.FC = () => {
                 </div>
 
                 <div className="mt-4">
-                    <label className="text-sm font-semibold text-type-heading mb-1 block">Report Details / Notes</label>
+                    <div className="flex justify-between items-center mb-1">
+                        <label className="text-sm font-semibold text-type-heading block">Report Details / Notes</label>
+                        <Button
+                            variant="secondary"
+                            className="text-xs py-1 h-auto flex gap-1"
+                            onClick={() => dispatch(toggleHistoryDrawer({ open: true, type: 'reports' }))}
+                        >
+                            <HistoryIcon size={14} /> View History
+                        </Button>
+                    </div>
                     <textarea
                         value={clinical.reportNotes || ''}
                         onChange={handleReportNotesChange}

@@ -247,7 +247,7 @@ export const usePatientForm = ({
                     console.log(`[Phase 3] Dual-Query Hydration for ${patientId}...`);
                     try {
                         const headers = { "Content-Type": "application/json", Accept: "application/json", "Cache-Control": "no-cache" };
-                        
+
                         // 1. Fetch BOTH data sources concurrently
                         const [patientResult, activeVisit] = await Promise.all([
                             fetch(API_ENDPOINTS.PATIENT_PROCESSOR, {
@@ -278,35 +278,38 @@ export const usePatientForm = ({
                         }
 
                         // 3. Hydrate Acute Visit Data (If active visit exists)
-                        if (activeVisit) {
-                            console.log(`[Phase 3] Hydrating Acute data from Visit: ${activeVisit.visitId}`);
-                            setActiveVisitId(activeVisit.visitId);
+                        // FIX: Safely extract actual visit record avoiding undefined crash
+                        const actualVisitRecord = activeVisit?.activeVisit || activeVisit?.data?.activeVisit || (activeVisit?.visitId ? activeVisit : null);
+
+                        if (actualVisitRecord && actualVisitRecord.visitId) {
+                            console.log(`[Phase 3] Hydrating Acute data from Visit: ${actualVisitRecord.visitId}`);
+                            setActiveVisitId(actualVisitRecord.visitId);
 
                             // Overwrite acute fields with data from the specific visit record
                             setPatientData(prev => ({
                                 ...prev,
-                                diagnosis: activeVisit.diagnosis || "",
-                                advisedInvestigations: activeVisit.advisedInvestigations || "",
-                                reports: activeVisit.reports || "",
+                                diagnosis: actualVisitRecord.diagnosis || "",
+                                advisedInvestigations: actualVisitRecord.advisedInvestigations || "",
+                                reports: actualVisitRecord.reports || "",
                                 // Promote WAITING history if present in visit
-                                newHistoryEntry: (activeVisit.status === "WAITING" && activeVisit.medicalHistory) 
-                                    ? activeVisit.medicalHistory 
+                                newHistoryEntry: (actualVisitRecord.status === "WAITING" && actualVisitRecord.medicalHistory)
+                                    ? actualVisitRecord.medicalHistory
                                     : prev.newHistoryEntry
                             }));
 
-                            if (activeVisit.clinicalParameters) {
-                                let cParams = { ...activeVisit.clinicalParameters };
+                            if (actualVisitRecord.clinicalParameters) {
+                                let cParams = { ...actualVisitRecord.clinicalParameters };
                                 if (typeof cParams.date === "string") cParams.date = new Date(cParams.date);
                                 if (!cParams.date || isNaN(cParams.date.getTime())) cParams.date = new Date();
                                 setClinicalParameters(cParams);
                             }
 
-                            if (activeVisit.medications && Array.isArray(activeVisit.medications)) {
-                                setMedications(activeVisit.medications);
+                            if (actualVisitRecord.medications && Array.isArray(actualVisitRecord.medications)) {
+                                setMedications(actualVisitRecord.medications);
                             }
 
-                            if (activeVisit.reportFiles && Array.isArray(activeVisit.reportFiles)) {
-                                const mappedFiles = activeVisit.reportFiles.map((file: any) => ({
+                            if (actualVisitRecord.reportFiles && Array.isArray(actualVisitRecord.reportFiles)) {
+                                const mappedFiles = actualVisitRecord.reportFiles.map((file: any) => ({
                                     uri: file.url || file.signedUrl || "",
                                     name: file.name || file.fileName || "",
                                     type: file.type || file.fileType || "application/pdf",
@@ -314,7 +317,7 @@ export const usePatientForm = ({
                                     s3Key: file.s3Key || file.key || null,
                                     uploadedToS3: true,
                                     uploadDate: file.uploadDate || file.uploadedAt || null,
-                                    fileId: file.s3Key || file.key || `visit_${activeVisit.visitId}_${Math.random().toString(36).substring(2, 7)}`,
+                                    fileId: file.s3Key || file.key || `visit_${actualVisitRecord.visitId}_${Math.random().toString(36).substring(2, 7)}`,
                                 }));
                                 setReportFiles(deduplicateFiles(mappedFiles));
                             }
@@ -652,11 +655,6 @@ export const usePatientForm = ({
         }
     };
 
-    // History helpers removed (Phase 3 cleanup) - newHistoryEntry in patientData handles this now.
-    // saveNewHistoryEntryToStorage removed
-    // includeNewHistoryEntry removed
-    // checkAndIncludePendingHistory removed
-
     // Date Handler
     const handleDateChange = (event: any, selectedDate?: Date) => {
         setShowDatePicker(false);
@@ -756,7 +754,6 @@ export const usePatientForm = ({
         pickDocument,
         removeReportFile,
         uploadFilesToS3,
-        // legacy history functions removed from exports
         handleDateChange,
         currentDraftId, // Export the ref if needed
         createBasicPatient, // New export

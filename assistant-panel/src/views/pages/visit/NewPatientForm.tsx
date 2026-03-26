@@ -6,17 +6,15 @@ import {
     initializeNewVisit,
     initializeExistingVisit,
     loadDraftIntoState,
-    setSaveStatus,
-    setCloudPatientId,
 } from '../../../controllers/slices/patientVisitSlice';
-import { autoSaveDraftToCloud, initiateVisitThunk, fetchPatientDataThunk } from '../../../controllers/apiThunks';
+import { initiateVisitThunk, fetchPatientDataThunk } from '../../../controllers/apiThunks';
 import { BasicTab } from './BasicTab';
 import { ClinicalTab } from './ClinicalTab';
 import { DiagnosisTab } from './DiagnosisTab';
 import { OverviewTab } from './OverviewTab';
 import { DraftService } from '../../../services/draftService';
 import { HistoryDrawer } from './components/HistoryDrawer';
-import { Stethoscope, ClipboardList, Activity, FileText, CheckCircle2, Clock, AlertCircle, ChevronLeft, ChevronRight, Save, ShieldCheck } from 'lucide-react';
+import { Stethoscope, ClipboardList, Activity, FileText, Clock, AlertCircle, ChevronLeft, ChevronRight, Save, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 const TABS = [
@@ -41,41 +39,16 @@ export const NewPatientForm: React.FC = () => {
     const getSaveStatusDisplay = () => {
         if (isVisitLocked) return null;
 
-        switch (saveStatus) {
-            case 'saving':
-                return (
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-                        <Clock size={12} className="animate-spin text-primary-base" />
-                        <span>Autosaving</span>
-                    </div>
-                );
-            case 'saved':
-                return (
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-secondary-base bg-secondary-light px-3 py-1.5 rounded-full border border-secondary-base/10">
-                        <CheckCircle2 size={12} />
-                        <span>Cloud Synced</span>
-                    </div>
-                );
-            case 'error':
-                return (
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-rose-500 bg-rose-50 px-3 py-1.5 rounded-full border border-rose-100">
-                        <AlertCircle size={12} />
-                        <span>Sync Error</span>
-                    </div>
-                );
-            default:
-                return (
-                    <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-                        <Save size={12} />
-                        <span>Draft Ready</span>
-                    </div>
-                );
-        }
+        return (
+            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+                <Save size={12} />
+                <span>Local Draft Ready</span>
+            </div>
+        );
     };
 
     const isInitialized = useRef(false);
     const localSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-    const cloudSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
     const patientVisitStateRef = useRef(patientVisitState);
 
     useEffect(() => {
@@ -159,29 +132,8 @@ export const NewPatientForm: React.FC = () => {
         return () => { if (localSaveTimerRef.current) clearTimeout(localSaveTimerRef.current); };
     }, [patientVisitState, isVisitLocked, patientId, draftId, isSubmitting]); 
 
-    useEffect(() => {
-        if (!isInitialized.current) return;
-        const currentId = draftId || patientId;
-        if (!isLocalDraftId(currentId) || isVisitLocked || !basic.fullName || isSubmitting) return;
-
-        if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current);
-        dispatch(setSaveStatus('saving'));
-        cloudSaveTimerRef.current = setTimeout(async () => {
-            const result = await dispatch(autoSaveDraftToCloud());
-            if (autoSaveDraftToCloud.fulfilled.match(result)) {
-                const { cloudPatientId: newCloudId } = result.payload;
-                if (newCloudId && newCloudId !== cloudPatientId) {
-                    dispatch(setCloudPatientId(newCloudId));
-                    const savedDraft = DraftService.getDraft(currentId!);
-                    if (savedDraft) DraftService.saveDraft(currentId!, { ...savedDraft, cloudPatientId: newCloudId });
-                }
-                dispatch(setSaveStatus('saved'));
-            } else {
-                dispatch(setSaveStatus('error'));
-            }
-        }, 3000);
-        return () => { if (cloudSaveTimerRef.current) clearTimeout(cloudSaveTimerRef.current); };
-    }, [patientVisitState, isVisitLocked, patientId, draftId, isSubmitting]); 
+    // ❌ REMOVED: autoSaveDraftToCloud effect to enforce strict localStorage-only intake.
+    // Cloud sync only happens on final 'Send to Doctor' click.
 
     const containerVariants = {
         hidden: { opacity: 0, y: 10 },
@@ -311,9 +263,6 @@ export const NewPatientForm: React.FC = () => {
                             {activeTab < 3 && (
                                 <button
                                     onClick={() => {
-                                        if (activeTab === 0 && basic.fullName && !isVisitLocked && !isSubmitting) {
-                                            dispatch(autoSaveDraftToCloud());
-                                        }
                                         dispatch(setActiveTab(activeTab + 1));
                                     }}
                                     className="btn-primary flex-1 sm:flex-none justify-center group"

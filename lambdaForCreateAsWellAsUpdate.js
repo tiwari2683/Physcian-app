@@ -265,11 +265,18 @@ async function handleGetPatient(patientId, forceRefresh = false) {
             patientData.reportFiles = await enrichPatientFilesWithSignedUrls(patientData.reportFiles);
         }
 
-        // Get history data
-        const clinicalHistoryResponse = await fetchClinicalHistory(patientId);
-        const medicalHistoryResponse = await fetchMedicalHistory(patientId);
-        const diagnosisHistoryResponse = await fetchDiagnosisHistory(patientId);
-        const investigationsHistoryResponse = await fetchInvestigationsHistory(patientId);
+        // Get history data concurrently
+        const [
+            clinicalHistoryResponse,
+            medicalHistoryResponse,
+            diagnosisHistoryResponse,
+            investigationsHistoryResponse
+        ] = await Promise.all([
+            fetchClinicalHistory(patientId),
+            fetchMedicalHistory(patientId),
+            fetchDiagnosisHistory(patientId),
+            fetchInvestigationsHistory(patientId)
+        ]);
 
         return {
             statusCode: 200,
@@ -424,6 +431,64 @@ async function deletePatientFile(requestData) {
 // MAIN HANDLER
 // ============================================
 
+async function getPatientHistory(requestData) {
+    const { patientId, type } = requestData;
+
+    if (!patientId) {
+        return formatErrorResponse('patientId is required');
+    }
+
+    try {
+        console.log(`🔍 Fetching history for patient: ${patientId}, type: ${type}`);
+        
+        const command = new QueryCommand({
+            TableName: VISITS_TABLE,
+            IndexName: 'patientId-status-index',
+            KeyConditionExpression: 'patientId = :pid',
+            ExpressionAttributeValues: {
+                ':pid': patientId
+            },
+            ScanIndexForward: false 
+        });
+
+        const data = await dynamodb.send(command);
+
+        let formattedRecords = [];
+
+        if (type === 'diagnoses') {
+            formattedRecords = (data.Items || [])
+                .filter(item => item.diagnosis)
+                .map(item => ({
+                    date: item.visitDate || item.visitId || new Date().toISOString(),
+                    title: item.diagnosis.split('\n')[0] || 'Diagnosis',
+                    details: item.diagnosis, 
+                    doctorName: item.doctorName || 'Dr. Tiwari'
+                }));
+        } else if (type === 'investigations') {
+            formattedRecords = (data.Items || [])
+                .filter(item => (item.selectedInvestigations && item.selectedInvestigations.length > 0) || item.customInvestigations)
+                .map(item => {
+                    const standard = item.selectedInvestigations ? item.selectedInvestigations.join(', ') : '';
+                    const custom = item.customInvestigations ? `Other: ${item.customInvestigations}` : '';
+                    const details = [standard, custom].filter(Boolean).join(' | ');
+
+                    return {
+                        date: item.visitDate || item.visitId || new Date().toISOString(),
+                        title: 'Advised Investigations',
+                        details: details,
+                        doctorName: item.doctorName || 'Dr. Tiwari'
+                    };
+                });
+        }
+
+        return formatSuccessResponse(formattedRecords);
+
+    } catch (error) {
+        console.error("DynamoDB Query Error:", error);
+        return formatErrorResponse(`Failed to fetch history: ${error.message}`);
+    }
+}
+
 export const handler = async (event, context) => {
     try {
         console.log("LOG: Lambda invoked");
@@ -488,6 +553,9 @@ export const handler = async (event, context) => {
 
         // Route to appropriate handler
         switch (action) {
+            case 'getPatientHistory':
+                return await getPatientHistory(requestData);
+                
             case 'getPresignedUploadUrl':
                 return await generatePresignedUploadUrl(requestData);
 
@@ -526,6 +594,9 @@ export const handler = async (event, context) => {
 
             case 'getMedicalHistory':
                 return await fetchMedicalHistory(requestData.patientId);
+
+            case 'getReportsHistory':
+                return await fetchReportsHistory(requestData.patientId);
 
             case 'getDiagnosisHistory':
                 return await fetchDiagnosisHistory(requestData.patientId);
@@ -879,26 +950,41 @@ async function deduplicateReportFiles(existingFiles = [], incomingFiles = []) {
 }
 
 // ============================================
-// HISTORY FETCH FUNCTIONS
+// HISTORY FETCH FUNCTIONS (Consolidated via Visits Table)
 // ============================================
+
+async function _fetchCompletedVisits(patientId) {
+    const result = await dynamodb.send(new QueryCommand({
+        TableName: VISITS_TABLE,
+        IndexName: 'patientId-status-index',
+        KeyConditionExpression: "patientId = :pid AND #s = :status",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":pid": patientId, ":status": "COMPLETED" },
+        ScanIndexForward: false, // Latest first
+        Limit: 50
+    }));
+    return result.Items || [];
+}
 
 async function fetchClinicalHistory(patientId) {
     try {
         console.log(`📊 Fetching clinical history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const clinicalHistory = visits
+            .filter(v => v.clinicalParameters && Object.keys(v.clinicalParameters).length > 0)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                ...v.clinicalParameters
+            }));
 
-        const result = await dynamodb.send(new QueryCommand({
-            TableName: CLINICAL_HISTORY_TABLE,
-            KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: { ":pid": patientId },
-            ScanIndexForward: false, // Latest first
-            Limit: 50 // Reasonable limit
-        }));
-
-        console.log(`✅ Found ${result.Items?.length || 0} clinical history entries`);
-        return formatSuccessResponse({ success: true, clinicalHistory: result.Items || [] });
+        console.log(`✅ Found ${clinicalHistory.length} clinical history entries in Visits`);
+        return formatSuccessResponse({ success: true, clinicalHistory });
     } catch (error) {
         console.error(`❌ Clinical history fetch error:`, error.message);
-        // Return empty on error - non-blocking
         return formatSuccessResponse({ success: false, clinicalHistory: [], error: error.message });
     }
 }
@@ -906,37 +992,68 @@ async function fetchClinicalHistory(patientId) {
 async function fetchMedicalHistory(patientId) {
     try {
         console.log(`🏥 Fetching medical history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const medicalHistory = visits
+            .filter(v => v.newHistoryEntry || v.historyDetails || v.medicalHistory)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                historyDetails: v.newHistoryEntry || v.historyDetails || v.medicalHistory,
+                medicalHistory: v.medicalHistory || v.newHistoryEntry || v.historyDetails
+            }));
 
-        const result = await dynamodb.send(new QueryCommand({
-            TableName: MEDICAL_HISTORY_TABLE,
-            KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: { ":pid": patientId },
-            ScanIndexForward: false,
-            Limit: 50
-        }));
-
-        console.log(`✅ Found ${result.Items?.length || 0} medical history entries`);
-        return formatSuccessResponse({ success: true, medicalHistory: result.Items || [] });
+        console.log(`✅ Found ${medicalHistory.length} medical history entries in Visits`);
+        return formatSuccessResponse({ success: true, medicalHistory });
     } catch (error) {
         console.error(`❌ Medical history fetch error:`, error.message);
         return formatSuccessResponse({ success: false, medicalHistory: [], error: error.message });
     }
 }
 
+async function fetchReportsHistory(patientId) {
+    try {
+        console.log(`📄 Fetching reports history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const reportsHistory = visits
+            .filter(v => v.reportNotes || v.reports)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                reportNotes: v.reportNotes || v.reports || 'No notes provided',
+                filesAttached: v.reportFiles ? v.reportFiles.length : 0
+            }));
+
+        console.log(`✅ Found ${reportsHistory.length} reports history entries in Visits`);
+        return formatSuccessResponse({ success: true, reportsHistory });
+    } catch (error) {
+        console.error(`❌ Reports history fetch error:`, error.message);
+        return formatSuccessResponse({ success: false, reportsHistory: [], error: error.message });
+    }
+}
+
 async function fetchDiagnosisHistory(patientId) {
     try {
         console.log(`🩺 Fetching diagnosis history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const diagnosisHistory = visits
+            .filter(v => v.diagnosis)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                diagnosis: v.diagnosis
+            }));
 
-        const result = await dynamodb.send(new QueryCommand({
-            TableName: DIAGNOSIS_HISTORY_TABLE,
-            KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: { ":pid": patientId },
-            ScanIndexForward: false,
-            Limit: 50
-        }));
-
-        console.log(`✅ Found ${result.Items?.length || 0} diagnosis history entries`);
-        return formatSuccessResponse({ success: true, diagnosisHistory: result.Items || [] });
+        console.log(`✅ Found ${diagnosisHistory.length} diagnosis history entries in Visits`);
+        return formatSuccessResponse({ success: true, diagnosisHistory });
     } catch (error) {
         console.error(`❌ Diagnosis history fetch error:`, error.message);
         return formatSuccessResponse({ success: false, diagnosisHistory: [], error: error.message });
@@ -946,17 +1063,21 @@ async function fetchDiagnosisHistory(patientId) {
 async function fetchInvestigationsHistory(patientId) {
     try {
         console.log(`🔬 Fetching investigations history for: ${patientId}`);
+        const visits = await _fetchCompletedVisits(patientId);
+        
+        const investigationsHistory = visits
+            .filter(v => (v.advisedInvestigations && v.advisedInvestigations.length > 0) || v.customInvestigations)
+            .map(v => ({
+                visitId: v.visitId,
+                patientId: v.patientId,
+                createdAt: v.createdAt || v.updatedAt || new Date().toISOString(),
+                doctorName: v.doctorName || 'Dr. Tiwari',
+                investigations: v.advisedInvestigations || [],
+                customInvestigations: v.customInvestigations || ""
+            }));
 
-        const result = await dynamodb.send(new QueryCommand({
-            TableName: INVESTIGATIONS_HISTORY_TABLE,
-            KeyConditionExpression: "patientId = :pid",
-            ExpressionAttributeValues: { ":pid": patientId },
-            ScanIndexForward: false,
-            Limit: 50
-        }));
-
-        console.log(`✅ Found ${result.Items?.length || 0} investigations history entries`);
-        return formatSuccessResponse({ success: true, investigationsHistory: result.Items || [] });
+        console.log(`✅ Found ${investigationsHistory.length} investigations history entries in Visits`);
+        return formatSuccessResponse({ success: true, investigationsHistory });
     } catch (error) {
         console.error(`❌ Investigations history fetch error:`, error.message);
         return formatSuccessResponse({ success: false, investigationsHistory: [], error: error.message });
@@ -1400,16 +1521,18 @@ async function handleGetWaitingRoom() {
 
         const params = {
             TableName: VISITS_TABLE,
-            FilterExpression: "#s = :waiting",
+            IndexName: 'status-createdAt-index',
+            KeyConditionExpression: "#s = :waiting",
             ExpressionAttributeNames: {
                 "#s": "status"
             },
             ExpressionAttributeValues: {
                 ":waiting": "WAITING"
-            }
+            },
+            ScanIndexForward: true // Auto-sort by arrival time
         };
 
-        const result = await dynamodb.send(new ScanCommand(params));
+        const result = await dynamodb.send(new QueryCommand(params));
         const visits = result.Items || [];
 
         console.log(`✅ Found ${visits.length} patients in Waiting Room`);
@@ -1459,14 +1582,51 @@ async function getActiveVisit(patientId) {
         return formatErrorResponse(`Failed to get active visit: ${error.message}`);
     }
 }
+/**
+ * Updates ONLY the status of a visit (e.g., WAITING -> IN_PROGRESS)
+ * Used to immediately remove patients from the Assistant's Waiting Room queue
+ */
+async function updateVisitStatus(requestData) {
+    try {
+        const { visitId, status } = requestData;
+
+        if (!visitId || !status) {
+            return formatErrorResponse("Missing visitId or status");
+        }
+
+        console.log(`🔄 Updating visit ${visitId} status to ${status}`);
+
+        const params = {
+            TableName: VISITS_TABLE,
+            Key: { visitId },
+            UpdateExpression: "SET #status = :s, updatedAt = :t",
+            ExpressionAttributeNames: { "#status": "status" },
+            ExpressionAttributeValues: {
+                ":s": status,
+                ":t": new Date().toISOString()
+            }
+        };
+
+        await dynamodb.send(new UpdateCommand(params));
+        
+        return formatSuccessResponse({
+            success: true,
+            message: `Visit status updated to ${status}`
+        });
+    } catch (error) {
+        console.error('❌ Error updating visit status:', error);
+        return formatErrorResponse(`Failed to update status: ${error.message}`);
+    }
+}
 
 /**
  * Completes a visit (Doctor Consultation)
- * Atomically marks visit as COMPLETED and appends snapshot to Master record
+ * Atomically marks visit as COMPLETED, saves final clinical data, and appends snapshot to Master record
  */
 async function completeVisit(requestData) {
     try {
-        const { visitId, patientId, ...acuteData } = requestData;
+        // FIX 1: Correctly extract the explicitly nested acuteData object
+        const { visitId, patientId, acuteData = {} } = requestData;
 
         if (!visitId || !patientId) {
             return formatErrorResponse("Missing visitId or patientId");
@@ -1487,17 +1647,26 @@ async function completeVisit(requestData) {
         const params = {
             TransactItems: [
                 {
-                    // 1. Mark Visit as COMPLETED
+                    // FIX 2: Update the Visits table with the Doctor's final edits AND the status
                     Update: {
                         TableName: VISITS_TABLE,
                         Key: { visitId },
-                        UpdateExpression: 'SET #status = :c, updatedAt = :t, completedAt = :t',
+                        UpdateExpression: 'SET #status = :c, updatedAt = :t, completedAt = :t, diagnosis = :diag, medications = :meds, clinicalParameters = :vitals, reportNotes = :reports, medicalHistory = :hist, advisedInvestigations = :inv',
                         ExpressionAttributeNames: { '#status': 'status' },
-                        ExpressionAttributeValues: { ':c': 'COMPLETED', ':t': timestamp }
+                        ExpressionAttributeValues: { 
+                            ':c': 'COMPLETED', 
+                            ':t': timestamp,
+                            ':diag': acuteData.diagnosis || "",
+                            ':meds': acuteData.medications || [],
+                            ':vitals': acuteData.clinicalParameters || {},
+                            ':reports': acuteData.reports || acuteData.reportNotes || "",
+                            ':hist': acuteData.newHistoryEntry || acuteData.medicalHistory || "",
+                            ':inv': acuteData.advisedInvestigations || ""
+                        }
                     }
                 },
                 {
-                    // 2. Append to Patient Master visitHistory (Safe null handling)
+                    // Append to Patient Master visitHistory (Safe null handling)
                     Update: {
                         TableName: PATIENTS_TABLE,
                         Key: { patientId },
