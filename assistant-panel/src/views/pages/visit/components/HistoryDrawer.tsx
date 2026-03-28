@@ -183,16 +183,16 @@ export const HistoryDrawer: React.FC = () => {
                 className={`relative w-full max-w-md bg-white h-full shadow-2xl transform transition-transform duration-300 ease-out flex flex-col ${isHistoryDrawerOpen ? 'translate-x-0' : 'translate-x-full'}`}
             >
                 {/* Header */}
-                <div className="px-6 py-5 border-b border-borderColor flex items-center justify-between bg-white sticky top-0 z-10">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-gray-50 rounded-lg">
+                <div className="px-4 py-3 border-b border-borderColor flex items-center justify-between bg-white sticky top-0 z-10">
+                    <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-gray-50 rounded-lg">
                             {getIcon()}
                         </div>
                         <div>
-                            <h3 className="text-lg font-bold text-type-heading capitalize leading-none mb-1">
+                            <h3 className="text-base font-black text-type-heading capitalize leading-none mb-0.5">
                                 {historyDrawerType} History
                             </h3>
-                            <p className="text-xs text-type-body">Retrieved from longitudinal records</p>
+                            <p className="text-[10px] text-type-body font-bold uppercase tracking-tighter opacity-60">Longitudinal Records</p>
                         </div>
                     </div>
                     <button 
@@ -204,19 +204,19 @@ export const HistoryDrawer: React.FC = () => {
                 </div>
 
                 {/* Search Bar (Purely Visual for now) */}
-                <div className="px-6 py-3 bg-gray-50 border-b border-borderColor">
+                <div className="px-4 py-2 bg-slate-50 border-b border-borderColor">
                     <div className="relative">
-                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                        <Search size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input 
                             type="text" 
                             placeholder="Filter records..." 
-                            className="w-full pl-9 pr-4 py-2 border border-borderColor rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary-base/20"
+                            className="w-full pl-9 pr-4 py-1.5 border border-borderColor rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-primary-base/20"
                         />
                     </div>
                 </div>
 
                 {/* Scrollable Content */}
-                <div className="flex-1 overflow-y-auto px-6 py-6 scroll-smooth">
+                <div className="flex-1 overflow-y-auto px-4 py-4 scroll-smooth">
                     {!hasPatientId ? (
                         <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-20 px-6">
                             <div className="p-6 bg-amber-50 rounded-full border border-dashed border-amber-200">
@@ -238,36 +238,36 @@ export const HistoryDrawer: React.FC = () => {
                             </div>
                         </div>
                     ) : (
-                        <div className="space-y-10">
+                        <div className="space-y-6">
                             {sortedDates.map(date => (
                                 <div key={date} className="relative">
                                     {/* Date Header */}
-                                    <div className="flex items-center gap-3 mb-6 sticky top-0 bg-white py-1 z-10">
-                                        <div className="p-1.5 bg-primary-base rounded text-white">
-                                            <Calendar size={14} />
+                                    <div className="flex items-center gap-2 mb-4 sticky top-0 bg-white py-1 z-10">
+                                        <div className="p-1 bg-primary-base rounded text-white shadow-sm">
+                                            <Calendar size={12} />
                                         </div>
-                                        <h4 className="font-bold text-type-heading text-sm uppercase tracking-wider">{date}</h4>
-                                        <div className="flex-1 h-px bg-gray-100" />
+                                        <h4 className="font-black text-type-heading text-[11px] uppercase tracking-widest">{date}</h4>
+                                        <div className="flex-1 h-px bg-slate-100" />
                                     </div>
 
                                     {/* Items for this date */}
-                                    <div className="space-y-6 ml-4 border-l-2 border-primary-light">
+                                    <div className="space-y-4 ml-3 border-l-2 border-primary-light">
                                         {groupedHistory[date].map((item: any, idx: number) => (
                                             <div key={idx} className="relative pl-6">
                                                 {/* Timeline Bullet */}
                                                 <div className="absolute left-[-9px] top-6 w-4 h-4 rounded-full bg-white border-4 border-primary-base" />
                                                 
-                                                <div className="bg-white border border-borderColor rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-200 border-l-4 border-l-primary-base">
-                                                    <div className="px-4 py-2 bg-gray-50/50 border-b border- borderColor flex justify-between items-center">
-                                                        <span className="text-[10px] font-bold text-primary-dark tracking-widest flex items-center gap-1 uppercase">
-                                                            <Clock size={12} />
+                                                <div className="bg-white border border-borderColor rounded-xl overflow-hidden shadow-glass-sm hover:shadow-glass transition-all duration-200 border-l-4 border-l-primary-base">
+                                                    <div className="px-3 py-1.5 bg-slate-50/50 border-b border-borderColor/50 flex justify-between items-center">
+                                                        <span className="text-[9px] font-black text-primary-dark tracking-tighter flex items-center gap-1 uppercase">
+                                                            <Clock size={10} />
                                                             {new Date(item.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
                                                         </span>
-                                                        <span className="text-[10px] font-bold text-gray-400 bg-white px-2 py-0.5 rounded border border-gray-100 uppercase">
+                                                        <span className="text-[9px] font-black text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-100 uppercase tracking-tighter">
                                                             Visit #{historyData.length - (historyData.indexOf(item))}
                                                         </span>
                                                     </div>
-                                                    <div className="p-4 leading-relaxed">
+                                                    <div className="p-3 leading-relaxed">
                                                         {renderContent(item)}
                                                     </div>
                                                 </div>
@@ -281,10 +281,9 @@ export const HistoryDrawer: React.FC = () => {
                 </div>
 
                 {/* Footer */}
-                <div className="p-6 border-t border-borderColor bg-gray-50/50">
-                    <p className="text-[10px] text-center text-type-body font-medium italic">
-                        Viewing historical snapshots from patient visit history. 
-                        Data is strictly read-only and contextually grouped.
+                <div className="p-4 border-t border-borderColor bg-slate-50/50">
+                    <p className="text-[9px] text-center text-type-body font-black uppercase tracking-tighter opacity-40 italic">
+                        Longitudinal Snapshot Data · Read-Only Context
                     </p>
                 </div>
             </div>

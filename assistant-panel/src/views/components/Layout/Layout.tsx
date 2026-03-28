@@ -28,8 +28,8 @@ export const Layout = () => {
     };
 
     const navItemClass = ({ isActive }: { isActive: boolean }) =>
-        `flex items-center justify-between px-4 py-3.5 rounded-2xl font-bold transition-all duration-300 group ${isActive
-            ? 'bg-primary-base text-white shadow-lg shadow-primary-base/25'
+        `flex items-center justify-between px-4 py-2.5 rounded-xl font-bold transition-all duration-300 group ${isActive
+            ? 'bg-primary-base text-white shadow-md shadow-primary-base/25'
             : 'text-type-body hover:bg-slate-100 hover:text-type-heading'
         }`;
 
@@ -64,14 +64,14 @@ export const Layout = () => {
             {/* Desktop Sidebar */}
             <aside className="w-72 bg-white border-r border-borderColor flex-col hidden md:flex relative z-40">
                 {/* Logo Section */}
-                <div className="p-8 mb-4">
-                    <div className="flex items-center gap-4">
-                        <div className="bg-gradient-to-br from-primary-base to-indigo-600 p-3 rounded-2xl text-white shadow-xl shadow-primary-base/20">
-                            <Activity size={24} />
+                <div className="p-6 mb-2">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-br from-primary-base to-indigo-600 p-2 rounded-xl text-white shadow-md shadow-primary-base/20">
+                            <Activity size={20} />
                         </div>
                         <div>
-                            <h1 className="font-black text-type-heading text-2xl leading-none tracking-tighter">Physician</h1>
-                            <span className="text-xs font-black text-primary-base uppercase tracking-[0.2em] mt-1 block">Assistant</span>
+                            <h1 className="font-black text-type-heading text-xl leading-none tracking-tighter">Physician</h1>
+                            <span className="text-[10px] font-black text-primary-base uppercase tracking-[0.2em] mt-1 block">Assistant</span>
                         </div>
                     </div>
                 </div>
@@ -83,9 +83,9 @@ export const Layout = () => {
                         <NavLink key={link.to} to={link.to} className={navItemClass}>
                             {({ isActive }) => (
                                 <>
-                                    <div className="flex items-center gap-4">
-                                        <link.icon size={22} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-primary-base transition-colors'} />
-                                        <span className="text-[15px]">{link.label}</span>
+                                    <div className="flex items-center gap-3">
+                                        <link.icon size={18} className={isActive ? 'text-white' : 'text-slate-400 group-hover:text-primary-base transition-colors'} />
+                                        <span className="text-sm">{link.label}</span>
                                     </div>
                                     {isActive && (
                                         <motion.div layoutId="nav-indicator">
@@ -99,11 +99,11 @@ export const Layout = () => {
                 </nav>
 
                 {/* User Section */}
-                <div className="p-6 mt-auto">
-                    <div className="bg-slate-50 rounded-3xl p-5 border border-borderColor">
-                        <div className="flex items-center gap-4 mb-5">
-                            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-primary-base to-indigo-400 p-[2px]">
-                                <div className="w-full h-full rounded-[14px] bg-white flex items-center justify-center text-primary-base font-black text-lg">
+                <div className="p-4 mt-auto">
+                    <div className="bg-slate-50 rounded-2xl p-4 border border-borderColor">
+                        <div className="flex items-center gap-3 mb-4">
+                            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-primary-base to-indigo-400 p-[2px]">
+                                <div className="w-full h-full rounded-lg bg-white flex items-center justify-center text-primary-base font-black text-base">
                                     {name[0].toUpperCase()}
                                 </div>
                             </div>
@@ -114,9 +114,9 @@ export const Layout = () => {
                         </div>
                         <button
                             onClick={handleLogout}
-                            className="w-full flex items-center gap-3 justify-center px-4 py-3 text-sm font-black text-rose-500 bg-white border border-rose-100 hover:bg-rose-500 hover:text-white rounded-2xl transition-all shadow-sm active:scale-95"
+                            className="w-full flex items-center gap-2 justify-center px-4 py-2 text-sm font-black text-rose-500 bg-white border border-rose-100 hover:bg-rose-500 hover:text-white rounded-xl transition-all shadow-sm active:scale-95"
                         >
-                            <LogOut size={18} />
+                            <LogOut size={16} />
                             Sign Out
                         </button>
                     </div>

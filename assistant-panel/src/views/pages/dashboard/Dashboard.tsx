@@ -136,7 +136,7 @@ const Dashboard = () => {
             {/* Header */}
             <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
                         Assistant Dashboard
                     </h1>
                     <p className="text-type-body flex items-center gap-2 mt-1">
@@ -164,18 +164,18 @@ const Dashboard = () => {
                     <motion.div 
                         key={idx}
                         whileHover={{ y: -5 }}
-                        className="glass-card p-6 flex items-center gap-5 group relative overflow-hidden"
+                        className="glass-card p-4 md:p-5 flex items-center gap-4 group relative overflow-hidden"
                     >
-                        <div className={`p-4 rounded-2xl bg-gradient-to-br ${metric.gradient} text-white shadow-lg shadow-${metric.color}-500/20`}>
-                            <metric.icon size={28} className={metric.pulse ? 'animate-pulse' : ''} />
+                        <div className={`p-3 rounded-xl bg-gradient-to-br ${metric.gradient} text-white shadow-lg shadow-${metric.color}-500/20`}>
+                            <metric.icon size={22} className={metric.pulse ? 'animate-pulse' : ''} />
                         </div>
                         <div>
-                            <p className="text-type-body text-sm font-semibold uppercase tracking-wider">{metric.label}</p>
-                            <p className="text-3xl font-bold text-type-heading mt-1">
+                            <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest">{metric.label}</p>
+                            <p className="text-2xl font-bold text-type-heading mt-0.5">
                                 {metric.loading ? (
                                     <span className="flex gap-1">
-                                        <span className="w-2 h-8 bg-slate-200 animate-pulse rounded"></span>
-                                        <span className="w-2 h-8 bg-slate-200 animate-pulse rounded delay-75"></span>
+                                        <span className="w-1.5 h-6 bg-slate-200 animate-pulse rounded"></span>
+                                        <span className="w-1.5 h-6 bg-slate-200 animate-pulse rounded delay-75"></span>
                                     </span>
                                 ) : metric.value}
                             </p>
@@ -192,8 +192,8 @@ const Dashboard = () => {
                     
                     {/* Waiting Room Queue */}
                     <motion.div variants={itemVariants} className="glass-card overflow-hidden">
-                        <div className="p-5 border-b border-borderColor/50 flex justify-between items-center bg-amber-50/50">
-                            <h2 className="text-lg font-bold text-amber-800 flex items-center gap-3">
+                        <div className="p-4 border-b border-borderColor/50 flex justify-between items-center bg-amber-50/50">
+                            <h2 className="text-base font-bold text-amber-800 flex items-center gap-2">
                                 <span className="relative flex h-3 w-3">
                                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                                     <span className="relative inline-flex rounded-full h-3 w-3 bg-amber-500"></span>
@@ -228,12 +228,12 @@ const Dashboard = () => {
                                             exit={{ opacity: 0, scale: 0.95 }}
                                             className="p-4 md:p-5 flex flex-col sm:flex-row justify-between items-center bg-white/40 hover:bg-amber-50/50 transition-colors group"
                                         >
-                                            <div className="flex items-center gap-4 w-full sm:w-auto">
-                                                <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold shrink-0">
+                                            <div className="flex items-center gap-3 w-full sm:w-auto">
+                                                <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 font-bold shrink-0 text-sm">
                                                     {(patient.name || 'U')[0].toUpperCase()}
                                                 </div>
                                                 <div className="min-w-0 flex-1">
-                                                    <p className="font-bold text-type-contrast truncate text-lg">{patient.name}</p>
+                                                    <p className="font-bold text-type-contrast truncate text-base leading-tight">{patient.name}</p>
                                                     <div className="flex flex-wrap items-center gap-2 mt-1">
                                                         <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded-full font-mono border border-slate-200">#{patient.patientId.split('_').pop()}</span>
                                                         {patient.visitId && <span className="text-[10px] bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">Visit Active</span>}
@@ -242,10 +242,10 @@ const Dashboard = () => {
                                             </div>
                                             <button
                                                 onClick={() => navigate(`/visit/${patient.patientId}`)}
-                                                className="mt-4 sm:mt-0 w-full sm:w-auto px-5 py-2 rounded-xl text-amber-700 bg-amber-100 hover:bg-amber-200 font-bold text-sm transition-all flex items-center justify-center gap-2 group"
+                                                className="mt-4 sm:mt-0 w-full sm:w-auto px-4 py-1.5 rounded-lg text-amber-700 bg-amber-100 hover:bg-amber-200 font-bold text-xs transition-all flex items-center justify-center gap-2 group"
                                             >
                                                 <span>View Case</span>
-                                                <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+                                                <ArrowRight size={14} className="group-hover:translate-x-1 transition-transform" />
                                             </button>
                                         </motion.div>
                                     ))
@@ -263,18 +263,18 @@ const Dashboard = () => {
                                 animate={{ opacity: 1, y: 0 }}
                                 className="glass-card overflow-hidden"
                             >
-                                <div className="p-5 border-b border-borderColor/50 flex justify-between items-center bg-slate-50/50">
-                                    <h2 className="text-lg font-bold text-type-heading flex items-center gap-3">
-                                        <Save size={20} className="text-primary-base" />
+                                <div className="p-4 border-b border-borderColor/50 flex justify-between items-center bg-slate-50/50">
+                                    <h2 className="text-base font-bold text-type-heading flex items-center gap-2">
+                                        <Save size={18} className="text-primary-base" />
                                         In-Progress Drafts
                                     </h2>
                                     <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-full border border-slate-200">OFFLINE SYNC</span>
                                 </div>
                                 <div className="divide-y divide-borderColor/30">
                                     {localDrafts.map((draft) => (
-                                        <div key={draft.patientId} className="p-4 md:p-5 flex flex-col sm:flex-row justify-between items-center bg-white/20 hover:bg-primary-light/10 transition-colors">
+                                        <div key={draft.patientId} className="p-4 flex flex-col sm:flex-row justify-between items-center bg-white/20 hover:bg-primary-light/10 transition-colors">
                                             <div className="w-full sm:w-auto">
-                                                <p className="font-bold text-type-contrast text-lg leading-none">
+                                                <p className="font-bold text-type-contrast text-base leading-none">
                                                     {draft.patientData?.basic?.fullName || 'Untitled Patient'}
                                                 </p>
                                                 <p className="text-xs text-type-body mt-2 flex items-center gap-1.5">
@@ -308,9 +308,9 @@ const Dashboard = () => {
                 {/* Right Section (Schedule) - 5 Columns on Large */}
                 <div className="lg:col-span-5">
                     <motion.div variants={itemVariants} className="glass-card flex flex-col h-full overflow-hidden">
-                        <div className="p-5 border-b border-borderColor/50 flex justify-between items-center bg-slate-900 text-white">
-                            <h2 className="text-lg font-bold flex items-center gap-3">
-                                <Calendar size={20} className="text-secondary-base" />
+                        <div className="p-4 border-b border-borderColor/50 flex justify-between items-center bg-slate-900 text-white">
+                            <h2 className="text-base font-bold flex items-center gap-2">
+                                <Calendar size={18} className="text-secondary-base" />
                                 Today's Schedule
                             </h2>
                             <button 
@@ -335,15 +335,15 @@ const Dashboard = () => {
                                 </div>
                             ) : (
                                 todayAppointments.map((apt) => (
-                                    <div key={apt.id} className="p-5 flex justify-between items-center hover:bg-slate-50/50 transition-colors relative group">
-                                        <div className="flex items-center gap-5">
-                                            <div className="text-center w-16 px-2 py-3 bg-slate-50 border border-slate-100 rounded-2xl group-hover:bg-white group-hover:shadow-sm transition-all">
-                                                <span className="block text-xs font-black text-primary-base scale-90">{apt.time.split(' ')[1] || ''}</span>
-                                                <span className="block text-lg font-bold text-slate-800 leading-none mt-0.5">{apt.time.split(' ')[0]}</span>
+                                    <div key={apt.id} className="p-4 flex justify-between items-center hover:bg-slate-50/50 transition-colors relative group">
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-center w-14 px-1 py-2 bg-slate-50 border border-slate-100 rounded-xl group-hover:bg-white group-hover:shadow-sm transition-all shrink-0">
+                                                <span className="block text-[10px] font-black text-primary-base scale-90">{apt.time.split(' ')[1] || ''}</span>
+                                                <span className="block text-base font-bold text-slate-800 leading-none mt-0.5">{apt.time.split(' ')[0]}</span>
                                             </div>
-                                            <div className="min-w-0">
-                                                <p className="font-bold text-type-contrast truncate text-lg leading-tight">{apt.patientName}</p>
-                                                <p className="text-[10px] font-bold text-secondary-base bg-secondary-light/30 px-2 py-0.5 rounded-full mt-1.5 inline-flex items-center gap-1 border border-secondary-base/10 uppercase tracking-tighter">
+                                            <div className="min-w-0 pr-2">
+                                                <p className="font-bold text-type-contrast truncate text-base leading-tight">{apt.patientName}</p>
+                                                <p className="text-[9px] font-black text-secondary-base bg-secondary-light/30 px-2 py-0.5 rounded-full mt-1 inline-flex items-center gap-1 border border-secondary-base/10 uppercase tracking-tighter">
                                                     <ShieldCheck size={10} />
                                                     {apt.type || 'Consultation'}
                                                 </p>
@@ -351,7 +351,7 @@ const Dashboard = () => {
                                         </div>
                                         <button
                                             onClick={() => handleCheckIn(apt)}
-                                            className="ml-4 px-4 py-2 rounded-xl text-slate-600 border border-slate-200 bg-white hover:border-primary-base hover:text-primary-base hover:bg-primary-light/30 font-bold text-sm transition-all shadow-sm"
+                                            className="ml-auto px-4 py-1.5 rounded-lg text-slate-600 border border-slate-200 bg-white hover:border-primary-base hover:text-primary-base hover:bg-primary-light/30 font-bold text-xs transition-all shadow-sm shrink-0"
                                         >
                                             Check In
                                         </button>

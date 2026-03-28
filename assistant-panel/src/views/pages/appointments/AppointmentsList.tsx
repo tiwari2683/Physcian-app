@@ -112,7 +112,7 @@ const AppointmentsList = () => {
             {/* Header */}
             <motion.div variants={itemVariants} className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
-                    <h1 className="text-2xl md:text-3xl lg:text-4xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
+                    <h1 className="text-xl md:text-2xl lg:text-3xl font-black bg-clip-text text-transparent bg-gradient-to-r from-slate-900 to-slate-500">
                         Appointments Manager
                     </h1>
                     <p className="text-type-body flex items-center gap-2 mt-1 font-medium">
@@ -140,8 +140,8 @@ const AppointmentsList = () => {
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
-                            className={`px-5 py-2.5 rounded-xl font-bold text-sm whitespace-nowrap transition-all duration-300 ${activeTab === tab
-                                ? 'bg-primary-base text-white shadow-lg shadow-primary-base/20'
+                            className={`px-4 py-2 rounded-lg font-bold text-xs whitespace-nowrap transition-all duration-300 ${activeTab === tab
+                                ? 'bg-primary-base text-white shadow-md shadow-primary-base/20'
                                 : 'text-slate-500 hover:bg-slate-100 hover:text-type-heading'
                                 }`}
                         >
@@ -157,7 +157,7 @@ const AppointmentsList = () => {
                         placeholder="Search patient name..."
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="input-field pl-11 py-3 text-sm"
+                        className="input-field pl-11 py-2 text-xs"
                     />
                 </div>
             </motion.div>
@@ -195,20 +195,20 @@ const AppointmentsList = () => {
                                     animate={{ opacity: 1, scale: 1 }}
                                     exit={{ opacity: 0, scale: 0.9 }}
                                     whileHover={{ y: -5 }}
-                                    className="glass-card p-6 group cursor-default"
+                                    className="glass-card p-4 md:p-5 group cursor-default"
                                 >
-                                    <div className="flex justify-between items-start mb-6">
-                                        <div className="flex items-center gap-4 min-w-0">
-                                            <div className={`w-14 h-14 rounded-2xl bg-gradient-to-br ${styles.avatar} text-white flex items-center justify-center font-black text-xl shadow-lg shrink-0`}>
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="flex items-center gap-3 min-w-0">
+                                            <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${styles.avatar} text-white flex items-center justify-center font-black text-base shadow-lg shrink-0`}>
                                                 {getInitials(apt.patientName)}
                                             </div>
                                             <div className="min-w-0 pr-4">
-                                                <h3 className="font-bold text-type-heading text-lg leading-tight truncate">{apt.patientName}</h3>
+                                                <h3 className="font-bold text-type-heading text-base leading-tight truncate">{apt.patientName}</h3>
                                                 <div className="flex items-center gap-2 mt-2">
                                                     <span className="text-[10px] font-black text-slate-400 bg-slate-50 border border-slate-100 px-2 py-0.5 rounded-full uppercase tracking-tighter">
                                                         {apt.type || 'Consultation'}
                                                     </span>
-                                                    <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border uppercase tracking-tighter ${styles.badge}`}>
+                                                    <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-tighter ${styles.badge}`}>
                                                         {smartStatus}
                                                     </span>
                                                 </div>
@@ -220,9 +220,9 @@ const AppointmentsList = () => {
                                                     e.stopPropagation();
                                                     setMenuOpenId(menuOpenId === apt.id ? null : apt.id);
                                                 }}
-                                                className="text-slate-400 hover:text-type-heading p-2 rounded-xl hover:bg-slate-50 transition-colors"
+                                                className="text-slate-400 hover:text-type-heading p-1.5 rounded-lg hover:bg-slate-50 transition-colors"
                                             >
-                                                <MoreVertical size={20} />
+                                                <MoreVertical size={16} />
                                             </button>
                                             <AnimatePresence>
                                                 {menuOpenId === apt.id && (
@@ -250,20 +250,20 @@ const AppointmentsList = () => {
                                         </div>
                                     </div>
 
-                                    <div className="grid grid-cols-2 gap-4 text-sm bg-slate-50/50 rounded-2xl p-4 border border-slate-100/50">
-                                        <div className="flex flex-col gap-1.5">
+                                    <div className="grid grid-cols-2 gap-3 text-xs bg-slate-50/50 rounded-xl p-3 border border-slate-100/50">
+                                        <div className="flex flex-col gap-1">
                                             <div className="flex items-center gap-1.5 text-slate-400">
-                                                <Calendar size={14} />
-                                                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Date</span>
+                                                <Calendar size={12} />
+                                                <span className="text-[9px] font-black uppercase tracking-widest leading-none">Date</span>
                                             </div>
-                                            <span className="font-bold text-type-contrast">{apt.date}</span>
+                                            <span className="font-bold text-type-contrast text-xs">{apt.date}</span>
                                         </div>
-                                        <div className="flex flex-col gap-1.5 pl-4 border-l border-slate-200">
+                                        <div className="flex flex-col gap-1 pl-3 border-l border-slate-200">
                                             <div className="flex items-center gap-1.5 text-slate-400">
-                                                <Clock size={14} />
-                                                <span className="text-[10px] font-black uppercase tracking-widest leading-none">Time</span>
+                                                <Clock size={12} />
+                                                <span className="text-[9px] font-black uppercase tracking-widest leading-none">Time</span>
                                             </div>
-                                            <span className="font-bold text-type-contrast">{apt.time}</span>
+                                            <span className="font-bold text-type-contrast text-xs">{apt.time}</span>
                                         </div>
                                     </div>
                                 </motion.div>

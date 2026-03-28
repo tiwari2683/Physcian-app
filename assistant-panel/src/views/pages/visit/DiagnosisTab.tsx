@@ -43,7 +43,7 @@ export const DiagnosisTab: React.FC = () => {
     ];
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-5">
             <Card title="Clinical Diagnosis">
                 <div className="flex justify-between items-center mb-2">
                     <label className="text-sm font-semibold text-type-heading">Current Diagnosis (Auto-Bulleted)</label>
@@ -59,18 +59,18 @@ export const DiagnosisTab: React.FC = () => {
                     value={diagnosis.diagnosisText}
                     onChange={handleDiagnosisChange}
                     disabled={isVisitLocked}
-                    className="input-field min-h-[150px] font-mono text-sm"
+                    className="input-field min-h-[100px] font-mono text-sm"
                     placeholder="Enter diagnosis details..."
                 />
             </Card>
 
             <Card title="Investigations Advised">
                 <p className="text-sm text-type-body mb-4">Select investigations to be carried out</p>
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
                     {investigations.map((test) => (
                         <label
                             key={test}
-                            className={`flex items-center gap-2 p-3 rounded-md border transition-all cursor-pointer ${diagnosis.selectedInvestigations.includes(test)
+                            className={`flex items-center gap-2 p-2 rounded-lg border transition-all cursor-pointer ${diagnosis.selectedInvestigations.includes(test)
                                 ? 'bg-primary-light border-primary-base text-primary-dark'
                                 : 'bg-white border-borderColor text-type-body hover:border-primary-base/50'
                                 } ${isVisitLocked ? 'opacity-70 cursor-not-allowed' : ''}`}
@@ -94,7 +94,7 @@ export const DiagnosisTab: React.FC = () => {
                             value={diagnosis.customInvestigations}
                             onChange={(e) => dispatch(updateDiagnosisDetails({ customInvestigations: e.target.value }))}
                             disabled={isVisitLocked}
-                            className="input-field flex-1 min-h-[80px]"
+                            className="input-field flex-1 min-h-[60px]"
                             placeholder="Add other required tests manually..."
                         />
                     </div>

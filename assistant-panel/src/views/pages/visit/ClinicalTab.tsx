@@ -64,7 +64,7 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                     <tr className="bg-[#F9FAFB]">
                         {/* Sticky header: Parameter column */}
                         <th
-                            className="sticky left-0 z-20 bg-[#F9FAFB] text-left px-4 py-3 font-bold text-[#374151] border-b border-r border-[#E5E7EB] min-w-[140px] whitespace-nowrap"
+                            className="sticky left-0 z-20 bg-[#F9FAFB] text-left px-3 py-2 font-black text-[#374151] border-b border-r border-[#E5E7EB] min-w-[120px] whitespace-nowrap text-xs uppercase tracking-wider"
                         >
                             Parameter
                         </th>
@@ -73,7 +73,7 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                         {historicalColumns.map((col, i) => (
                             <th
                                 key={i}
-                                className="text-center px-4 py-3 font-semibold text-[#6B7280] border-b border-r border-[#E5E7EB] min-w-[100px] whitespace-nowrap"
+                                className="text-center px-3 py-2 font-bold text-[#6B7280] border-b border-r border-[#E5E7EB] min-w-[90px] whitespace-nowrap text-xs"
                             >
                                 {formatDate(col.timestamp)}
                             </th>
@@ -81,10 +81,10 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
 
                         {/* Today column header */}
                         <th
-                            className="text-center px-4 py-3 font-bold text-white bg-[#2563EB] border-b border-[#1D4ED8] min-w-[120px] whitespace-nowrap"
+                            className="text-center px-3 py-2 font-black text-white bg-primary-base border-b border-primary-dark min-w-[110px] whitespace-nowrap text-xs uppercase tracking-widest"
                         >
                             Today
-                            <span className="block text-xs font-normal opacity-75">{todayLabel}</span>
+                            <span className="block text-[10px] font-normal opacity-80">{todayLabel}</span>
                         </th>
                     </tr>
                 </thead>
@@ -99,11 +99,11 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                             <tr key={field.name} className={`${rowBg} hover:bg-[#EFF6FF] transition-colors group`}>
                                 {/* ── Sticky Parameter Name Cell ─────────── */}
                                 <td
-                                    className={`sticky left-0 z-10 ${rowBg} group-hover:bg-[#EFF6FF] transition-colors px-4 py-2.5 font-semibold text-[#374151] border-r border-[#E5E7EB] whitespace-nowrap`}
+                                    className={`sticky left-0 z-10 ${rowBg} group-hover:bg-[#EFF6FF] transition-colors px-3 py-1.5 font-bold text-[#374151] border-r border-[#E5E7EB] whitespace-nowrap text-[13px]`}
                                 >
                                     <span>{field.label}</span>
                                     {field.unit && (
-                                        <span className="ml-1 text-xs text-[#9CA3AF] font-normal">({field.unit})</span>
+                                        <span className="ml-1 text-[10px] text-[#9CA3AF] font-normal uppercase">({field.unit})</span>
                                     )}
                                 </td>
 
@@ -113,10 +113,10 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                                     return (
                                         <td
                                             key={i}
-                                            className="text-center px-4 py-2.5 text-[#374151] border-r border-[#E5E7EB]"
+                                            className="text-center px-3 py-1.5 text-[#374151] border-r border-[#E5E7EB] text-xs"
                                         >
                                             {val !== undefined && val !== '' && val !== null
-                                                ? <span className="font-medium">{val}</span>
+                                                ? <span className="font-bold">{val}</span>
                                                 : <span className="text-[#D1D5DB]">—</span>
                                             }
                                         </td>
@@ -124,7 +124,7 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                                 })}
 
                                 {/* ── Editable Today Cell — bound to Redux ─ */}
-                                <td className="px-3 py-1.5 bg-[#EFF6FF]">
+                                <td className="px-2 py-1 bg-primary-light/30">
                                     <input
                                         type="number"
                                         name={field.name}
@@ -133,7 +133,7 @@ const CompareTable: React.FC<CompareTableProps> = ({ vitals, history, onVitalsCh
                                         disabled={isLocked}
                                         step="0.01"
                                         placeholder="—"
-                                        className="w-full text-center bg-white border border-[#93C5FD] rounded-md px-2 py-1.5 text-sm font-semibold text-[#1D4ED8] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200"
+                                        className="w-full text-center bg-white border border-primary-base/20 rounded-md px-1.5 py-1 text-xs font-black text-primary-base focus:outline-none focus:ring-2 focus:ring-primary-base focus:border-transparent disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200"
                                     />
                                 </td>
                             </tr>
@@ -241,7 +241,7 @@ export const ClinicalTab: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-5">
             {/* ── History & Symptoms ──────────────────────────────────────── */}
             <Card title="History & Symptoms">
                 <div className="flex justify-between items-center mb-2">

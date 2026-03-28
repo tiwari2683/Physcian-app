@@ -136,34 +136,34 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
     };
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-            <div className="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
-                <div className="flex justify-between items-center p-6 border-b border-[#E5E7EB] bg-[#F9FAFB]">
-                    <h2 className="text-xl font-bold text-[#1F2937]">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-xl shadow-premium w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh] border border-borderColor">
+                <div className="flex justify-between items-center px-5 py-4 border-b border-borderColor bg-appBg">
+                    <h2 className="text-lg font-black text-type-heading">
                         {initialData ? 'Edit Appointment' : 'New Appointment'}
                     </h2>
-                    <button onClick={onClose} className="text-[#6B7280] hover:text-[#EF4444] transition-colors">
-                        <X size={24} />
+                    <button onClick={onClose} className="text-slate-400 hover:text-rose-500 transition-colors p-1 rounded-full hover:bg-rose-50">
+                        <X size={20} />
                     </button>
                 </div>
 
-                <div className="p-6 overflow-y-auto">
-                    <form id="new-appointment-form" onSubmit={handleSubmit} className="space-y-6">
+                <div className="p-5 overflow-y-auto">
+                    <form id="new-appointment-form" onSubmit={handleSubmit} className="space-y-4">
 
                         {/* Toggle Mode */}
                         {!initialData && (
-                            <div className="flex bg-[#F1F5F9] rounded-lg p-1">
+                            <div className="flex bg-slate-100/50 rounded-lg p-1 border border-slate-100">
                                 <button
                                     type="button"
                                     onClick={() => handleChangeMode('existing')}
-                                    className={`flex-1 py-2 rounded-md text-sm font-semibold transition-all ${mode === 'existing' ? 'bg-white text-[#2563EB] shadow-sm' : 'text-[#64748B] hover:text-[#334155]'}`}
+                                    className={`flex-1 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-all ${mode === 'existing' ? 'bg-white text-primary-base shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
                                     Existing Patient
                                 </button>
                                 <button
                                     type="button"
                                     onClick={() => handleChangeMode('new')}
-                                    className={`flex-1 py-2 rounded-md text-sm font-semibold transition-all ${mode === 'new' ? 'bg-white text-[#2563EB] shadow-sm' : 'text-[#64748B] hover:text-[#334155]'}`}
+                                    className={`flex-1 py-1.5 rounded-md text-xs font-black uppercase tracking-wider transition-all ${mode === 'new' ? 'bg-white text-primary-base shadow-sm border border-slate-100' : 'text-slate-500 hover:text-slate-700'}`}
                                 >
                                     New Patient
                                 </button>
@@ -173,18 +173,18 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                         {/* Search Section for Existing Patient */}
                         {mode === 'existing' && !selectedPatientId && (
                             <div className="relative space-y-2">
-                                <label className="text-sm font-bold text-[#374151]">Search Patient</label>
+                                <label className="text-xs font-black uppercase tracking-widest text-type-body">Search Patient</label>
                                 <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-[#9CA3AF]" size={18} />
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
                                     <input
                                         type="text"
                                         placeholder="Search by name or phone..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
-                                        className="w-full pl-10 pr-4 py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:outline-none text-[#1F2937]"
+                                        className="w-full pl-10 pr-4 py-2 bg-white border border-borderColor rounded-lg focus:ring-4 focus:ring-primary-base/10 focus:border-primary-base focus:outline-none text-sm text-type-contrast transition-all"
                                     />
                                     {isSearching && (
-                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-[#9CA3AF] animate-spin" size={18} />
+                                        <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 text-primary-base animate-spin" size={16} />
                                     )}
                                 </div>
 
@@ -214,15 +214,15 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
                         {/* Selected Patient Banner */}
                         {mode === 'existing' && selectedPatientId && !initialData && (
-                            <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg p-4 flex justify-between items-center">
+                            <div className="bg-primary-light border border-primary-base/20 rounded-lg p-3 flex justify-between items-center shadow-glass-sm font-sans">
                                 <div>
-                                    <div className="text-xs font-semibold text-[#1D4ED8] uppercase tracking-wider mb-1">Selected Patient</div>
-                                    <div className="text-[#1E3A8A] font-medium">{formData.patientName}</div>
+                                    <div className="text-[10px] font-black text-primary-base uppercase tracking-widest mb-0.5">Selected Patient</div>
+                                    <div className="text-primary-dark font-bold text-sm tracking-tight">{formData.patientName}</div>
                                 </div>
                                 <button
                                     type="button"
                                     onClick={() => { setSelectedPatientId(null); setFormData(prev => ({ ...emptyForm, type: prev.type, date: prev.date, time: prev.time })); }}
-                                    className="text-sm font-semibold text-[#2563EB] hover:text-[#1D4ED8]"
+                                    className="text-xs font-black text-primary-base hover:text-primary-dark uppercase tracking-widest bg-white/50 px-3 py-1.5 rounded-md transition-colors"
                                 >
                                     Change
                                 </button>
@@ -264,7 +264,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
                                 {/* Sex — Radio Group */}
                                 <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-[#374151]">Sex</label>
+                                    <label className="text-xs font-black uppercase tracking-widest text-type-body">Sex</label>
                                     <div className="flex gap-6 mt-1">
                                         {(['Male', 'Female', 'Other'] as const).map((option) => (
                                             <label key={option} className={`flex items-center gap-2 ${mode === 'existing' ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
@@ -284,14 +284,14 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                                 </div>
 
                                 {/* Address */}
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-[#374151]">Address</label>
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-xs font-black uppercase tracking-widest text-type-body">Address</label>
                                     <textarea
                                         value={formData.address}
                                         onChange={(e) => setFormData({ ...formData, address: e.target.value })}
                                         rows={2}
                                         placeholder="Patient's permanent address (optional)"
-                                        className="px-4 py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:outline-none text-[#1F2937] resize-none"
+                                        className="input-field min-h-[60px] resize-none"
                                         disabled={mode === 'existing'}
                                     />
                                 </div>
@@ -300,13 +300,13 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
 
                         {/* ── Visit Details ── */}
                         {(mode === 'new' || selectedPatientId) && (
-                            <div className="space-y-4 pt-2">
-                                <h3 className="text-sm font-bold tracking-wide text-[#6B7280] uppercase border-t border-[#E5E7EB] pt-4">Visit Details</h3>
+                            <div className="space-y-4 pt-1">
+                                <h3 className="text-xs font-black tracking-widest text-slate-400 uppercase border-t border-slate-100 pt-4">Visit Details</h3>
 
-                                <div className="flex flex-col gap-2">
-                                    <label className="text-sm font-bold text-[#374151]">Visit Type</label>
+                                <div className="flex flex-col gap-1.5">
+                                    <label className="text-xs font-black uppercase tracking-widest text-type-body">Visit Type</label>
                                     <select
-                                        className="px-4 py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-lg focus:ring-2 focus:ring-[#2563EB] focus:outline-none text-[#1F2937] w-full cursor-pointer"
+                                        className="input-field cursor-pointer"
                                         value={formData.type}
                                         onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                                         required
@@ -339,8 +339,8 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                     </form>
                 </div>
 
-                <div className="p-6 border-t border-[#E5E7EB] bg-[#F9FAFB] flex justify-end gap-3 shrink-0">
-                    <Button variant="secondary" onClick={onClose} type="button">
+                <div className="px-5 py-4 border-t border-borderColor bg-appBg flex justify-end gap-3 shrink-0">
+                    <Button variant="secondary" onClick={onClose} type="button" className="text-xs uppercase tracking-widest font-black">
                         Cancel
                     </Button>
                     <Button 
@@ -349,6 +349,7 @@ export const NewAppointmentModal: React.FC<Props> = ({ onClose, initialData }) =
                         form="new-appointment-form" 
                         loading={loading}
                         disabled={mode === 'existing' && !selectedPatientId}
+                        className="text-xs uppercase tracking-widest font-black"
                     >
                         {initialData ? 'Save Changes' : 'Schedule Appointment'}
                     </Button>

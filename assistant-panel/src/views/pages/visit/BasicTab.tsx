@@ -9,12 +9,16 @@ export const BasicTab: React.FC = () => {
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value } = e.target;
-        dispatch(updateBasicDetails({ [name]: value }));
+        if (name === 'mobileNumber') {
+            dispatch(updateBasicDetails({ [name]: value.replace(/\D/g, '') }));
+        } else {
+            dispatch(updateBasicDetails({ [name]: value }));
+        }
     };
 
     return (
         <Card title="Patient Demographics">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <Input
                     label="Full Name"
                     name="fullName"
@@ -72,7 +76,7 @@ export const BasicTab: React.FC = () => {
                     value={basic.address}
                     onChange={handleChange}
                     disabled={isVisitLocked}
-                    className="input-field min-h-[100px]"
+                    className="input-field min-h-[80px]"
                     placeholder="Patient permanent address"
                 />
             </div>

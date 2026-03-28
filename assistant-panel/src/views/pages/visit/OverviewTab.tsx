@@ -131,28 +131,28 @@ export const OverviewTab: React.FC = () => {
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 md:space-y-5">
 
             {/* ── 1. Demographics Summary ────────────────────────────────── */}
             <Card title="Patient Demographics" className="border-t-4 border-t-blue-500">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div>
-                        <p className="text-xs text-type-body uppercase tracking-wider mb-1">Full Name</p>
-                        <p className="font-semibold text-type-contrast">{basic.fullName || <span className="text-gray-400 italic">Not provided</span>}</p>
+                        <p className="text-[10px] text-type-body uppercase tracking-wider mb-1 font-black">Full Name</p>
+                        <p className="font-bold text-type-contrast text-sm">{basic.fullName || <span className="text-gray-400 italic">Not provided</span>}</p>
                     </div>
                     <div>
-                        <p className="text-xs text-type-body uppercase tracking-wider mb-1">Age / Sex</p>
-                        <p className="font-semibold text-type-contrast">
+                        <p className="text-[10px] text-type-body uppercase tracking-wider mb-1 font-black">Age / Sex</p>
+                        <p className="font-bold text-type-contrast text-sm">
                             {basic.age || '?'} yrs / {basic.sex || '?'}
                         </p>
                     </div>
                     <div>
-                        <p className="text-xs text-type-body uppercase tracking-wider mb-1">Mobile</p>
-                        <p className="font-semibold text-type-contrast">{basic.mobileNumber || <span className="text-gray-400 italic">—</span>}</p>
+                        <p className="text-[10px] text-type-body uppercase tracking-wider mb-1 font-black">Mobile</p>
+                        <p className="font-bold text-type-contrast text-sm">{basic.mobileNumber || <span className="text-gray-400 italic">—</span>}</p>
                     </div>
                     <div>
-                        <p className="text-xs text-type-body uppercase tracking-wider mb-1">Address</p>
-                        <p className="font-semibold text-type-contrast">{basic.address || <span className="text-gray-400 italic">—</span>}</p>
+                        <p className="text-[10px] text-type-body uppercase tracking-wider mb-1 font-black">Address</p>
+                        <p className="font-bold text-type-contrast text-sm">{basic.address || <span className="text-gray-400 italic">—</span>}</p>
                     </div>
                 </div>
             </Card>
@@ -160,25 +160,25 @@ export const OverviewTab: React.FC = () => {
             {/* ── 2. Clinical Vitals ───────────────────────────────────── */}
             <Card title="Clinical Vitals" className="border-t-4 border-t-emerald-500">
                 <div className="flex items-start gap-4">
-                    <Activity className="text-emerald-500 mt-1" size={20} />
+                    <Activity className="text-emerald-500 mt-1" size={18} />
                     <div className="w-full">
                         {populatedVitals.length === 0 ? (
-                            <p className="text-type-body text-sm italic">No vitals recorded.</p>
+                            <p className="text-type-body text-xs italic">No vitals recorded.</p>
                         ) : (
-                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 bg-gray-50 p-4 rounded-lg border border-gray-100">
+                            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 bg-slate-50/50 p-3 rounded-lg border border-slate-100/50">
                                 {populatedVitals.map(([key, value]) => (
-                                    <div key={key} className="bg-white p-2 rounded shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
-                                        <span className="text-xs text-gray-500 font-medium mb-1 uppercase bg-gray-100 px-2 py-0.5 rounded-full">{key}</span>
-                                        <span className="font-bold text-gray-800">{value as string}</span>
+                                    <div key={key} className="bg-white p-2 rounded shadow-sm border border-slate-100 flex flex-col items-center justify-center text-center">
+                                        <span className="text-[9px] text-slate-500 font-black mb-1 uppercase bg-slate-100 px-2 py-0.5 rounded-full tracking-tighter">{key}</span>
+                                        <span className="font-bold text-slate-800 text-sm">{value as string}</span>
                                     </div>
                                 ))}
                             </div>
                         )}
 
                         {clinical.historyText && (
-                            <div className="mt-4 pt-4 border-t border-gray-100">
-                                <p className="text-xs text-type-body uppercase tracking-wider mb-2">History & Symptoms</p>
-                                <div className="bg-white p-3 rounded border border-gray-100 text-sm whitespace-pre-wrap font-mono text-gray-700">
+                            <div className="mt-4 pt-3 border-t border-slate-100">
+                                <p className="text-[10px] text-type-body uppercase tracking-wider mb-2 font-black">History & Symptoms</p>
+                                <div className="bg-white p-2.5 rounded border border-slate-100 text-xs whitespace-pre-wrap font-mono text-slate-600">
                                     {clinical.historyText}
                                 </div>
                             </div>
